@@ -12,51 +12,51 @@ import (
 )
 
 type Config struct {
-	Version     int          `yaml:"version"`
-	Server      Server       `yaml:"server"`
-	Secret      string       `yaml:"secret"`
-	VirtualKeys []VirtualKey `yaml:"virtual_keys"`
-	Models      []Model      `yaml:"models"`
-	Accounts    []Account    `yaml:"accounts"`
-	Routing     Routing      `yaml:"routing"`
-	Resilience  Resilience   `yaml:"resilience"`
+	Version     int          `yaml:"version" json:"version"`
+	Server      Server       `yaml:"server" json:"server"`
+	Secret      string       `yaml:"secret" json:"secret"`
+	VirtualKeys []VirtualKey `yaml:"virtual_keys" json:"virtual_keys"`
+	Models      []Model      `yaml:"models" json:"models"`
+	Accounts    []Account    `yaml:"accounts" json:"accounts"`
+	Routing     Routing      `yaml:"routing" json:"routing"`
+	Resilience  Resilience   `yaml:"resilience" json:"resilience"`
 }
 type Server struct {
-	Addr         string `yaml:"addr"`
-	ReadTimeout  string `yaml:"read_timeout"`
-	WriteTimeout string `yaml:"write_timeout"`
+	Addr         string `yaml:"addr" json:"addr"`
+	ReadTimeout  string `yaml:"read_timeout" json:"read_timeout"`
+	WriteTimeout string `yaml:"write_timeout" json:"write_timeout"`
 }
 type VirtualKey struct {
-	Name   string   `yaml:"name"`
-	Key    string   `yaml:"key"`
-	Models []string `yaml:"models"`
-	RPM    int      `yaml:"rpm"`
+	Name   string   `yaml:"name" json:"name"`
+	Key    string   `yaml:"key" json:"key"`
+	Models []string `yaml:"models" json:"models"`
+	RPM    int      `yaml:"rpm" json:"rpm"`
 	hash   []byte
 }
 type Model struct {
-	Alias         string   `yaml:"alias"`
-	UpstreamModel string   `yaml:"upstream_model"`
-	Accounts      []string `yaml:"accounts"`
+	Alias         string   `yaml:"alias" json:"alias"`
+	UpstreamModel string   `yaml:"upstream_model" json:"upstream_model"`
+	Accounts      []string `yaml:"accounts" json:"accounts"`
 }
 type Account struct {
-	Name           string  `yaml:"name"`
-	BaseURL        string  `yaml:"base_url"`
-	APIKey         string  `yaml:"api_key"`
-	Enabled        bool    `yaml:"enabled"`
-	Priority       int     `yaml:"priority"`
-	Weight         int     `yaml:"weight"`
-	MaxConcurrency int     `yaml:"max_concurrency"`
-	Cost           float64 `yaml:"cost"`
+	Name           string  `yaml:"name" json:"name"`
+	BaseURL        string  `yaml:"base_url" json:"base_url"`
+	APIKey         string  `yaml:"api_key" json:"api_key"`
+	Enabled        bool    `yaml:"enabled" json:"enabled"`
+	Priority       int     `yaml:"priority" json:"priority"`
+	Weight         int     `yaml:"weight" json:"weight"`
+	MaxConcurrency int     `yaml:"max_concurrency" json:"max_concurrency"`
+	Cost           float64 `yaml:"cost" json:"cost"`
 }
 type Routing struct {
-	Strategy    string `yaml:"strategy"`
-	StickyTTL   string `yaml:"sticky_ttl"`
-	MaxAttempts int    `yaml:"max_attempts"`
+	Strategy    string `yaml:"strategy" json:"strategy"`
+	StickyTTL   string `yaml:"sticky_ttl" json:"sticky_ttl"`
+	MaxAttempts int    `yaml:"max_attempts" json:"max_attempts"`
 }
 type Resilience struct {
-	Cooldown        string `yaml:"cooldown"`
-	CircuitFailures int    `yaml:"circuit_failures"`
-	CircuitReset    string `yaml:"circuit_reset"`
+	Cooldown        string `yaml:"cooldown" json:"cooldown"`
+	CircuitFailures int    `yaml:"circuit_failures" json:"circuit_failures"`
+	CircuitReset    string `yaml:"circuit_reset" json:"circuit_reset"`
 }
 
 type Snapshot struct {
@@ -130,16 +130,30 @@ func Build(c Config) (*Snapshot, error) {
 		if a.MaxConcurrency <= 0 {
 			a.MaxConcurrency = 100
 		}
+		if _, exists := s.AccountsByName[a.Name]; exists {
+			return nil, fmt.Errorf("duplicate account %s", a.Name)
+		}
 		s.AccountsByName[a.Name] = a
 	}
 	for _, m := range c.Models {
 		if m.Alias == "" || m.UpstreamModel == "" || len(m.Accounts) == 0 {
 			return nil, errors.New("model alias/upstream_model/accounts required")
 		}
+		if _, exists := s.ModelsByAlias[m.Alias]; exists {
+			return nil, fmt.Errorf("duplicate model %s", m.Alias)
+		}
+		eligible := false
 		for _, an := range m.Accounts {
-			if _, ok := s.AccountsByName[an]; !ok {
+			a, ok := s.AccountsByName[an]
+			if !ok {
 				return nil, fmt.Errorf("model %s references unknown account %s", m.Alias, an)
 			}
+			if a.Enabled {
+				eligible = true
+			}
+		}
+		if !eligible {
+			return nil, fmt.Errorf("model %s has no enabled account", m.Alias)
 		}
 		s.ModelsByAlias[m.Alias] = m
 	}

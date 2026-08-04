@@ -6,19 +6,41 @@ import (
 	"github.com/1jehuang/2papi/internal/policy"
 	"github.com/1jehuang/2papi/internal/protocol"
 	"github.com/1jehuang/2papi/internal/proxy"
+	"github.com/1jehuang/2papi/internal/resilience"
+	"github.com/1jehuang/2papi/internal/router"
 	"io"
 	"net/http"
+	"sync/atomic"
 )
 
-type Server struct {
+type Runtime struct {
 	Snap  *config.Snapshot
 	Auth  *policy.Auth
 	Proxy *proxy.Proxy
 }
 
-func New(s *config.Snapshot, p *proxy.Proxy) *Server {
-	return &Server{Snap: s, Auth: policy.New(s), Proxy: p}
+type Server struct {
+	runtime atomic.Value
+	state   *resilience.State
 }
+
+func New(s *config.Snapshot, p *proxy.Proxy) *Server {
+	srv := &Server{state: p.State}
+	srv.runtime.Store(&Runtime{Snap: s, Auth: policy.New(s), Proxy: p})
+	return srv
+}
+func NewRuntimeServer(s *config.Snapshot, st *resilience.State) *Server {
+	srv := &Server{state: st}
+	srv.Adopt(s)
+	return srv
+}
+func BuildRuntime(s *config.Snapshot, st *resilience.State) *Runtime {
+	rt := router.New(s, st)
+	px := proxy.New(s, st, rt)
+	return &Runtime{Snap: s, Auth: policy.New(s), Proxy: px}
+}
+func (s *Server) Adopt(snap *config.Snapshot) { s.runtime.Store(BuildRuntime(snap, s.state)) }
+func (s *Server) Runtime() *Runtime           { return s.runtime.Load().(*Runtime) }
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.index)
@@ -50,18 +72,20 @@ code{color:#93c5fd}a{color:#93c5fd}.muted{color:#9aa7bd}li{margin:8px 0}
 }
 
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
+	rt := s.Runtime()
 	data := []map[string]any{}
-	for _, m := range s.Snap.Models {
+	for _, m := range rt.Snap.Models {
 		data = append(data, map[string]any{"id": m.Alias, "object": "model", "owned_by": "gateway"})
 	}
 	json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data})
 }
 func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
+	rt := s.Runtime()
 	if r.Method != http.MethodPost {
 		proxy.Error(w, 405, "method not allowed")
 		return
 	}
-	vk, ok := s.Auth.Authenticate(r)
+	vk, ok := rt.Auth.Authenticate(r)
 	if !ok {
 		proxy.Error(w, 401, "unauthorized")
 		return
@@ -76,7 +100,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		proxy.Error(w, 400, "model required")
 		return
 	}
-	if _, ok := s.Snap.ModelsByAlias[meta.Model]; !ok {
+	if _, ok := rt.Snap.ModelsByAlias[meta.Model]; !ok {
 		proxy.Error(w, 404, "unknown model")
 		return
 	}
@@ -84,9 +108,9 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		proxy.Error(w, 403, "model not allowed")
 		return
 	}
-	if !s.Auth.AllowRate(vk) {
+	if !rt.Auth.AllowRate(vk) {
 		proxy.Error(w, 429, "rate limit exceeded")
 		return
 	}
-	s.Proxy.Chat(w, r, meta, body)
+	rt.Proxy.Chat(w, r, meta, body)
 }

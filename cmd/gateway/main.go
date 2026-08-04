@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/proxy"
+	"github.com/1jehuang/2papi/internal/controlplane"
 	"github.com/1jehuang/2papi/internal/resilience"
-	"github.com/1jehuang/2papi/internal/router"
 	"github.com/1jehuang/2papi/internal/server"
 	"log"
 	"net/http"
+	"os"
+	"time"
 )
 
 func main() {
@@ -19,9 +21,60 @@ func main() {
 		log.Fatal(err)
 	}
 	st := resilience.New()
-	rt := router.New(snap, st)
-	px := proxy.New(snap, st, rt)
-	srv := &http.Server{Addr: snap.Server.Addr, Handler: server.New(snap, px).Routes(), ReadTimeout: snap.ReadTimeout, WriteTimeout: snap.WriteTimeout}
-	log.Printf("gateway listening on %s", snap.Server.Addr)
+	gw := server.NewRuntimeServer(snap, st)
+	if cp := controlPlaneClientFromEnv(); cp != nil {
+		poll := pollIntervalFromEnv()
+		adoptOnce(context.Background(), cp, gw)
+		go pollControlPlane(cp, gw, poll)
+	}
+	rt := gw.Runtime()
+	srv := &http.Server{Addr: rt.Snap.Server.Addr, Handler: gw.Routes(), ReadTimeout: rt.Snap.ReadTimeout, WriteTimeout: rt.Snap.WriteTimeout}
+	log.Printf("gateway listening on %s", rt.Snap.Server.Addr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func controlPlaneClientFromEnv() *controlplane.Client {
+	baseURL, token := os.Getenv("CONTROL_PLANE_URL"), os.Getenv("CONTROL_PLANE_INTERNAL_TOKEN")
+	if token == "" {
+		token = os.Getenv("INTERNAL_SERVICE_TOKEN")
+	}
+	if !controlplane.Enabled(baseURL, token) {
+		return nil
+	}
+	gwID := os.Getenv("GATEWAY_ID")
+	if gwID == "" {
+		gwID = "gateway-local"
+	}
+	return controlplane.New(baseURL, token, gwID)
+}
+
+func pollIntervalFromEnv() time.Duration {
+	if v := os.Getenv("CONTROL_PLANE_POLL_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 15 * time.Second
+}
+
+func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for range t.C {
+		adoptOnce(context.Background(), cp, gw)
+	}
+}
+
+func adoptOnce(ctx context.Context, cp *controlplane.Client, gw *server.Server) {
+	snap, version, checksum, err := cp.Fetch(ctx)
+	if err != nil {
+		log.Printf("control-plane snapshot adoption failed: %v", err)
+		_ = cp.Ack(ctx, controlplane.Ack{Version: version, Checksum: checksum, Success: false, Error: err.Error()})
+		return
+	}
+	gw.Adopt(snap)
+	if err := cp.Ack(ctx, controlplane.Ack{Version: version, Checksum: checksum, Success: true}); err != nil {
+		log.Printf("control-plane snapshot ack failed: %v", err)
+	}
+	log.Printf("adopted control-plane snapshot version=%d checksum=%s", version, checksum)
 }

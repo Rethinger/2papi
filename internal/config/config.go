@@ -27,11 +27,12 @@ type Server struct {
 	WriteTimeout string `yaml:"write_timeout" json:"write_timeout"`
 }
 type VirtualKey struct {
-	Name   string   `yaml:"name" json:"name"`
-	Key    string   `yaml:"key" json:"key"`
-	Models []string `yaml:"models" json:"models"`
-	RPM    int      `yaml:"rpm" json:"rpm"`
-	hash   []byte
+	Name    string   `yaml:"name" json:"name"`
+	Key     string   `yaml:"key,omitempty" json:"key,omitempty"`
+	KeyHash string   `yaml:"key_hash,omitempty" json:"key_hash,omitempty"`
+	Models  []string `yaml:"models" json:"models"`
+	RPM     int      `yaml:"rpm" json:"rpm"`
+	hash    []byte
 }
 type Model struct {
 	Alias         string   `yaml:"alias" json:"alias"`
@@ -158,12 +159,20 @@ func Build(c Config) (*Snapshot, error) {
 		s.ModelsByAlias[m.Alias] = m
 	}
 	for _, k := range c.VirtualKeys {
-		if k.Name == "" || k.Key == "" {
-			return nil, errors.New("virtual key name/key required")
+		if k.Name == "" || (k.Key == "" && k.KeyHash == "") {
+			return nil, errors.New("virtual key name and key or key_hash required")
 		}
-		mac := hmac.New(sha256.New, []byte(c.Secret))
-		mac.Write([]byte(k.Key))
-		s.KeyHashes[k.Name] = mac.Sum(nil)
+		if k.KeyHash != "" {
+			hash, err := hex.DecodeString(k.KeyHash)
+			if err != nil || len(hash) != sha256.Size {
+				return nil, fmt.Errorf("virtual key %s has invalid key_hash", k.Name)
+			}
+			s.KeyHashes[k.Name] = hash
+		} else {
+			mac := hmac.New(sha256.New, []byte(c.Secret))
+			mac.Write([]byte(k.Key))
+			s.KeyHashes[k.Name] = mac.Sum(nil)
+		}
 	}
 	if len(s.VirtualKeys) == 0 {
 		return nil, errors.New("at least one virtual key required")

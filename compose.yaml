@@ -1,0 +1,11 @@
+services:
+  gateway:
+    build: .
+    ports: ["18080:8080"]
+    depends_on: [fake-upstream]
+  fake-upstream:
+    image: golang:1.22
+    working_dir: /src
+    volumes: [".:/src"]
+    command: go run ./test/fakeupstream
+    ports: ["9001:9001", "9002:9002"]

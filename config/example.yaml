@@ -1,0 +1,40 @@
+version: 1
+secret: dev-secret-change-me
+server:
+  addr: ":8080"
+  read_timeout: 10s
+  write_timeout: 0s
+virtual_keys:
+  - name: dev
+    key: sk-gateway-dev
+    models: [gpt-dev]
+    rpm: 60
+models:
+  - alias: gpt-dev
+    upstream_model: gpt-4o-mini
+    accounts: [primary, secondary]
+accounts:
+  - name: primary
+    base_url: http://fake-upstream:9001
+    api_key: upstream-primary
+    enabled: true
+    priority: 1
+    weight: 2
+    max_concurrency: 100
+    cost: 0.15
+  - name: secondary
+    base_url: http://fake-upstream:9002
+    api_key: upstream-secondary
+    enabled: true
+    priority: 2
+    weight: 1
+    max_concurrency: 100
+    cost: 0.20
+routing:
+  strategy: balanced
+  sticky_ttl: 1h
+  max_attempts: 2
+resilience:
+  cooldown: 30s
+  circuit_failures: 3
+  circuit_reset: 1m

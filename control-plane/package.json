@@ -1,0 +1,31 @@
+{
+  "name": "papi-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 3000",
+    "build": "next build",
+    "start": "next start -H ${HOSTNAME:-127.0.0.1} -p ${PORT:-3000}",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "migrate": "node --import tsx scripts/migrate.ts",
+    "seed": "node --import tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@primer/octicons-react": "^19.33.0",
+    "@types/pg": "latest",
+    "ioredis": "latest",
+    "next": "latest",
+    "pg": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "tsx": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "typescript": "latest"
+  }
+}

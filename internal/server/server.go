@@ -21,12 +21,34 @@ func New(s *config.Snapshot, p *proxy.Proxy) *Server {
 }
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.index)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("ok")) })
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("ready")) })
 	mux.HandleFunc("/v1/models", s.models)
 	mux.HandleFunc("/v1/chat/completions", s.chat)
 	return mux
 }
+
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2papi Gateway</title><style>
+body{margin:0;background:#0b1020;color:#e7ecf7;font:16px/1.5 system-ui,sans-serif}main{max-width:760px;margin:12vh auto;padding:32px}
+h1{font-size:42px;margin:0 0 8px}.ok{color:#67e8a5}.card{margin-top:28px;padding:22px;border:1px solid #273250;border-radius:14px;background:#11182b}
+code{color:#93c5fd}a{color:#93c5fd}.muted{color:#9aa7bd}li{margin:8px 0}
+</style></head><body><main><div class="ok">● Gateway is running</div><h1>2papi</h1>
+<p class="muted">OpenAI-compatible multi-account AI gateway.</p><div class="card"><strong>Available endpoints</strong><ul>
+<li><a href="/healthz"><code>GET /healthz</code></a></li><li><a href="/readyz"><code>GET /readyz</code></a></li>
+<li><a href="/v1/models"><code>GET /v1/models</code></a></li><li><code>POST /v1/chat/completions</code></li>
+</ul><p class="muted">Use the virtual API key from <code>config/example.yaml</code>.</p></div></main></body></html>`)
+}
+
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	data := []map[string]any{}
 	for _, m := range s.Snap.Models {

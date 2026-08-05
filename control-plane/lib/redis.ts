@@ -36,3 +36,19 @@ export async function consumeJsonOnce<T>(key: string): Promise<T | null> {
   const raw = await redis.eval("local v=redis.call('GET', KEYS[1]); if v then redis.call('DEL', KEYS[1]); end; return v", 1, key) as string | null;
   return raw ? JSON.parse(raw) as T : null;
 }
+
+export async function consumeJsonWhenDue<T extends { next_poll_at_ms?: number }>(key: string, nowMs = Date.now()): Promise<{ status: 'missing'|'too_soon'|'due'; value?: T; ttlSeconds?: number }> {
+  await ensureRedis();
+  if (useMemoryRedis) {
+    const hit = memory.get(key);
+    if (!hit || hit.expires <= nowMs) { memory.delete(key); return { status: 'missing' }; }
+    const value = JSON.parse(hit.value) as T;
+    const ttlSeconds = Math.max(1, Math.ceil((hit.expires - nowMs) / 1000));
+    if (typeof value.next_poll_at_ms === 'number' && value.next_poll_at_ms > nowMs) return { status: 'too_soon', value, ttlSeconds };
+    memory.delete(key);
+    return { status: 'due', value, ttlSeconds };
+  }
+  const raw = await redis.eval("local v=redis.call('GET', KEYS[1]); if not v then return {0}; end; local ttl=redis.call('PTTL', KEYS[1]); if ttl <= 0 then return {0}; end; local obj=cjson.decode(v); if obj['next_poll_at_ms'] and obj['next_poll_at_ms'] > tonumber(ARGV[1]) then return {1, v, ttl}; end; redis.call('DEL', KEYS[1]); return {2, v, ttl};", 1, key, String(nowMs)) as [number, string?, number?];
+  if (raw[0] === 0) return { status: 'missing' };
+  return { status: raw[0] === 1 ? 'too_soon' : 'due', value: JSON.parse(raw[1]!) as T, ttlSeconds: Math.max(1, Math.ceil((raw[2] ?? 1000) / 1000)) };
+}

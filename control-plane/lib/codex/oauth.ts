@@ -38,10 +38,11 @@ export async function exchangeAuthorizationCode(code: string, session: StoredSes
   if (!res.ok) throw new Error('codex_token_exchange_failed');
   const token = await res.json() as Record<string, unknown>;
   const idToken = typeof token.id_token === 'string' ? token.id_token : undefined;
-  const identity = idToken ? await verifyOpenAIIDToken(idToken, session.nonce) : undefined;
+  if (!idToken) throw new Error('missing_id_token');
+  const identity = await verifyOpenAIIDToken(idToken, session.nonce);
   const expiresIn = typeof token.expires_in === 'number' ? token.expires_in : 3600;
-  if (typeof token.access_token !== 'string') throw new Error('missing_access_token');
-  return { kind: 'oauth', access_token: token.access_token, refresh_token: typeof token.refresh_token === 'string' ? token.refresh_token : undefined, id_token: idToken, expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(), client_id: CODEX_CLIENT_ID, chatgpt_account_id: identity?.chatgpt_account_id ?? String(token.account_id ?? ''), email: identity?.email, plan_type: identity?.plan_type, auth_method: 'browser' };
+  if (typeof token.access_token !== 'string' || !token.access_token) throw new Error('missing_access_token');
+  return { kind: 'oauth', access_token: token.access_token, refresh_token: typeof token.refresh_token === 'string' ? token.refresh_token : undefined, id_token: idToken, expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(), client_id: CODEX_CLIENT_ID, chatgpt_account_id: identity.chatgpt_account_id, email: identity.email, plan_type: identity.plan_type, auth_method: 'browser' };
 }
 
 export async function refreshOAuthCredential(refreshToken: string, clientId = CODEX_CLIENT_ID) {

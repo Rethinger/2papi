@@ -21,7 +21,7 @@ async function loadJwks(force = false): Promise<Jwk[]> {
 
 export function clearJwksCacheForTests() { cache = undefined; }
 
-export async function verifyOpenAIIDToken(token: string, nonce: string): Promise<VerifiedCodexIdentity> {
+export async function verifyOpenAIIDToken(token: string, nonce?: string): Promise<VerifiedCodexIdentity> {
   const parts = token.split('.');
   if (parts.length !== 3) throw new Error('invalid_id_token');
   const header = parsePart<{ alg?: string; kid?: string }>(parts[0]);
@@ -37,8 +37,11 @@ export async function verifyOpenAIIDToken(token: string, nonce: string): Promise
   const aud = payload.aud;
   if (!(aud === CODEX_CLIENT_ID || (Array.isArray(aud) && aud.includes(CODEX_CLIENT_ID)))) throw new Error('invalid_id_token_audience');
   if (typeof payload.exp !== 'number' || payload.exp <= Math.floor(Date.now() / 1000)) throw new Error('expired_id_token');
-  if (payload.nonce !== nonce) throw new Error('invalid_id_token_nonce');
-  const account = String(payload['https://api.openai.com/auth'] ?? payload.chatgpt_account_id ?? payload.sub ?? '');
+  if (nonce !== undefined && payload.nonce !== nonce) throw new Error('invalid_id_token_nonce');
+  const auth = payload['https://api.openai.com/auth'];
+  const structuredAccount = auth && typeof auth === 'object' ? (auth as Record<string, unknown>).chatgpt_account_id ?? (auth as Record<string, unknown>).account_id : undefined;
+  const structuredPlan = auth && typeof auth === 'object' ? (auth as Record<string, unknown>).plan_type ?? (auth as Record<string, unknown>).plan : undefined;
+  const account = String(structuredAccount ?? payload.chatgpt_account_id ?? payload.account_id ?? '');
   if (!account) throw new Error('missing_chatgpt_account_id');
-  return { sub: String(payload.sub ?? account), chatgpt_account_id: account, email: typeof payload.email === 'string' ? payload.email : undefined, plan_type: typeof payload.plan === 'string' ? payload.plan : typeof payload.plan_type === 'string' ? payload.plan_type : undefined, exp: payload.exp };
+  return { sub: String(payload.sub ?? account), chatgpt_account_id: account, email: typeof payload.email === 'string' ? payload.email : undefined, plan_type: typeof structuredPlan === 'string' ? structuredPlan : typeof payload.plan === 'string' ? payload.plan : typeof payload.plan_type === 'string' ? payload.plan_type : undefined, exp: payload.exp };
 }

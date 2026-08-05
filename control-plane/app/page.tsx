@@ -1,5 +1,6 @@
 import DashboardClient from './dashboard-client';
+import { getRequestLocale } from './request-locale';
 
-export default function Page() {
-  return <DashboardClient />;
+export default async function Page() {
+  return <DashboardClient initialLocale={await getRequestLocale()} />;
 }

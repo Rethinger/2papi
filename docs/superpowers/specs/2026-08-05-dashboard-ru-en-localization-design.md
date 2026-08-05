@@ -53,7 +53,7 @@ The client receives that locale as a prop, preventing a hydration mismatch and a
 - cookie `2papi_locale` for future server renders;
 - `document.documentElement.lang`.
 
-On hydration, a valid local-storage value may repair an absent or stale cookie. The explicit client preference wins over browser detection.
+On hydration, the server-selected cookie value remains authoritative and repairs an absent or stale local-storage mirror. Manual selection always writes both stores together. This avoids a post-hydration language swap while preserving the explicit preference for future server renders.
 
 ### 3.3 Dashboard integration
 

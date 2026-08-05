@@ -17,6 +17,7 @@ COPY package*.json ./
 COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY lib ./lib
+COPY app/i18n.ts ./app/i18n.ts
 COPY tests ./tests
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./

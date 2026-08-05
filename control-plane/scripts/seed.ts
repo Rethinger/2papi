@@ -1,10 +1,17 @@
 import crypto from 'node:crypto';
 import { pool, tx } from '../lib/db';
-import { audit, insertSecret, storeDraft } from '../lib/control';
+import { audit, insertSecret, publishLatest, storeDraft } from '../lib/control';
 
 await tx(async c => {
   const count = await c.query('SELECT count(*)::int n FROM providers');
-  if (count.rows[0].n > 0) return;
+  if (count.rows[0].n > 0) {
+    const latest = await c.query("SELECT 1 FROM config_versions WHERE status='published' LIMIT 1");
+    if (!latest.rows[0]) {
+      await storeDraft(c);
+      await publishLatest(c);
+    }
+    return;
+  }
   const provider = await c.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('generic-openai','Generic OpenAI Compatible','openai-compatible','http://fake-upstream:9001') RETURNING id");
   const s1 = await insertSecret(c, 'account_credential', { api_key: 'upstream-primary' });
   const s2 = await insertSecret(c, 'account_credential', { api_key: 'upstream-secondary' });
@@ -19,6 +26,7 @@ await tx(async c => {
   await c.query("INSERT INTO system_settings (key,value) VALUES ('bind_host','\"127.0.0.1\"'::jsonb),('phase','\"A\"'::jsonb)");
   await audit(c, 'seed', 'database', undefined, { provider: 'generic-openai', accounts: 2, model: 'gpt-dev' });
   await storeDraft(c);
+  await publishLatest(c);
 });
 await pool.end();
 console.log('seed complete');

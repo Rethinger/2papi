@@ -1,2 +1,6 @@
 .superpowers/
 coverage.out
+.playwright-cli/
+artifacts/
+control-plane/node_modules/
+control-plane/.next/

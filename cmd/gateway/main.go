@@ -24,8 +24,8 @@ func main() {
 	gw := server.NewRuntimeServer(snap, st)
 	if cp := controlPlaneClientFromEnv(); cp != nil {
 		poll := pollIntervalFromEnv()
-		adoptOnce(context.Background(), cp, gw)
-		go pollControlPlane(cp, gw, poll)
+		version, checksum := adoptOnce(context.Background(), cp, gw, 0, "")
+		go pollControlPlane(cp, gw, poll, version, checksum)
 	}
 	rt := gw.Runtime()
 	srv := &http.Server{Addr: rt.Snap.Server.Addr, Handler: gw.Routes(), ReadTimeout: rt.Snap.ReadTimeout, WriteTimeout: rt.Snap.WriteTimeout}
@@ -57,24 +57,30 @@ func pollIntervalFromEnv() time.Duration {
 	return 15 * time.Second
 }
 
-func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration) {
+func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration, version int, checksum string) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for range t.C {
-		adoptOnce(context.Background(), cp, gw)
+		version, checksum = adoptOnce(context.Background(), cp, gw, version, checksum)
 	}
 }
 
-func adoptOnce(ctx context.Context, cp *controlplane.Client, gw *server.Server) {
+func adoptOnce(ctx context.Context, cp *controlplane.Client, gw *server.Server, currentVersion int, currentChecksum string) (int, string) {
 	snap, version, checksum, err := cp.Fetch(ctx)
 	if err != nil {
 		log.Printf("control-plane snapshot adoption failed: %v", err)
-		_ = cp.Ack(ctx, controlplane.Ack{Version: version, Checksum: checksum, Success: false, Error: err.Error()})
-		return
+		if version > 0 && checksum != "" {
+			_ = cp.Ack(ctx, controlplane.Ack{Version: version, Checksum: checksum, Success: false, Error: err.Error()})
+		}
+		return currentVersion, currentChecksum
+	}
+	if version == currentVersion && checksum == currentChecksum {
+		return currentVersion, currentChecksum
 	}
 	gw.Adopt(snap)
 	if err := cp.Ack(ctx, controlplane.Ack{Version: version, Checksum: checksum, Success: true}); err != nil {
 		log.Printf("control-plane snapshot ack failed: %v", err)
 	}
 	log.Printf("adopted control-plane snapshot version=%d checksum=%s", version, checksum)
+	return version, checksum
 }

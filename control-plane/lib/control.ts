@@ -10,6 +10,15 @@ export const ModelSchema = z.object({ alias: z.string().min(1), upstream_model: 
 export const RoutingSchema = z.object({ strategy: z.enum(['balanced','priority','weighted']).default('balanced'), sticky_ttl: z.string().default('1h'), max_attempts: z.number().int().positive().default(2), resilience: z.object({ cooldown: z.string().default('30s'), circuit_failures: z.number().int().positive().default(3), circuit_reset: z.string().default('1m') }).default({ cooldown: '30s', circuit_failures: 3, circuit_reset: '1m' }) });
 export const VirtualKeySchema = z.object({ name: z.string().min(1), plaintext_key: z.string().min(8).optional(), enabled: z.boolean().default(true), models: z.array(z.string()).default([]), rpm: z.number().int().positive().default(60) });
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 function b64ToBuf(v: string) { return Buffer.from(v, 'base64'); }
 function bufToB64(v: Buffer) { return v.toString('base64'); }
 export function rowToEncrypted(row: any): EncryptedSecretRecord { return { key_version: row.key_version, data_key_nonce: bufToB64(row.data_key_nonce), data_key_ciphertext: bufToB64(row.data_key_ciphertext), data_key_tag: bufToB64(row.data_key_tag), secret_nonce: bufToB64(row.secret_nonce), secret_ciphertext: bufToB64(row.secret_ciphertext), secret_tag: bufToB64(row.secret_tag) }; }
@@ -25,14 +34,12 @@ export async function audit(client: PoolClient, action: string, resourceType: st
 }
 
 export async function compileSnapshot(client: PoolClient) {
-  const [accountsR, secretsR, modelsR, mapsR, routingR, keysR] = await Promise.all([
-    client.query('SELECT * FROM accounts WHERE enabled ORDER BY priority, name'),
-    client.query('SELECT * FROM secret_records'),
-    client.query('SELECT * FROM model_aliases WHERE enabled ORDER BY alias'),
-    client.query('SELECT mam.*, a.name account_name, ma.alias FROM model_account_mappings mam JOIN accounts a ON a.id=mam.account_id JOIN model_aliases ma ON ma.id=mam.model_alias_id WHERE mam.enabled AND a.enabled ORDER BY mam.tier, mam.position'),
-    client.query('SELECT * FROM routing_settings WHERE id=true'),
-    client.query('SELECT * FROM virtual_keys WHERE enabled ORDER BY name'),
-  ]);
+  const accountsR = await client.query('SELECT * FROM accounts WHERE enabled ORDER BY priority, name');
+  const secretsR = await client.query('SELECT * FROM secret_records');
+  const modelsR = await client.query('SELECT * FROM model_aliases WHERE enabled ORDER BY alias');
+  const mapsR = await client.query('SELECT mam.*, a.name account_name, ma.alias FROM model_account_mappings mam JOIN accounts a ON a.id=mam.account_id JOIN model_aliases ma ON ma.id=mam.model_alias_id WHERE mam.enabled AND a.enabled ORDER BY mam.tier, mam.position');
+  const routingR = await client.query('SELECT * FROM routing_settings WHERE id=true');
+  const keysR = await client.query('SELECT * FROM virtual_keys WHERE enabled ORDER BY name');
   const secrets = new Map(secretsR.rows.map((r: any) => [r.id, r]));
   const accounts = accountsR.rows.map((a: any) => {
     const sr = secrets.get(a.secret_record_id);
@@ -51,8 +58,8 @@ export async function compileSnapshot(client: PoolClient) {
   const routing = routingR.rows[0] ?? { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: { cooldown: '30s', circuit_failures: 3, circuit_reset: '1m' } };
   const snapshot = { version: 1, metadata: { compiled_at: new Date().toISOString() }, secret: env.GATEWAY_SHARED_SECRET, server: { addr: ':8080', read_timeout: '10s', write_timeout: '0s' }, virtual_keys: keysR.rows.map((k: any) => ({ name: k.name, key_hash: k.key_hash, models: k.models, rpm: k.rpm })), models, accounts, routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience: routing.resilience };
   if (snapshot.virtual_keys.length === 0) throw new Error('at least one virtual key required');
-  const checksum = crypto.createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
-  return { snapshot: { ...snapshot, metadata: { ...snapshot.metadata, checksum } }, checksum };
+  const checksum = crypto.createHash('sha256').update(canonicalJson(snapshot)).digest('hex');
+  return { snapshot, checksum };
 }
 
 export async function storeDraft(client: PoolClient) {

@@ -23,11 +23,13 @@ docker run --rm -v "%cd%:/src" -w /src golang:1.22 go vet ./...
 docker build -t 2papi-gateway .
 ```
 
-Run the local stack with fake OpenAI-compatible upstreams:
+Run the complete local stack with dashboard, PostgreSQL, Redis, gateway, and fake OpenAI-compatible upstreams:
 
 ```sh
 docker compose up --build
 ```
+
+Open the dashboard at `http://localhost:13000`. The OpenAI-compatible gateway remains at `http://localhost:18080`.
 
 Call the gateway:
 
@@ -53,4 +55,4 @@ Start from `config/example.yaml`. It defines a versioned immutable snapshot:
 - `routing`: strategy, sticky TTL, and max pre-commit attempts.
 - `resilience`: cooldown and circuit-breaker thresholds.
 
-The request hot path uses only in-memory config and state. PostgreSQL and Redis are intentionally left for later control-plane phases behind replaceable interfaces.
+The request hot path uses only an immutable in-memory snapshot. The dashboard stores desired state in PostgreSQL, publishes version notifications through Redis, and the Go gateway atomically adopts validated snapshots while retaining its last valid configuration if the control plane is unavailable.

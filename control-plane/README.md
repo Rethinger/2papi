@@ -1,6 +1,6 @@
 # Papi Control Plane
 
-Phase A backend/control-plane foundation. It is intentionally standalone and does not modify the Go gateway or `compose.yaml`.
+Phase A dashboard and control-plane foundation. The root `compose.yaml` integrates it with PostgreSQL, Redis, and the Go gateway.
 
 ## Required services
 
@@ -24,4 +24,4 @@ npm run dev
 npm test
 ```
 
-Management APIs live under `/api/control/v1`. Snapshot fetch and gateway acknowledgement use authenticated `/api/internal/snapshots`.
+Management APIs live under `/api/control/v1`. The dashboard is served at `/`. Gateway snapshot fetch and acknowledgement use authenticated `/api/internal/v1/snapshot` and `/api/internal/v1/gateway-acks` endpoints.

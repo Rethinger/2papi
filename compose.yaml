@@ -1,8 +1,61 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: papi_control
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - papi-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d papi_control"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - papi-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  control-plane:
+    build: ./control-plane
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/papi_control
+      REDIS_URL: redis://redis:6379
+      CONTROL_PLANE_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+      INTERNAL_SERVICE_TOKEN: dev-internal-service-token
+      GATEWAY_SHARED_SECRET: dev-secret-change-me
+      CONTROL_PLANE_BIND_HOST: 0.0.0.0
+    ports: ["127.0.0.1:13000:3000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
   gateway:
     build: .
-    ports: ["18080:8080"]
+    ports: ["127.0.0.1:18080:8080"]
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:3000
+      CONTROL_PLANE_INTERNAL_TOKEN: dev-internal-service-token
+      CONTROL_PLANE_POLL_INTERVAL: 2s
+      GATEWAY_ID: gateway-compose
     depends_on:
+      control-plane:
+        condition: service_healthy
       fake-upstream:
         condition: service_healthy
   fake-upstream:
@@ -10,9 +63,12 @@ services:
     working_dir: /src
     volumes: [".:/src"]
     command: go run ./test/fakeupstream
-    ports: ["9001:9001", "9002:9002"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9001/v1/chat/completions > /dev/null && curl -fsS http://127.0.0.1:9002/v1/chat/completions > /dev/null"]
       interval: 2s
       timeout: 2s
       retries: 30
+
+volumes:
+  papi-postgres:
+  papi-redis:

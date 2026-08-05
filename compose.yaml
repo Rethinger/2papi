@@ -34,7 +34,10 @@ services:
       INTERNAL_SERVICE_TOKEN: dev-internal-service-token
       GATEWAY_SHARED_SECRET: dev-secret-change-me
       CONTROL_PLANE_BIND_HOST: 0.0.0.0
-    ports: ["127.0.0.1:13000:3000"]
+      DASHBOARD_PUBLIC_URL: http://localhost:13000
+    ports:
+      - "127.0.0.1:13000:3000"
+      - "127.0.0.1:1455:3000"
     depends_on:
       postgres:
         condition: service_healthy

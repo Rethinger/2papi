@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Pool } from 'pg';
 import { audit, compileSnapshot, insertSecret, publishLatest, storeDraft } from '../lib/control.ts';
+import { sanitizeHistoricalConfigVersions } from '../lib/snapshot-migration.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const options = { skip: url ? false : 'TEST_DATABASE_URL is not set' };
@@ -12,10 +13,17 @@ const pool = url ? new Pool({ connectionString: url, max: 4 }) : null;
 test.before(async () => {
   if (!url) return;
   await pool!.query('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
-  const file = path.join(process.cwd(), 'migrations', '001_schema.sql');
-  const sql = await fs.readFile(file, 'utf8');
-  await pool!.query(sql);
+  await applyMigrations(pool!);
 });
+
+async function applyMigrations(client: any) {
+  const dir = path.join(process.cwd(), 'migrations');
+  for (const name of (await fs.readdir(dir)).filter(n => n.endsWith('.sql')).sort()) {
+    await client.query(await fs.readFile(path.join(dir, name), 'utf8'));
+  }
+  await client.query('BEGIN');
+  try { await sanitizeHistoricalConfigVersions(client); await client.query('COMMIT'); } catch (e) { await client.query('ROLLBACK'); throw e; }
+}
 
 async function withRollback<T>(fn: (client: any) => Promise<T>): Promise<T> {
   const client = await pool!.connect();
@@ -50,9 +58,7 @@ test('migrations create every control-plane table', options, async () => {
 });
 
 test('migration runner is idempotent', options, async () => {
-  const file = path.join(process.cwd(), 'migrations', '001_schema.sql');
-  const sql = await fs.readFile(file, 'utf8');
-  await pool!.query(sql);
+  await applyMigrations(pool!);
   const providers = await pool!.query('SELECT count(*)::int n FROM providers');
   assert.ok(providers.rows[0].n >= 0);
 });
@@ -101,7 +107,7 @@ test('credentials are unreadable in storage but decrypt during compilation', opt
     const compiled = await compileSnapshot(client);
     const account = compiled.snapshot.accounts.find((item: any) => item.name === 'itest-primary');
     assert.ok(account, 'compiled snapshot is missing the seeded account');
-    assert.equal(account.api_key, 'integration-secret');
+    assert.equal(account.credential.api_key, 'integration-secret');
     assert.equal(compiled.checksum.length, 64);
   });
 });
@@ -121,7 +127,7 @@ test('draft, publish, and rollback move the published pointer', options, async (
 
     const source = await client.query('SELECT snapshot,checksum FROM config_versions WHERE version=$1', [first.version]);
     const clone = await client.query(
-      'INSERT INTO config_versions (status,checksum,snapshot,source_version) VALUES ($1,$2,$3,$4) RETURNING version,checksum',
+      'INSERT INTO config_versions (status,checksum,config_checksum,schema_version,snapshot,source_version) VALUES ($1,$2,$2,2,$3,$4) RETURNING version,checksum',
       ['draft', source.rows[0].checksum, JSON.stringify(source.rows[0].snapshot), first.version],
     );
     const restored = await publishLatest(client);

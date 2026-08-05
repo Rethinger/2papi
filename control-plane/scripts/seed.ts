@@ -5,9 +5,11 @@ import { audit, insertSecret, publishLatest, storeDraft } from '../lib/control';
 await tx(async c => {
   const count = await c.query('SELECT count(*)::int n FROM providers');
   if (count.rows[0].n > 0) {
-    const latest = await c.query("SELECT 1 FROM config_versions WHERE status='published' LIMIT 1");
+    const latest = await c.query("SELECT 1 FROM config_versions WHERE status='published' AND NOT (snapshot::text ~* '(api_key|access_token|refresh_token|id_token)') LIMIT 1");
     if (!latest.rows[0]) {
-      await storeDraft(c);
+      const invalid = await c.query("SELECT version FROM config_versions WHERE status='invalid' ORDER BY version DESC LIMIT 1");
+      const draft = await storeDraft(c);
+      if (invalid.rows[0]) await c.query('UPDATE config_versions SET source_version=$2 WHERE version=$1', [draft.version, invalid.rows[0].version]);
       await publishLatest(c);
     }
     return;

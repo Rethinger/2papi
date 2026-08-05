@@ -173,6 +173,19 @@ test('model account reassignment replaces mappings and reorders the compiled sna
     };
 
     await reassign([secondId, seeded.accountId]);
+
+    // Mirrors the GET /models projection. json_agg must explicitly order by
+    // position, otherwise the API can return a different order after cleanup.
+    const apiProjection = await client.query(
+      `SELECT COALESCE(json_agg(mam.account_id ORDER BY mam.position)
+        FILTER (WHERE mam.account_id IS NOT NULL),'[]') accounts
+       FROM model_aliases ma
+       LEFT JOIN model_account_mappings mam ON mam.model_alias_id=ma.id
+       WHERE ma.id=$1 GROUP BY ma.id`,
+      [modelId],
+    );
+    assert.deepEqual(apiProjection.rows[0].accounts, [secondId, seeded.accountId], 'GET /models must preserve mapping positions');
+
     const both = await compileSnapshot(client);
     const compiledModel = both.snapshot.models.find((m: any) => m.alias === 'itest-model');
     assert.ok(compiledModel, 'compiled snapshot is missing itest-model');

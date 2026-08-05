@@ -20,7 +20,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
     if (r === 'providers') return ok((await pool.query('SELECT * FROM providers ORDER BY name')).rows);
     if (r === 'accounts') return ok((await pool.query(`SELECT a.*, sr.key_version, sr.rotated_at, sr.id secret_id FROM accounts a LEFT JOIN secret_records sr ON sr.id=a.secret_record_id ORDER BY a.name`)).rows.map(row => ({ ...row, secret_present: Boolean(row.secret_id) })));
-    if (r === 'models') return ok((await pool.query(`SELECT ma.*, COALESCE(json_agg(mam.account_id) FILTER (WHERE mam.account_id IS NOT NULL),'[]') accounts FROM model_aliases ma LEFT JOIN model_account_mappings mam ON mam.model_alias_id=ma.id GROUP BY ma.id ORDER BY ma.alias`)).rows);
+    if (r === 'models') return ok((await pool.query(`SELECT ma.*, COALESCE(json_agg(mam.account_id ORDER BY mam.position) FILTER (WHERE mam.account_id IS NOT NULL),'[]') accounts FROM model_aliases ma LEFT JOIN model_account_mappings mam ON mam.model_alias_id=ma.id GROUP BY ma.id ORDER BY ma.alias`)).rows);
     if (r === 'gateway-acks') return ok((await pool.query('SELECT gateway_id,version,checksum,status,error,acknowledged_at FROM gateway_config_acks ORDER BY acknowledged_at DESC LIMIT 200')).rows.map(row => ({ ...row, version: Number(row.version) })));
     if (r === 'routing') return ok((await pool.query('SELECT * FROM routing_settings WHERE id=true')).rows[0]);
     if (r === 'virtual-keys') return ok((await pool.query('SELECT id,name,key_prefix,enabled,models,rpm,created_at,last_used_at FROM virtual_keys ORDER BY name')).rows);

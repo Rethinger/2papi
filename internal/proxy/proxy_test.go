@@ -92,3 +92,50 @@ func TestFallbackBeforeStreamingAndHeaders(t *testing.T) {
 		t.Fatal(body)
 	}
 }
+func TestResponseModelAliasRewrite(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":"1","model":"up","choices":[]}`)
+	}))
+	defer up.Close()
+	snap, err := config.Build(config.Config{Version: 1, Secret: "s", VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"m"}, RPM: 10}}, Models: []config.Model{{Alias: "m", UpstreamModel: "up", Accounts: []string{"a"}}}, Accounts: []config.Account{{Name: "a", BaseURL: up.URL, APIKey: "a", Enabled: true, Weight: 1, MaxConcurrency: 10}}, Resilience: config.Resilience{CircuitFailures: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := resilience.New()
+	rt := router.New(snap, st)
+	ts := httptest.NewServer(server.New(snap, proxy.New(snap, st, rt)).Routes())
+	defer ts.Close()
+	resp, body := post(ts, "sk", `{"model":"m"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, `"model":"m"`) || strings.Contains(body, `"model":"up"`) {
+		t.Fatalf("body=%s", body)
+	}
+}
+
+func TestRetryAfterCooldownFallback(t *testing.T) {
+	up1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		http.Error(w, "limited", http.StatusTooManyRequests)
+	}))
+	up2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"ok":1}`) }))
+	defer up1.Close()
+	defer up2.Close()
+	snap, err := config.Build(config.Config{Version: 1, Secret: "s", VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"m"}, RPM: 10}}, Models: []config.Model{{Alias: "m", UpstreamModel: "up", Accounts: []string{"a", "b"}}}, Accounts: []config.Account{{Name: "a", BaseURL: up1.URL, APIKey: "a", Enabled: true, Priority: 1, Weight: 1, MaxConcurrency: 10}, {Name: "b", BaseURL: up2.URL, APIKey: "b", Enabled: true, Priority: 2, Weight: 1, MaxConcurrency: 10}}, Routing: config.Routing{Strategy: "priority", MaxAttempts: 2}, Resilience: config.Resilience{CircuitFailures: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := resilience.New()
+	rt := router.New(snap, st)
+	ts := httptest.NewServer(server.New(snap, proxy.New(snap, st, rt)).Routes())
+	defer ts.Close()
+	resp, body := post(ts, "sk", `{"model":"m"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	resp, _ = post(ts, "sk", `{"model":"m","user":"retry-after-new-affinity"}`)
+	if resp.Header.Get("X-Gateway-Route") != "b" {
+		t.Fatalf("route=%s", resp.Header.Get("X-Gateway-Route"))
+	}
+}

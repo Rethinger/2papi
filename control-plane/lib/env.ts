@@ -12,6 +12,9 @@ const EnvSchema = z.object({
   CODEX_TEST_MODE: boolish,
   CODEX_AUTH_ORIGIN: z.string().url().optional(),
   CODEX_CHATGPT_ORIGIN: z.string().url().optional(),
+  SNAPSHOT_POLL_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
+  GATEWAY_CAPABILITY_TTL_SECONDS: z.coerce.number().int().positive().optional(),
+  MIN_ACTIVE_GATEWAYS: z.coerce.number().int().nonnegative().default(1),
 });
 
 export const env = EnvSchema.parse(process.env);

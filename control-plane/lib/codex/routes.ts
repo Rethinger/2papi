@@ -22,7 +22,7 @@ export type CodexRouteDeps = {
 
 export function codexRouteDeps(): CodexRouteDeps {
   return {
-    dashboardPublicUrl: process.env.DASHBOARD_PUBLIC_URL || 'http://localhost:3000',
+    dashboardPublicUrl: process.env.DASHBOARD_PUBLIC_URL || 'http://localhost:13000',
     trustedProxy: process.env.TRUSTED_PROXY === 'true',
     startOAuthSession,
     consumeOAuthSession,
@@ -57,7 +57,6 @@ function hostAllowed(request: Request, deps: CodexRouteDeps) {
 }
 
 export async function codexOAuthStartCore(request: Request, deps: CodexRouteDeps) {
-  if (!hostAllowed(request, deps)) return json({ error: 'invalid_callback_host' }, 400);
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const started = await deps.startOAuthSession({ accountName: typeof body.name === 'string' ? body.name : undefined });
   return json({ authorization_url: started.authorizationUrl, expires_in: started.expires_in });
@@ -86,11 +85,38 @@ export async function codexCallbackCore(request: Request, deps: CodexRouteDeps) 
   }
 }
 
+async function boundedText(request: Request) {
+  const lenHeader = request.headers.get('content-length');
+  if (lenHeader && Number(lenHeader) > MAX_IMPORT_BYTES) return null;
+  if (!request.body) return '';
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > MAX_IMPORT_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 export async function codexImportAuthCore(request: Request, deps: CodexRouteDeps) {
-  const len = Number(request.headers.get('content-length') || 0);
-  if (len > MAX_IMPORT_BYTES) return json({ error: 'body_too_large' }, 413);
-  const body = await request.text();
-  if (body.length > MAX_IMPORT_BYTES) return json({ error: 'body_too_large' }, 413);
+  const body = await boundedText(request);
+  if (body === null) return json({ error: 'body_too_large' }, 413);
   try {
     const credential = await deps.parseCodexAuthFile(body);
     const account = await deps.createAccount({ method: 'import', credential });

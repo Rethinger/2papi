@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import type { NormalizedCodexCredential } from './auth-file';
 import { audit as defaultAudit, insertSecret as defaultInsertSecret, storeDraft as defaultStoreDraft } from '../control';
@@ -17,30 +18,54 @@ export type CreateCodexAccountDeps = {
   storeDraft: typeof defaultStoreDraft;
 };
 
+const CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 const defaults: CreateCodexAccountDeps = { insertSecret: defaultInsertSecret, audit: defaultAudit, storeDraft: defaultStoreDraft };
 
+function safeNamePart(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+function generatedSafeName() {
+  return `codex-${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+}
+
 function accountName(input: CreateCodexAccountInput) {
-  return input.name ?? `codex-${input.credential.chatgpt_account_id}`;
+  if (input.name) return input.name;
+  const emailName = input.credential.email ? safeNamePart(input.credential.email) : '';
+  if (emailName) return `codex-${emailName}`;
+  const accountIdName = input.credential.chatgpt_account_id ? safeNamePart(input.credential.chatgpt_account_id) : '';
+  if (accountIdName) return `codex-${accountIdName}`;
+  return generatedSafeName();
 }
 
 export async function createCodexAccount(client: PoolClient, input: CreateCodexAccountInput, deps: CreateCodexAccountDeps = defaults) {
   const credential = input.credential;
+  const provider = (await client.query(`SELECT id FROM providers WHERE slug='openai-codex' LIMIT 1`)).rows[0];
+  if (!provider?.id) throw new Error('codex_provider_missing');
+
   const secretId = await deps.insertSecret(client, 'codex-oauth', credential);
   const name = accountName(input);
   const displayName = credential.email ? `Codex ${credential.email}` : name;
   const enabled = input.enabled ?? true;
   const maxConcurrency = input.max_concurrency ?? 1;
+  const metadata = JSON.stringify({ provider: 'openai-codex', auth_method: input.method });
 
   const sql = input.accountId
-    ? `UPDATE accounts SET secret_record_id=$1, display_name=$2, enabled=$3, max_concurrency=$4, external_account_id=$5, account_email=$6, plan_type=$7, token_expires_at=$8, last_credential_refresh_at=now(), credential_persistence_status='persisted', metadata=$9, updated_at=now() WHERE id=$10 RETURNING id, name`
-    : `INSERT INTO accounts (provider_id, name, display_name, base_url, enabled, priority, weight, max_concurrency, cost, secret_record_id, external_account_id, account_email, plan_type, token_expires_at, credential_persistence_status, metadata) VALUES ((SELECT id FROM providers WHERE slug='openai-codex' LIMIT 1), $1, $2, 'https://chatgpt.com', $3, 1, 1, $4, 0, $5, $6, $7, $8, $9, 'persisted', $10) ON CONFLICT (name) DO UPDATE SET secret_record_id=EXCLUDED.secret_record_id, display_name=EXCLUDED.display_name, enabled=EXCLUDED.enabled, max_concurrency=EXCLUDED.max_concurrency, external_account_id=EXCLUDED.external_account_id, account_email=EXCLUDED.account_email, plan_type=EXCLUDED.plan_type, token_expires_at=EXCLUDED.token_expires_at, credential_persistence_status='persisted', metadata=EXCLUDED.metadata, updated_at=now() RETURNING id, name`;
-  const metadata = JSON.stringify({ provider: 'openai-codex', auth_method: input.method });
+    ? `UPDATE accounts SET secret_record_id=$1, display_name=$2, base_url=$3, enabled=$4, max_concurrency=$5, external_account_id=$6, account_email=$7, plan_type=$8, token_expires_at=$9, last_credential_refresh_at=now(), credential_persistence_status='persisted', credential_revision=COALESCE(credential_revision, 0)+1, metadata=$10, updated_at=now() WHERE id=$11 AND provider_id=$12 RETURNING id, name, credential_revision`
+    : `INSERT INTO accounts (provider_id, name, display_name, base_url, enabled, priority, weight, max_concurrency, cost, secret_record_id, external_account_id, account_email, plan_type, token_expires_at, credential_persistence_status, credential_revision, metadata) VALUES ($1, $2, $3, $4, $5, 1, 1, $6, 0, $7, $8, $9, $10, $11, 'persisted', 1, $12) ON CONFLICT (name) DO UPDATE SET secret_record_id=EXCLUDED.secret_record_id, display_name=EXCLUDED.display_name, base_url=EXCLUDED.base_url, enabled=EXCLUDED.enabled, max_concurrency=EXCLUDED.max_concurrency, external_account_id=EXCLUDED.external_account_id, account_email=EXCLUDED.account_email, plan_type=EXCLUDED.plan_type, token_expires_at=EXCLUDED.token_expires_at, credential_persistence_status='persisted', credential_revision=COALESCE(accounts.credential_revision, 0)+1, metadata=EXCLUDED.metadata, updated_at=now() WHERE accounts.provider_id=EXCLUDED.provider_id RETURNING id, name, credential_revision`;
   const params = input.accountId
-    ? [secretId, displayName, enabled, maxConcurrency, credential.chatgpt_account_id, credential.email ?? null, credential.plan_type ?? null, credential.expires_at ?? null, metadata, input.accountId]
-    : [name, displayName, enabled, maxConcurrency, secretId, credential.chatgpt_account_id, credential.email ?? null, credential.plan_type ?? null, credential.expires_at ?? null, metadata];
+    ? [secretId, displayName, CODEX_BASE_URL, enabled, maxConcurrency, credential.chatgpt_account_id ?? null, credential.email ?? null, credential.plan_type ?? null, credential.expires_at ?? null, metadata, input.accountId, provider.id]
+    : [provider.id, name, displayName, CODEX_BASE_URL, enabled, maxConcurrency, secretId, credential.chatgpt_account_id ?? null, credential.email ?? null, credential.plan_type ?? null, credential.expires_at ?? null, metadata];
   const row = (await client.query(sql, params)).rows[0];
-  const draft = await deps.storeDraft(client);
-  const revision = Number(draft.version);
+  if (!row?.id) throw new Error(input.accountId ? 'codex_account_missing' : 'codex_account_upsert_failed');
+
+  await deps.storeDraft(client);
+  const revision = Number(row.credential_revision);
   await deps.audit(client, 'codex_account_upsert', 'account', row.id, { account_id: row.id, method: input.method, plan: credential.plan_type ?? null, revision });
   return { id: String(row.id), revision };
 }

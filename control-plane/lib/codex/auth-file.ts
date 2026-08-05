@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CODEX_CLIENT_ID } from './constants';
-import { verifyOpenAIIDToken, type VerifiedCodexIdentity } from './jwt';
+import { unsafeReadJwtExp, verifyOpenAIIDToken, type VerifiedCodexIdentity } from './jwt';
 import { refreshOAuthCredential } from './oauth';
 
 export type NormalizedCodexCredential = {
@@ -36,15 +36,22 @@ function hintId(data: AuthData) { return data.chatgpt_account_id ?? data.account
 function applyIdentity(data: AuthData, identity: VerifiedCodexIdentity) {
   const hinted = hintId(data);
   if (hinted && hinted !== identity.chatgpt_account_id) throw new Error('auth_file_identity_mismatch');
-  return { id: identity.chatgpt_account_id, email: identity.email ?? data.email, plan: identity.plan_type ?? data.plan_type };
+  return { id: identity.chatgpt_account_id, email: identity.email, plan: identity.plan_type };
+}
+
+function idTokenExpired(idToken?: string) {
+  if (!idToken) return true;
+  const exp = unsafeReadJwtExp(idToken);
+  return typeof exp !== 'number' || exp <= Math.floor(Date.now() / 1000);
 }
 
 async function normalize(data: AuthData, nonce?: string): Promise<NormalizedCodexCredential> {
   if (!data.access_token && !data.refresh_token && !data.id_token) throw new Error('auth_file_missing_oauth_tokens');
   let identity: ReturnType<typeof applyIdentity> | undefined;
-  if (data.id_token && !isExpired(expiry(data))) identity = applyIdentity(data, await verifyOpenAIIDToken(data.id_token, nonce));
+  const needsRefresh = isExpired(expiry(data)) || idTokenExpired(data.id_token);
+  if (data.id_token && !needsRefresh) identity = applyIdentity(data, await verifyOpenAIIDToken(data.id_token, nonce));
 
-  if (isExpired(expiry(data))) {
+  if (needsRefresh) {
     if (!data.refresh_token) throw new Error('auth_file_expired_without_refresh_token');
     const refreshed = await refreshOAuthCredential(data.refresh_token, data.client_id ?? CODEX_CLIENT_ID);
     data.access_token = typeof refreshed.access_token === 'string' ? refreshed.access_token : '';

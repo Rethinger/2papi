@@ -59,29 +59,31 @@ export async function consumeJsonWhenDue<T extends { next_poll_at_ms?: number }>
   return { status: raw[0] === 1 ? 'too_soon' : 'due', value: JSON.parse(raw[1]!) as T, ttlSeconds: Math.max(1, Math.ceil((raw[2] ?? 1000) / 1000)) };
 }
 
-export async function leaseJsonWhenDue<T extends { next_poll_at_ms?: number; lease_until_ms?: number }>(key: string, leaseMs: number, nowMs = Date.now()): Promise<{ status: 'missing'|'too_soon'|'leased'; value?: T; ttlMs?: number }> {
+export async function leaseJsonWhenDue<T extends { next_poll_at_ms?: number; lease_until_ms?: number }>(key: string, leaseMs: number, nowMs = Date.now()): Promise<{ status: 'missing'|'too_soon'|'leased'; value?: T; expiresAtMs?: number }> {
   await ensureRedis();
   if (useMemoryRedis) {
     const hit = memory.get(key);
     if (!hit || hit.expires <= nowMs) { memory.delete(key); return { status: 'missing' }; }
     const value = JSON.parse(hit.value) as T;
-    if ((typeof value.next_poll_at_ms === 'number' && value.next_poll_at_ms > nowMs) || (typeof value.lease_until_ms === 'number' && value.lease_until_ms > nowMs)) return { status: 'too_soon', value, ttlMs: hit.expires - nowMs };
+    if ((typeof value.next_poll_at_ms === 'number' && value.next_poll_at_ms > nowMs) || (typeof value.lease_until_ms === 'number' && value.lease_until_ms > nowMs)) return { status: 'too_soon', value, expiresAtMs: hit.expires };
     const leased = { ...value, lease_until_ms: nowMs + leaseMs };
     memory.set(key, { value: JSON.stringify(leased), expires: hit.expires });
-    return { status: 'leased', value: leased as T, ttlMs: hit.expires - nowMs };
+    return { status: 'leased', value: leased as T, expiresAtMs: hit.expires };
   }
   const raw = await redis.eval("local v=redis.call('GET', KEYS[1]); if not v then return {0}; end; local ttl=redis.call('PTTL', KEYS[1]); if ttl <= 0 then return {0}; end; local obj=cjson.decode(v); local now=tonumber(ARGV[1]); if (obj['next_poll_at_ms'] and obj['next_poll_at_ms'] > now) or (obj['lease_until_ms'] and obj['lease_until_ms'] > now) then return {1, v, ttl}; end; obj['lease_until_ms']=now+tonumber(ARGV[2]); local nv=cjson.encode(obj); redis.call('PSETEX', KEYS[1], ttl, nv); return {2, nv, ttl};", 1, key, String(nowMs), String(leaseMs)) as [number, string?, number?];
   if (raw[0] === 0) return { status: 'missing' };
-  return { status: raw[0] === 1 ? 'too_soon' : 'leased', value: JSON.parse(raw[1]!) as T, ttlMs: raw[2] ?? 0 };
+  return { status: raw[0] === 1 ? 'too_soon' : 'leased', value: JSON.parse(raw[1]!) as T, expiresAtMs: nowMs + (raw[2] ?? 0) };
 }
 
-export async function updateLeasedJson<T extends { lease_until_ms?: number }>(key: string, value: T, ttlMs: number | undefined, mode: 'set'|'delete' = 'set') {
+export async function updateLeasedJson<T extends { lease_until_ms?: number }>(key: string, value: T, expiresAtMs: number | undefined, mode: 'set'|'delete' = 'set') {
   await ensureRedis();
   if (useMemoryRedis) {
     if (mode === 'delete') { memory.delete(key); return; }
-    memory.set(key, { value: JSON.stringify({ ...value, lease_until_ms: undefined }), expires: Date.now() + Math.max(1, ttlMs ?? 1000) });
+    if (!expiresAtMs || expiresAtMs <= Date.now()) { memory.delete(key); return; }
+    memory.set(key, { value: JSON.stringify({ ...value, lease_until_ms: undefined }), expires: expiresAtMs });
     return;
   }
   if (mode === 'delete') await redis.del(key);
-  else await redis.psetex(key, Math.max(1, ttlMs ?? 1000), JSON.stringify({ ...value, lease_until_ms: undefined }));
+  else if (!expiresAtMs || expiresAtMs <= Date.now()) await redis.del(key);
+  else await redis.psetex(key, expiresAtMs - Date.now(), JSON.stringify({ ...value, lease_until_ms: undefined }));
 }

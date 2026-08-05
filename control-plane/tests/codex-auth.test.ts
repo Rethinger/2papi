@@ -193,6 +193,22 @@ test('Device Code preserves upstream expiry values and returns failed on network
   await server.close();
 });
 
+test('Device Code pending response never extends the original upstream deadline', async () => {
+  const server = await fakeAuthServer(async (req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/api/accounts/deviceauth/usercode') res.end(JSON.stringify({ device_code: 'dc-expiry', user_code: 'UC', expires_in: 0.05, interval: 0 }));
+    else if (req.url === '/api/accounts/deviceauth/token') {
+      await new Promise(resolve => setTimeout(resolve, 75));
+      res.writeHead(400).end(JSON.stringify({ error: 'authorization_pending' }));
+    } else res.writeHead(404).end();
+  });
+  const { startDeviceFlow, pollDeviceFlow } = await import('../lib/codex/device.ts');
+  const flow = await startDeviceFlow();
+  assert.equal((await pollDeviceFlow(flow.session)).state, 'pending');
+  assert.equal((await pollDeviceFlow(flow.session)).state, 'expired');
+  await server.close();
+});
+
 test('secret redaction recursively hides credential-bearing fields', async () => {
   const { redactCodexSecrets } = await import('../lib/codex/accounts.ts');
   assert.deepEqual(redactCodexSecrets({ access_token: 'at', nested: { refresh_token: 'rt', ok: true } }), { access_token: '[REDACTED]', nested: { refresh_token: '[REDACTED]', ok: true } });

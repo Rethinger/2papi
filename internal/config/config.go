@@ -40,14 +40,29 @@ type Model struct {
 	Accounts      []string `yaml:"accounts" json:"accounts"`
 }
 type Account struct {
-	Name           string  `yaml:"name" json:"name"`
-	BaseURL        string  `yaml:"base_url" json:"base_url"`
-	APIKey         string  `yaml:"api_key" json:"api_key"`
-	Enabled        bool    `yaml:"enabled" json:"enabled"`
-	Priority       int     `yaml:"priority" json:"priority"`
-	Weight         int     `yaml:"weight" json:"weight"`
-	MaxConcurrency int     `yaml:"max_concurrency" json:"max_concurrency"`
-	Cost           float64 `yaml:"cost" json:"cost"`
+	ID             string     `yaml:"id,omitempty" json:"id,omitempty"`
+	Name           string     `yaml:"name" json:"name"`
+	Adapter        string     `yaml:"adapter,omitempty" json:"adapter,omitempty"`
+	BaseURL        string     `yaml:"base_url" json:"base_url"`
+	APIKey         string     `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+	Credential     Credential `yaml:"credential,omitempty" json:"credential,omitempty"`
+	Enabled        bool       `yaml:"enabled" json:"enabled"`
+	Priority       int        `yaml:"priority" json:"priority"`
+	Weight         int        `yaml:"weight" json:"weight"`
+	MaxConcurrency int        `yaml:"max_concurrency" json:"max_concurrency"`
+	Cost           float64    `yaml:"cost" json:"cost"`
+}
+
+type Credential struct {
+	Kind             string `yaml:"kind,omitempty" json:"kind,omitempty"`
+	APIKey           string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+	AccessToken      string `yaml:"access_token,omitempty" json:"access_token,omitempty"`
+	RefreshToken     string `yaml:"refresh_token,omitempty" json:"refresh_token,omitempty"`
+	IDToken          string `yaml:"id_token,omitempty" json:"id_token,omitempty"`
+	ExpiresAt        string `yaml:"expires_at,omitempty" json:"expires_at,omitempty"`
+	ClientID         string `yaml:"client_id,omitempty" json:"client_id,omitempty"`
+	ChatGPTAccountID string `yaml:"chatgpt_account_id,omitempty" json:"chatgpt_account_id,omitempty"`
+	Revision         int64  `yaml:"revision,omitempty" json:"revision,omitempty"`
 }
 type Routing struct {
 	Strategy    string `yaml:"strategy" json:"strategy"`
@@ -81,7 +96,7 @@ func Load(path string) (*Snapshot, error) {
 	return Build(c)
 }
 func Build(c Config) (*Snapshot, error) {
-	if c.Version != 1 {
+	if c.Version != 1 && c.Version != 2 {
 		return nil, fmt.Errorf("unsupported config version %d", c.Version)
 	}
 	if c.Secret == "" {
@@ -121,9 +136,33 @@ func Build(c Config) (*Snapshot, error) {
 	if e != nil {
 		return nil, e
 	}
-	for _, a := range c.Accounts {
-		if a.Name == "" || a.BaseURL == "" || a.APIKey == "" {
-			return nil, errors.New("account name/base_url/api_key required")
+	for i, a := range c.Accounts {
+		if a.Name == "" || a.BaseURL == "" {
+			return nil, errors.New("account name/base_url required")
+		}
+		if c.Version == 1 {
+			if a.APIKey == "" {
+				return nil, errors.New("account api_key required")
+			}
+			a.Adapter = "openai-compatible"
+			a.Credential = Credential{Kind: "api_key", APIKey: a.APIKey, Revision: 1}
+			c.Accounts[i] = a
+		} else {
+			if a.ID == "" || a.Adapter == "" || a.Credential.Kind == "" || a.Credential.Revision <= 0 {
+				return nil, errors.New("version 2 account id/adapter/credential kind/positive revision required")
+			}
+			switch a.Adapter {
+			case "openai-compatible":
+				if a.Credential.APIKey == "" {
+					return nil, errors.New("openai-compatible credential api_key required")
+				}
+			case "openai-codex":
+				if a.Credential.AccessToken == "" || a.Credential.ChatGPTAccountID == "" {
+					return nil, errors.New("openai-codex access_token and chatgpt_account_id required")
+				}
+			default:
+				return nil, fmt.Errorf("unsupported account adapter %s", a.Adapter)
+			}
 		}
 		if a.Weight <= 0 {
 			a.Weight = 1
@@ -134,6 +173,8 @@ func Build(c Config) (*Snapshot, error) {
 		if _, exists := s.AccountsByName[a.Name]; exists {
 			return nil, fmt.Errorf("duplicate account %s", a.Name)
 		}
+		c.Accounts[i] = a
+		s.Config.Accounts[i] = a
 		s.AccountsByName[a.Name] = a
 	}
 	for _, m := range c.Models {

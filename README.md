@@ -45,6 +45,28 @@ curl -N http://localhost:18080/v1/chat/completions \
 
 Responses include `X-Gateway-Route` and `X-Gateway-Attempts`. Upstream authorization is replaced and never forwarded from the client.
 
+## Testing
+
+Go unit tests with race detection:
+
+```sh
+docker run --rm -v "%cd%:/src" -w /src golang:1.22 go test -race ./...
+```
+
+Control-plane integration tests (migrations, constraints, audit, envelope encryption, compile/publish/rollback, gateway acknowledgements):
+
+```sh
+docker compose exec control-plane node scripts/run-tests.mjs
+```
+
+Full-stack E2E against a running `docker compose up` stack:
+
+```sh
+node test/e2e.mjs
+```
+
+The E2E script drives the whole lifecycle: create an account, attach it to a model alias, publish, wait for the gateway to adopt that exact version, mint a virtual key, publish again, issue an authenticated streaming request, assert an unknown key is rejected with 401, roll back to the baseline version, and verify the restored snapshot.
+
 ## Configuration
 
 Start from `config/example.yaml`. It defines a versioned immutable snapshot:

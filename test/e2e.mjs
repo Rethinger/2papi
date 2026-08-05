@@ -19,131 +19,151 @@ async function gateway(path, opts = {}) {
 
 async function sleep(ms) { await new Promise(resolve => setTimeout(resolve, ms)); }
 
-console.log('[E2E] Starting create → publish → adopt → request → rollback → verify');
-
-// 1. Baseline snapshot
-const baseline = await api('config-versions');
-const baselineVersion = baseline[0]?.version ?? 0;
-console.log(`[E2E] Baseline version: ${baselineVersion}`);
-
-// 2. Create new account
-const accounts = await api('accounts');
-const testAccount = accounts.find(a => a.name === 'e2e-test');
-let accountId;
-if (testAccount) {
-  accountId = testAccount.id;
-  console.log('[E2E] Reusing existing e2e-test account');
-} else {
-  const providers = await api('providers');
-  const provider = providers[0];
-  const newAccount = await api('accounts', {
-    method: 'POST',
-    body: JSON.stringify({
-      provider_id: provider.id,
-      name: 'e2e-test',
-      display_name: 'E2E Test Account',
-      base_url: 'http://fake-upstream:9003',
-      enabled: true,
-      priority: 3,
-      weight: 1,
-      max_concurrency: 50,
-      cost: 0.1,
-      credential: { api_key: 'e2e-test-key' },
-      metadata: {},
-    }),
-  });
-  accountId = newAccount.id;
-  console.log(`[E2E] Created account: ${accountId}`);
-}
-
-// 3. Add account to existing model
-const models = await api('models');
-const testModel = models[0];
-const baselineAccountIds = testModel.accounts.slice();
-if (!baselineAccountIds.includes(accountId)) {
-  await api(`models/${testModel.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ accounts: [...baselineAccountIds, accountId] }),
-  });
-  console.log(`[E2E] Added e2e-test to model ${testModel.alias}`);
-}
-
-// 4. Publish and wait for adoption
-const published = await api('config-versions/publish', { method: 'POST', body: '{}' });
-console.log(`[E2E] Published version ${published.version}, checksum ${published.checksum.slice(0, 10)}`);
-await sleep(5000);
-
-async function waitForAdoption(version, timeoutMs = 20000) {
+async function waitForAdoption(version, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
+  let seen = [];
   while (Date.now() < deadline) {
-    const versions = await api('config-versions');
-    const row = versions.find(v => v.version === version);
-    if (row && (row.adopted_at || row.status === 'adopted')) return row;
-    const events = await api('audit-events?resource_type=config_versions&action=adopted');
-    if (events.some(e => String(e.payload?.version ?? e.resource_id) === String(version))) return row;
+    const acks = await api('gateway-acks');
+    const match = acks.find(a => Number(a.version) === Number(version));
+    if (match) {
+      assert.equal(match.status, 'adopted', `gateway rejected version ${version}: ${match.error ?? 'unknown error'}`);
+      return match;
+    }
+    seen = acks.slice(0, 3).map(a => `${a.version}:${a.status}`);
     await sleep(1000);
   }
-  throw new Error(`gateway did not adopt version ${version} within ${timeoutMs}ms`);
+  throw new Error(`gateway did not acknowledge version ${version} within ${timeoutMs}ms (latest acks: ${seen.join(', ') || 'none'})`);
 }
 
-await waitForAdoption(published.version);
-console.log(`[E2E] Gateway adopted version ${published.version}`);
+// Tracked so cleanup can run even when an assertion fails midway.
+const state = { accountId: null, accountWasPreexisting: false, modelId: null, baselineAccountIds: null, keyId: null };
 
-// 5. Create a dedicated virtual key so auth is genuinely exercised
-const createdKey = await api('virtual-keys', {
-  method: 'POST',
-  body: JSON.stringify({ name: `e2e-key-${Date.now()}`, enabled: true, models: [testModel.alias], rpm: 100 }),
-});
-const plaintext = createdKey.plaintext_key ?? createdKey.key;
-assert.ok(plaintext && plaintext.startsWith('sk-'), `no plaintext key returned: ${JSON.stringify(createdKey)}`);
-console.log(`[E2E] Created virtual key ${createdKey.key_prefix ?? plaintext.slice(0, 10)}`);
-
-// Key only reaches the gateway after a publish
-const keyPublish = await api('config-versions/publish', { method: 'POST', body: '{}' });
-console.log(`[E2E] Published version ${keyPublish.version} carrying the new key`);
-await sleep(5000);
-
-const streamRes = await gateway('/v1/chat/completions', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${plaintext}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ model: testModel.alias, stream: true, messages: [{ role: 'user', content: 'e2e' }] }),
-});
-assert.equal(streamRes.status, 200, 'streaming request with new key failed');
-const route = streamRes.headers.get('x-gateway-route');
-await streamRes.text();
-console.log(`[E2E] Streaming request authorised with new key, routed to: ${route}`);
-
-// Negative check: a bogus key must be rejected
-const bogus = await fetch(`${gwBase}/v1/chat/completions`, {
-  method: 'POST',
-  headers: { Authorization: 'Bearer sk-definitely-not-valid', 'Content-Type': 'application/json' },
-  body: JSON.stringify({ model: testModel.alias, messages: [{ role: 'user', content: 'e2e' }] }),
-});
-assert.equal(bogus.status, 401, `bogus key should be 401, got ${bogus.status}`);
-console.log('[E2E] Bogus key correctly rejected with 401');
-
-// 6. Rollback to baseline
-if (baselineVersion > 0) {
-  await api('config-versions/rollback', { method: 'POST', body: JSON.stringify({ version: baselineVersion }) });
-  const rolledBack = await api('config-versions/publish', { method: 'POST', body: '{}' });
-  console.log(`[E2E] Rolled back and published version ${rolledBack.version}`);
-  await sleep(5000);
-
-  // 7. Verify rollback adoption
-  const afterRollback = await api('config-versions');
-  const latest = afterRollback[0];
-  assert.ok(latest.source_version === baselineVersion || latest.version === baselineVersion, 'rollback did not restore baseline');
-  console.log(`[E2E] Rollback verified: latest version ${latest.version}, source ${latest.source_version ?? 'n/a'}`);
+async function cleanup() {
+  const drop = async (label, fn) => {
+    try { await fn(); } catch (e) { console.error(`[E2E] cleanup ${label} failed: ${e.message}`); }
+  };
+  if (state.keyId) await drop('virtual key', () => api(`virtual-keys/${state.keyId}`, { method: 'DELETE' }));
+  if (state.modelId && state.baselineAccountIds) {
+    await drop('model routing', () => api(`models/${state.modelId}`, { method: 'PATCH', body: JSON.stringify({ accounts: state.baselineAccountIds }) }));
+  }
+  if (state.accountId && !state.accountWasPreexisting) {
+    await drop('account', () => api(`accounts/${state.accountId}`, { method: 'DELETE' }));
+  }
+  // Leave the control plane on a published snapshot that matches the restored state.
+  await drop('final publish', () => api('config-versions/publish', { method: 'POST', body: '{}' }));
+  console.log('[E2E] Cleanup complete');
 }
 
-// 8. Cleanup
-await api(`models/${testModel.id}`, {
-  method: 'PATCH',
-  body: JSON.stringify({ accounts: testModel.accounts }),
-});
-if (!testAccount) {
-  await api(`accounts/${accountId}`, { method: 'DELETE' });
-  console.log('[E2E] Cleaned up test account');
+async function run() {
+  console.log('[E2E] Starting create → publish → adopt → request → rollback → verify');
+
+  // 1. Baseline snapshot
+  const baseline = await api('config-versions');
+  const baselineVersion = baseline[0]?.version ?? 0;
+  console.log(`[E2E] Baseline version: ${baselineVersion}`);
+
+  // 2. Create the test account
+  const accounts = await api('accounts');
+  const existing = accounts.find(a => a.name === 'e2e-test');
+  if (existing) {
+    state.accountId = existing.id;
+    state.accountWasPreexisting = true;
+    console.log('[E2E] Reusing existing e2e-test account');
+  } else {
+    const providers = await api('providers');
+    const created = await api('accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider_id: providers[0].id,
+        name: 'e2e-test',
+        display_name: 'E2E Test Account',
+        base_url: 'http://fake-upstream:9003',
+        enabled: true,
+        priority: 3,
+        weight: 1,
+        max_concurrency: 50,
+        cost: 0.1,
+        credential: { api_key: 'e2e-test-key' },
+        metadata: {},
+      }),
+    });
+    state.accountId = created.id;
+    console.log(`[E2E] Created account: ${state.accountId}`);
+  }
+
+  // 3. Attach the account to an existing model alias
+  const models = await api('models');
+  const testModel = models[0];
+  state.modelId = testModel.id;
+  state.baselineAccountIds = testModel.accounts.slice();
+  if (!state.baselineAccountIds.includes(state.accountId)) {
+    await api(`models/${testModel.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ accounts: [...state.baselineAccountIds, state.accountId] }),
+    });
+    const reread = (await api('models')).find(m => m.id === testModel.id);
+    assert.ok(reread.accounts.includes(state.accountId), 'PATCH /models did not persist the new account');
+    console.log(`[E2E] Added e2e-test to model ${testModel.alias}`);
+  }
+
+  // 4. Publish and wait for the gateway to adopt that exact version
+  const published = await api('config-versions/publish', { method: 'POST', body: '{}' });
+  console.log(`[E2E] Published version ${published.version}, checksum ${published.checksum.slice(0, 10)}`);
+  await waitForAdoption(published.version);
+  console.log(`[E2E] Gateway adopted version ${published.version}`);
+
+  // 5. Mint a virtual key so authentication is genuinely exercised
+  const createdKey = await api('virtual-keys', {
+    method: 'POST',
+    body: JSON.stringify({ name: `e2e-key-${Date.now()}`, enabled: true, models: [testModel.alias], rpm: 100 }),
+  });
+  state.keyId = createdKey.id;
+  const plaintext = createdKey.plaintext_key ?? createdKey.key;
+  assert.ok(plaintext && plaintext.startsWith('sk-'), `no plaintext key returned: ${JSON.stringify(createdKey)}`);
+  console.log(`[E2E] Created virtual key ${createdKey.key_prefix ?? plaintext.slice(0, 10)}`);
+
+  const keyPublish = await api('config-versions/publish', { method: 'POST', body: '{}' });
+  console.log(`[E2E] Published version ${keyPublish.version} carrying the new key`);
+  await waitForAdoption(keyPublish.version);
+
+  const streamRes = await gateway('/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${plaintext}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: testModel.alias, stream: true, messages: [{ role: 'user', content: 'e2e' }] }),
+  });
+  assert.equal(streamRes.status, 200, 'streaming request with new key failed');
+  const route = streamRes.headers.get('x-gateway-route');
+  await streamRes.text();
+  console.log(`[E2E] Streaming request authorised with new key, routed to: ${route}`);
+
+  // Negative check: an unknown key must be rejected
+  const bogus = await fetch(`${gwBase}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer sk-definitely-not-valid', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: testModel.alias, messages: [{ role: 'user', content: 'e2e' }] }),
+  });
+  assert.equal(bogus.status, 401, `bogus key should be 401, got ${bogus.status}`);
+  console.log('[E2E] Bogus key correctly rejected with 401');
+
+  // 6. Rollback to the baseline version and verify it is restored
+  if (baselineVersion > 0) {
+    await api('config-versions/rollback', { method: 'POST', body: JSON.stringify({ version: baselineVersion }) });
+    const rolledBack = await api('config-versions/publish', { method: 'POST', body: '{}' });
+    console.log(`[E2E] Rolled back and published version ${rolledBack.version}`);
+    await waitForAdoption(rolledBack.version);
+
+    const latest = (await api('config-versions'))[0];
+    assert.ok(
+      latest.source_version === baselineVersion || latest.version === baselineVersion,
+      `rollback did not restore baseline ${baselineVersion}, got version ${latest.version} source ${latest.source_version}`,
+    );
+    console.log(`[E2E] Rollback verified: latest version ${latest.version}, source ${latest.source_version ?? 'n/a'}`);
+  }
 }
 
-console.log('[E2E] ✓ All phases passed: create → publish → adopt → request → rollback → verify');
+try {
+  await run();
+  console.log('[E2E] ✓ All phases passed: create → publish → adopt → request → rollback → verify');
+} finally {
+  await cleanup();
+}

@@ -28,6 +28,7 @@ services:
     build: ./control-plane
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/papi_control
+      TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/papi_control_test
       REDIS_URL: redis://redis:6379
       CONTROL_PLANE_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
       INTERNAL_SERVICE_TOKEN: dev-internal-service-token

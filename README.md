@@ -56,8 +56,10 @@ docker run --rm -v "%cd%:/src" -w /src golang:1.22 go test -race ./...
 Control-plane integration tests (migrations, constraints, audit, envelope encryption, compile/publish/rollback, gateway acknowledgements):
 
 ```sh
-docker compose exec control-plane node scripts/run-tests.mjs
+docker compose exec control-plane npm test
 ```
+
+The integration tests require `TEST_DATABASE_URL`, which compose sets to a dedicated `papi_control_test` database. Create it once with `docker compose exec postgres createdb -U postgres papi_control_test`; without it those tests skip instead of failing.
 
 Full-stack E2E against a running `docker compose up` stack:
 

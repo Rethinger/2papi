@@ -8,7 +8,8 @@ import { sanitizeHistoricalConfigVersions } from '../lib/snapshot-migration.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const options = { skip: url ? false : 'TEST_DATABASE_URL is not set' };
-const pool = url ? new Pool({ connectionString: url, max: 4 }) : null;
+const schema = `snapshot_security_${process.pid}`;
+const pool = url ? new Pool({ connectionString: `${url}?options=-c%20search_path%3D${schema},public`, max: 4 }) : null;
 
 async function sql(name: string) { return fs.readFile(path.join(process.cwd(), 'migrations', name), 'utf8'); }
 async function tx<T>(fn: (c: any) => Promise<T>) { const c = await pool!.connect(); try { await c.query('BEGIN'); const v = await fn(c); await c.query('COMMIT'); return v; } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); } }
@@ -25,8 +26,8 @@ async function seedBase(c: any) {
 
 test.before(async () => {
   if (!url) return;
-  await pool!.query('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
-  await pool!.query(await sql('001_schema.sql'));
+  await pool!.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; CREATE SCHEMA ${schema};`);
+  await pool!.query((await sql('001_schema.sql')).replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
 });
 
 test('snapshot security migrations reconstruct history and keep snapshots credential-free', options, async () => {
@@ -63,7 +64,7 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     assert.equal(declarative.accounts[0].adapter, 'openai-compatible');
 
     for (const table of ['gateway_instances','discovered_models','account_provider_state','provider_operations']) {
-      assert.equal((await c.query('SELECT to_regclass($1) ok', [`public.${table}`])).rows[0].ok, table);
+      assert.equal((await c.query('SELECT to_regclass($1) ok', [`${schema}.${table}`])).rows[0].ok, `${schema}.${table}`);
     }
     const idx = await c.query("SELECT indexdef FROM pg_indexes WHERE indexname='provider_operations_one_active_reset'");
     assert.match(idx.rows[0].indexdef, /WHERE .*quota_reset.*pending.*unknown/i);

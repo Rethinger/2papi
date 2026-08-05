@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const boolish = z.preprocess(v => v === true || v === 'true' || v === '1', z.boolean()).default(false);
+
 const EnvSchema = z.object({
   DATABASE_URL: z.string().url().default('postgres://postgres:postgres@localhost:5432/papi_control'),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
@@ -7,6 +9,9 @@ const EnvSchema = z.object({
   INTERNAL_SERVICE_TOKEN: z.string().min(16).default('dev-internal-service-token'),
   GATEWAY_SHARED_SECRET: z.string().min(1).default('dev-secret-change-me'),
   CONTROL_PLANE_BIND_HOST: z.string().default('127.0.0.1'),
+  CODEX_TEST_MODE: boolish,
+  CODEX_AUTH_ORIGIN: z.string().url().optional(),
+  CODEX_CHATGPT_ORIGIN: z.string().url().optional(),
 });
 
 export const env = EnvSchema.parse(process.env);

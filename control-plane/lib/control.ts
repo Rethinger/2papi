@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
 import { decryptSecretJson, encryptSecretJson, type EncryptedSecretRecord } from './crypto';
-import { compileDeclarativeSnapshot, materializeRuntimeSnapshot } from './snapshots';
+import { compileDeclarativeSnapshot, materializeLegacyRuntimeSnapshot } from './snapshots';
+import { sha256Canonical } from './canonical-json';
 
 export const ProviderSchema = z.object({ slug: z.string().min(1), name: z.string().min(1), adapter: z.string().default('openai-compatible'), base_url: z.string().url(), enabled: z.boolean().default(true), metadata: z.record(z.string(), z.unknown()).default({}) });
 export const AccountSchema = z.object({ provider_id: z.string().uuid(), name: z.string().min(1), display_name: z.string().min(1), base_url: z.string().url(), enabled: z.boolean().default(true), priority: z.number().int().default(1), weight: z.number().int().positive().default(1), max_concurrency: z.number().int().positive().default(100), cost: z.number().nonnegative().default(0), credential: z.object({ api_key: z.string().min(1) }).optional(), metadata: z.record(z.string(), z.unknown()).default({}) });
@@ -25,8 +26,8 @@ export async function audit(client: PoolClient, action: string, resourceType: st
 
 export async function compileSnapshot(client: PoolClient) {
   const compiled = await compileDeclarativeSnapshot(client);
-  const runtime = await materializeRuntimeSnapshot(client, compiled.snapshot);
-  return { snapshot: { ...runtime, accounts: runtime.accounts.map((a: any) => ({ ...a, api_key: a.credential?.api_key })) }, checksum: compiled.checksum };
+  const runtime = await materializeLegacyRuntimeSnapshot(client, compiled.snapshot);
+  return { snapshot: runtime, checksum: sha256Canonical(runtime) };
 }
 
 export async function storeDraft(client: PoolClient) {

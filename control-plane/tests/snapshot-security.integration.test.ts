@@ -51,7 +51,7 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     for (const row of rows.rows.slice(0, 2)) {
       assert.equal(row.checksum, row.config_checksum);
       const body = JSON.stringify(row.snapshot);
-      assert.ok(!/integration-secret|api_key|access_token|refresh_token|id_token/i.test(body), body);
+      assert.ok(!/integration-secret|api_key|access_token|refresh_token|id_token|"secret"/i.test(body), body);
       assert.equal(row.snapshot.accounts[0].credential_revision, 1);
       assert.equal(row.snapshot.accounts[0].adapter, 'openai-compatible');
     }
@@ -59,12 +59,14 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     const stored = await c.query('SELECT snapshot::text body FROM config_versions WHERE version=$1', [draft.version]);
     assert.ok(!stored.rows[0].body.includes('integration-secret'));
     assert.ok(!stored.rows[0].body.includes('api_key'));
+    assert.ok(!stored.rows[0].body.includes('"secret"'));
     const declarative = JSON.parse(stored.rows[0].body);
     assert.equal(declarative.accounts[0].credential_revision, 1);
     assert.equal(declarative.accounts[0].adapter, 'openai-compatible');
 
     for (const table of ['gateway_instances','discovered_models','account_provider_state','provider_operations']) {
-      assert.equal((await c.query('SELECT to_regclass($1) ok', [`${schema}.${table}`])).rows[0].ok, `${schema}.${table}`);
+      const regclass = (await c.query('SELECT to_regclass($1) ok', [`${schema}.${table}`])).rows[0].ok;
+      assert.ok(regclass === `${schema}.${table}` || regclass === table, regclass);
     }
     const idx = await c.query("SELECT indexdef FROM pg_indexes WHERE indexname='provider_operations_one_active_reset'");
     assert.match(idx.rows[0].indexdef, /WHERE .*quota_reset.*pending.*unknown/i);

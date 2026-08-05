@@ -38,6 +38,6 @@ async function reconstruct(client: PoolClient, legacy: any): Promise<{ ok: true;
       const row = r.rows[0];
       accounts.push({ id: row.id, name: row.name, adapter: row.adapter ?? 'openai-compatible', base_url: row.base_url, credential_revision: Number(row.credential_revision ?? 1), enabled: row.enabled, priority: row.priority, weight: row.weight, max_concurrency: row.max_concurrency, cost: Number(row.cost) });
     }
-    return { ok: true, snapshot: { version: 2, metadata: legacy.metadata ?? {}, secret: legacy.secret, server: legacy.server, virtual_keys: legacy.virtual_keys, models: legacy.models, accounts, routing: legacy.routing, resilience: legacy.resilience } };
+    return { ok: true, snapshot: { version: 2, metadata: legacy.metadata ?? {}, server: legacy.server, virtual_keys: legacy.virtual_keys, models: legacy.models, accounts, routing: legacy.routing, resilience: legacy.resilience } };
   } catch { return { ok: false }; }
 }

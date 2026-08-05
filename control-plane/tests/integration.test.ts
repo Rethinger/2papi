@@ -107,7 +107,7 @@ test('credentials are unreadable in storage but decrypt during compilation', opt
     const compiled = await compileSnapshot(client);
     const account = compiled.snapshot.accounts.find((item: any) => item.name === 'itest-primary');
     assert.ok(account, 'compiled snapshot is missing the seeded account');
-    assert.equal(account.credential.api_key, 'integration-secret');
+    assert.equal(account.api_key, 'integration-secret');
     assert.equal(compiled.checksum.length, 64);
   });
 });

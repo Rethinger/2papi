@@ -1,6 +1,7 @@
 import { pool } from '@/lib/db';
 import { ok, problem, requireInternal, ApiError } from '@/lib/api';
 import { env } from '@/lib/env';
+import { runtimeSnapshotFromPublishedRow } from '@/lib/snapshots';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,9 +10,12 @@ export async function GET(req: Request) {
     requireInternal(req, env.INTERNAL_SERVICE_TOKEN);
     const url = new URL(req.url);
     const version = url.searchParams.get('version');
-    const q = version ? await pool.query('SELECT version,checksum,snapshot FROM config_versions WHERE version=$1', [version]) : await pool.query("SELECT version,checksum,snapshot FROM config_versions WHERE status='published' ORDER BY version DESC LIMIT 1");
-    if (!q.rows[0]) throw new ApiError(404, 'not_found', 'Snapshot not found');
-    return ok(q.rows[0]);
+    const client = await pool.connect();
+    try {
+      const row = await runtimeSnapshotFromPublishedRow(client, version ?? undefined);
+      if (!row) throw new ApiError(404, 'not_found', 'Snapshot not found');
+      return ok(row);
+    } finally { client.release(); }
   } catch (e) { return problem(e); }
 }
 

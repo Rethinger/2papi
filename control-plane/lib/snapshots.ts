@@ -22,18 +22,49 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   });
   if (models.length === 0) throw new Error('at least one model required');
   const routing = routingR.rows[0] ?? { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: { cooldown: '30s', circuit_failures: 3, circuit_reset: '1m' } };
-  const snapshot = { version: 2, metadata: {}, secret: env.GATEWAY_SHARED_SECRET, server: { addr: ':8080', read_timeout: '10s', write_timeout: '0s' }, virtual_keys: keysR.rows.map((k: any) => ({ name: k.name, key_hash: k.key_hash, models: k.models, rpm: k.rpm })), models, accounts, routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience: routing.resilience };
+  const snapshot = { version: 2, metadata: {}, server: { addr: ':8080', read_timeout: '10s', write_timeout: '0s' }, virtual_keys: keysR.rows.map((k: any) => ({ name: k.name, key_hash: k.key_hash, models: k.models, rpm: k.rpm })), models, accounts, routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience: routing.resilience };
   if (snapshot.virtual_keys.length === 0) throw new Error('at least one virtual key required');
   return { snapshot, checksum: sha256Canonical(snapshot), schemaVersion: 2 };
 }
 
+async function credentialByAccountId(client: PoolClient, accountIds: string[]) {
+  const rows = await client.query(`SELECT a.id account_id, sr.* FROM accounts a JOIN secret_records sr ON sr.id=a.secret_record_id WHERE a.id = ANY($1::uuid[])`, [accountIds]);
+  return new Map(rows.rows.map((r: any) => [r.account_id, decryptSecretJson<any>(rowToEncrypted(r))]));
+}
+
 export async function materializeRuntimeSnapshot(client: PoolClient, declarative: any): Promise<RuntimeSnapshot> {
-  const rows = await client.query(`SELECT a.id, sr.* FROM accounts a JOIN secret_records sr ON sr.id=a.secret_record_id WHERE a.id = ANY($1::uuid[])`, [(declarative.accounts ?? []).map((a: any) => a.id)]);
-  const secrets = new Map(rows.rows.map((r: any) => [r.id, decryptSecretJson<any>(rowToEncrypted(r))]));
-  return { ...declarative, accounts: declarative.accounts.map((a: any) => ({ ...a, credential: secrets.get(a.id) })) };
+  const accountIds = (declarative.accounts ?? []).map((a: any) => a.id);
+  const secrets = await credentialByAccountId(client, accountIds);
+  const accounts = (declarative.accounts ?? []).map((a: any) => {
+    const credential = secrets.get(a.id);
+    if (!credential) throw new Error(`account ${a.id} missing credential`);
+    return { ...a, credential };
+  });
+  return { ...declarative, version: 2, secret: env.GATEWAY_SHARED_SECRET, accounts };
+}
+
+export async function materializeLegacyRuntimeSnapshot(client: PoolClient, declarative: any): Promise<RuntimeSnapshot> {
+  const accountIds = (declarative.accounts ?? []).map((a: any) => a.id);
+  const secrets = await credentialByAccountId(client, accountIds);
+  const accounts = (declarative.accounts ?? []).map((a: any) => {
+    const credential = secrets.get(a.id);
+    if (!credential?.api_key) throw new Error(`account ${a.id} missing credential`);
+    return { name: a.name, base_url: a.base_url, api_key: credential.api_key, enabled: a.enabled, priority: a.priority, weight: a.weight, max_concurrency: a.max_concurrency, cost: a.cost };
+  });
+  return { version: 1, metadata: declarative.metadata ?? {}, secret: env.GATEWAY_SHARED_SECRET, server: declarative.server, virtual_keys: declarative.virtual_keys, models: declarative.models, accounts, routing: declarative.routing, resilience: declarative.resilience };
+}
+
+export async function runtimeSnapshotFromPublishedRow(client: PoolClient, version?: string | number) {
+  const q = version
+    ? await client.query('SELECT version,snapshot FROM config_versions WHERE version=$1 AND status=$2', [version, 'published'])
+    : await client.query("SELECT version,snapshot FROM config_versions WHERE status='published' ORDER BY version DESC LIMIT 1");
+  const row = q.rows[0];
+  if (!row) return null;
+  const snapshot = await materializeLegacyRuntimeSnapshot(client, row.snapshot);
+  return { version: Number(row.version), checksum: sha256Canonical(snapshot), snapshot };
 }
 
 function b64(v: Buffer) { return v.toString('base64'); }
 function rowToEncrypted(row: any): EncryptedSecretRecord { return { key_version: row.key_version, data_key_nonce: b64(row.data_key_nonce), data_key_ciphertext: b64(row.data_key_ciphertext), data_key_tag: b64(row.data_key_tag), secret_nonce: b64(row.secret_nonce), secret_ciphertext: b64(row.secret_ciphertext), secret_tag: b64(row.secret_tag) }; }
 
-export const FORBIDDEN_SNAPSHOT_PATTERN = /integration-secret|api_key|access_token|refresh_token|id_token/i;
+export const FORBIDDEN_SNAPSHOT_PATTERN = /integration-secret|dev-secret-change-me|api_key|access_token|refresh_token|id_token/i;

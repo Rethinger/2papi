@@ -1,7 +1,10 @@
 package proxy
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/1jehuang/2papi/internal/adapter"
 	adapteropenai "github.com/1jehuang/2papi/internal/adapter/openai"
@@ -15,6 +18,8 @@ import (
 	"strings"
 	"time"
 )
+
+const defaultResponseBodyLimit = 16 << 20
 
 type Proxy struct {
 	Client   *http.Client
@@ -53,6 +58,9 @@ func (p *Proxy) Chat(w http.ResponseWriter, r *http.Request, meta protocol.ChatM
 	}
 	attempts := 0
 	for _, acct := range plan {
+		if err := r.Context().Err(); err != nil {
+			return
+		}
 		attempts++
 		if !p.State.TryAcquire(acct.Name, acct.MaxConcurrency) {
 			continue
@@ -60,6 +68,9 @@ func (p *Proxy) Chat(w http.ResponseWriter, r *http.Request, meta protocol.ChatM
 		start := time.Now()
 		status, committed, cool := p.try(w, r, acct, model, body, attempts)
 		p.State.Release(acct.Name)
+		if r.Context().Err() != nil {
+			return
+		}
 		if status >= 200 && status < 500 && status != 429 {
 			p.State.Success(acct.Name, time.Since(start))
 			p.Router.CommitAffinity(aff, acct.Name)
@@ -74,6 +85,9 @@ func (p *Proxy) Chat(w http.ResponseWriter, r *http.Request, meta protocol.ChatM
 			p.State.Failure(acct.Name, p.Snap.Resilience.CircuitFailures)
 		}
 	}
+	if r.Context().Err() != nil {
+		return
+	}
 	Error(w, 502, "all upstream attempts failed")
 }
 func (p *Proxy) try(w http.ResponseWriter, r *http.Request, acct config.Account, model config.Model, body []byte, attempt int) (int, bool, time.Duration) {
@@ -83,10 +97,16 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, acct config.Account,
 	}
 	result, err := ad.Execute(r.Context(), adapter.Execution{Endpoint: adapter.EndpointChatCompletions, Request: r, Account: acct, Model: model, PublicModel: model.Alias, Body: body})
 	if err != nil {
+		if errorsIsContextDone(err) || r.Context().Err() != nil {
+			return 0, true, p.Snap.Cooldown
+		}
 		if strings.Contains(err.Error(), "invalid") {
 			Error(w, 400, "invalid json")
 			return 400, true, p.Snap.Cooldown
 		}
+		return 0, false, p.Snap.Cooldown
+	}
+	if result == nil || result.Body == nil {
 		return 0, false, p.Snap.Cooldown
 	}
 	defer result.Body.Close()
@@ -94,8 +114,17 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, acct config.Account,
 		io.Copy(io.Discard, result.Body)
 		return result.Status, false, ParseRetryAfter(result.Header.Get("Retry-After"), p.Snap.Cooldown)
 	}
+	out := result.Body
+	if !isStreamingRequest(body) {
+		b, err := rewriteResponseModel(result.Body, model.UpstreamModel, model.Alias, defaultResponseBodyLimit)
+		if err != nil {
+			return 0, false, p.Snap.Cooldown
+		}
+		out = io.NopCloser(bytes.NewReader(b))
+		result.Header.Set("Content-Length", strconv.Itoa(len(b)))
+	}
 	for k, v := range result.Header {
-		if strings.EqualFold(k, "Authorization") {
+		if shouldDropResponseHeader(k, result.Header) {
 			continue
 		}
 		for _, vv := range v {
@@ -109,12 +138,12 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, acct config.Account,
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
-	out := result.Body
-	if !isStreamingRequest(body) {
-		out = io.NopCloser(rewriteResponseModel(result.Body, model.UpstreamModel, model.Alias))
-	}
 	_, _ = io.Copy(w, out)
 	return result.Status, committed, p.Snap.Cooldown
+}
+
+func errorsIsContextDone(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func isStreamingRequest(body []byte) bool {
@@ -124,15 +153,52 @@ func isStreamingRequest(body []byte) bool {
 	return json.Unmarshal(body, &payload) == nil && payload.Stream
 }
 
-func rewriteResponseModel(body io.Reader, upstream, public string) io.Reader {
-	if upstream == "" || public == "" || upstream == public {
-		return body
+func rewriteResponseModel(body io.Reader, upstream, public string, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = defaultResponseBodyLimit
 	}
-	b, err := io.ReadAll(body)
+	b, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
-		return strings.NewReader("")
+		return nil, err
 	}
-	return strings.NewReader(strings.ReplaceAll(string(b), fmt.Sprintf(`"model":"%s"`, upstream), fmt.Sprintf(`"model":"%s"`, public)))
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("upstream response body exceeds limit")
+	}
+	if upstream == "" || public == "" || upstream == public {
+		return b, nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(b, &payload); err != nil {
+		return nil, err
+	}
+	if current, ok := payload["model"].(string); ok && current == upstream {
+		payload["model"] = public
+	}
+	return json.Marshal(payload)
+}
+
+func shouldDropResponseHeader(k string, h http.Header) bool {
+	lk := strings.ToLower(k)
+	if lk == "authorization" || strings.HasPrefix(lk, "x-gateway-") || isHopByHopHeader(lk) {
+		return true
+	}
+	for _, token := range h.Values("Connection") {
+		for _, part := range strings.Split(token, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), k) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isHopByHopHeader(lower string) bool {
+	switch lower {
+	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+		return true
+	default:
+		return false
+	}
 }
 func ParseRetryAfter(v string, def time.Duration) time.Duration {
 	if n, err := strconv.Atoi(v); err == nil && n > 0 {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/1jehuang/2papi/internal/adapter"
@@ -50,7 +51,11 @@ func (a *Adapter) Execute(ctx context.Context, ex adapter.Execution) (*adapter.R
 	default:
 		return nil, fmt.Errorf("unsupported endpoint %s", ex.Endpoint)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(ex.Account.BaseURL, "/")+path, bytes.NewReader(body))
+	upstreamURL, err := joinBaseURL(ex.Account.BaseURL, path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +75,11 @@ func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.Op
 	if op.Kind != adapter.OperationDiscoverModels {
 		return adapter.OperationResult{}, &adapter.CapabilityError{Kind: op.Kind}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(op.Account.BaseURL, "/")+ModelsPath, nil)
+	upstreamURL, err := joinBaseURL(op.Account.BaseURL, ModelsPath)
+	if err != nil {
+		return adapter.OperationResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		return adapter.OperationResult{}, err
 	}
@@ -93,14 +102,55 @@ func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.Op
 	return adapter.OperationResult{Data: json.RawMessage(data)}, nil
 }
 
+func joinBaseURL(base, endpoint string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("base_url must be absolute")
+	}
+	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", fmt.Errorf("base_url must not include query or fragment")
+	}
+	e, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	if e.IsAbs() || e.Host != "" || e.RawQuery != "" || e.ForceQuery || e.Fragment != "" {
+		return "", fmt.Errorf("endpoint path must not include scheme, host, query, or fragment")
+	}
+	return u.JoinPath(strings.TrimPrefix(e.Path, "/")).String(), nil
+}
+
 func copyHeaders(dst, src http.Header) {
 	for k, v := range src {
 		lk := strings.ToLower(k)
-		if lk == "authorization" || strings.HasPrefix(lk, "x-gateway-") {
+		if lk == "authorization" || strings.HasPrefix(lk, "x-gateway-") || isHopByHopHeader(lk) || namedByConnection(k, src) {
 			continue
 		}
 		for _, vv := range v {
 			dst.Add(k, vv)
 		}
+	}
+}
+
+func namedByConnection(k string, h http.Header) bool {
+	for _, token := range h.Values("Connection") {
+		for _, part := range strings.Split(token, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), k) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isHopByHopHeader(lower string) bool {
+	switch lower {
+	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+		return true
+	default:
+		return false
 	}
 }

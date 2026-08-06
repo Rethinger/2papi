@@ -19,6 +19,7 @@ const (
 	ChatCompletionsPath = "/v1/chat/completions"
 	ResponsesPath       = "/v1/responses"
 	ModelsPath          = "/v1/models"
+	OperationBodyLimit  = 2 << 20
 )
 
 type Adapter struct {
@@ -89,7 +90,7 @@ func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.Op
 		return adapter.OperationResult{}, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := readBounded(resp.Body, OperationBodyLimit)
 	if err != nil {
 		return adapter.OperationResult{}, err
 	}
@@ -100,6 +101,17 @@ func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.Op
 		return adapter.OperationResult{}, fmt.Errorf("discover_models returned invalid json")
 	}
 	return adapter.OperationResult{Data: json.RawMessage(data)}, nil
+}
+
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("provider operation response body exceeds limit")
+	}
+	return data, nil
 }
 
 func joinBaseURL(base, endpoint string) (string, error) {
@@ -148,7 +160,7 @@ func namedByConnection(k string, h http.Header) bool {
 
 func isHopByHopHeader(lower string) bool {
 	switch lower {
-	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+	case "connection", "proxy-connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
 		return true
 	default:
 		return false

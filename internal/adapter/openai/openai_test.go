@@ -87,6 +87,37 @@ func TestOperateDiscoverModelsAndCapabilityError(t *testing.T) {
 	}
 }
 
+func TestOperateDiscoverModelsRejectsOversizedBody(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(w, io.LimitReader(strings.NewReader(strings.Repeat(" ", adapteropenai.OperationBodyLimit+1)), adapteropenai.OperationBodyLimit+1))
+	}))
+	defer up.Close()
+	_, err := adapteropenai.New(up.Client()).Operate(context.Background(), adapter.Operation{Kind: adapter.OperationDiscoverModels, Account: account(up.URL)})
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("expected oversized body error, got %v", err)
+	}
+}
+
+func TestExecuteFiltersProxyConnectionRequestHeader(t *testing.T) {
+	seen := make(chan http.Header, 1)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Clone()
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	defer up.Close()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"public"}`))
+	req.Header.Set("Authorization", "Bearer client")
+	req.Header.Set("Proxy-Connection", "keep-alive")
+	res, err := adapteropenai.New(up.Client()).Execute(context.Background(), adapter.Execution{Endpoint: adapter.EndpointChatCompletions, Request: req, Account: account(up.URL), Model: config.Model{Alias: "public", UpstreamModel: "upstream"}, Body: []byte(`{"model":"public"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if got := (<-seen).Get("Proxy-Connection"); got != "" {
+		t.Fatalf("Proxy-Connection forwarded as %q", got)
+	}
+}
+
 func account(base string) config.Account {
 	return config.Account{Name: "a", Adapter: adapteropenai.Name, BaseURL: base, Credential: config.Credential{Kind: "api_key", APIKey: "upstream-key", Revision: 1}}
 }

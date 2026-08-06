@@ -167,12 +167,24 @@ func rewriteResponseModel(body io.Reader, upstream, public string, limit int64) 
 	if upstream == "" || public == "" || upstream == public {
 		return b, nil
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(b, &payload); err != nil {
+	var payload map[string]json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(&payload); err != nil {
 		return nil, err
 	}
-	if current, ok := payload["model"].(string); ok && current == upstream {
-		payload["model"] = public
+	if raw, ok := payload["model"]; ok {
+		var current string
+		if err := json.Unmarshal(raw, &current); err != nil {
+			return nil, err
+		}
+		if current == upstream {
+			replacement, err := json.Marshal(public)
+			if err != nil {
+				return nil, err
+			}
+			payload["model"] = replacement
+		}
 	}
 	return json.Marshal(payload)
 }
@@ -194,14 +206,17 @@ func shouldDropResponseHeader(k string, h http.Header) bool {
 
 func isHopByHopHeader(lower string) bool {
 	switch lower {
-	case "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
+	case "connection", "proxy-connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade":
 		return true
 	default:
 		return false
 	}
 }
 func ParseRetryAfter(v string, def time.Duration) time.Duration {
-	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+	if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+		if n < 0 || n > int64((1<<63-1)/time.Second) {
+			return def
+		}
 		return time.Duration(n) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil && time.Until(t) > 0 {

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type errAdapter struct{ err error }
@@ -127,6 +128,24 @@ func TestResponseModelAliasRewrite(t *testing.T) {
 	}
 }
 
+func TestResponseModelRewritePreservesLargeJSONNumberLexeme(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":"1","model":"up","usage":{"total_tokens":900719925474099312345},"score":1.2300}`)
+	}))
+	defer up.Close()
+	ts := oneUpstreamApp(t, up.URL)
+	defer ts.Close()
+	resp, body := post(ts, "sk", `{"model":"m","user":"response-number"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	for _, want := range []string{`"model":"m"`, `"total_tokens":900719925474099312345`, `"score":1.2300`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %s: %s", want, body)
+		}
+	}
+}
+
 func TestRetryAfterCooldownFallback(t *testing.T) {
 	up1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "7")
@@ -169,7 +188,7 @@ func TestSpoofedGatewayAndHopByHopResponseHeadersFiltered(t *testing.T) {
 	if resp.Header.Get("X-Gateway-Route") != "a" || resp.Header.Get("X-Gateway-Attempts") != "1" {
 		t.Fatalf("gateway headers route=%q attempts=%q", resp.Header.Get("X-Gateway-Route"), resp.Header.Get("X-Gateway-Attempts"))
 	}
-	for _, h := range []string{"X-Leak", "Connection", "Keep-Alive"} {
+	for _, h := range []string{"X-Leak", "Connection", "Keep-Alive", "Proxy-Connection"} {
 		if got := resp.Header.Get(h); got != "" {
 			t.Fatalf("%s leaked as %q", h, got)
 		}
@@ -188,6 +207,7 @@ func TestHopByHopRequestHeadersFiltered(t *testing.T) {
 	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(`{"model":"m","user":"request-headers"}`))
 	req.Header.Set("Authorization", "Bearer sk")
 	req.Header.Set("Connection", "X-Remove")
+	req.Header.Set("Proxy-Connection", "keep-alive")
 	req.Header.Set("X-Remove", "secret")
 	req.Header.Set("TE", "trailers")
 	req.Header.Set("X-Gateway-Route", "spoofed")
@@ -197,10 +217,20 @@ func TestHopByHopRequestHeadersFiltered(t *testing.T) {
 	}
 	resp.Body.Close()
 	h := <-seen
-	for _, name := range []string{"Connection", "X-Remove", "TE", "X-Gateway-Route"} {
+	for _, name := range []string{"Connection", "Proxy-Connection", "X-Remove", "TE", "X-Gateway-Route"} {
 		if got := h.Get(name); got != "" {
 			t.Fatalf("%s forwarded as %q", name, got)
 		}
+	}
+}
+
+func TestParseRetryAfterAcceptsZeroAndRejectsOverflow(t *testing.T) {
+	def := 5 * time.Second
+	if got := proxy.ParseRetryAfter("0", def); got != 0 {
+		t.Fatalf("zero retry-after = %s", got)
+	}
+	if got := proxy.ParseRetryAfter("9223372036854775807", def); got != def {
+		t.Fatalf("overflow retry-after = %s", got)
 	}
 }
 

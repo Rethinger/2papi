@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 type ChatMetadata struct {
 	Model    string         `json:"model"`
@@ -11,10 +14,16 @@ type ChatMetadata struct {
 
 func ParseChat(b []byte) (ChatMetadata, error) { var m ChatMetadata; return m, json.Unmarshal(b, &m) }
 func RewriteModel(b []byte, upstream string) ([]byte, error) {
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
+	var m map[string]json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(&m); err != nil {
 		return nil, err
 	}
-	m["model"] = upstream
+	model, err := json.Marshal(upstream)
+	if err != nil {
+		return nil, err
+	}
+	m["model"] = model
 	return json.Marshal(m)
 }

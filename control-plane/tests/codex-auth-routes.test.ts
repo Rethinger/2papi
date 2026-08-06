@@ -87,6 +87,25 @@ test('callback handles invalid/reused state and callback errors with safe redire
   assert.equal(error.headers.get('location'), 'http://localhost:13000/?codex_status=error');
 });
 
+test('provider error callback consumes OAuth state so replay fails', async () => {
+  const states = new Set(['good']);
+  const calls: string[] = [];
+  const testDeps = deps({
+    consumeOAuthSession: async state => {
+      calls.push(state);
+      if (!states.delete(state)) return null;
+      return { state, nonce: 'n', verifier: 'v', created_at: new Date().toISOString() } as any;
+    },
+  });
+
+  const first = await codexCallbackCore(req('http://localhost:1455/auth/callback?error=access_denied&state=good&account_id=evil', { headers: { host: 'localhost:1455' } }), testDeps);
+  assert.equal(first.headers.get('location'), 'http://localhost:13000/?codex_status=error');
+
+  const replay = await codexCallbackCore(req('http://localhost:1455/auth/callback?error=access_denied&state=good&account_id=evil', { headers: { host: 'localhost:1455' } }), testDeps);
+  assert.equal(replay.headers.get('location'), 'http://localhost:13000/?codex_status=invalid_state');
+  assert.deepEqual(calls, ['good', 'good']);
+});
+
 test('callback success redirects only codex_status and account ID to DASHBOARD_PUBLIC_URL', async () => {
   const res = await codexCallbackCore(req('http://localhost:1455/auth/callback?code=c&state=good&next=https://evil', { headers: { host: 'localhost:1455' } }), deps());
   assert.equal(res.status, 302);

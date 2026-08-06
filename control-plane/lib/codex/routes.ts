@@ -70,12 +70,16 @@ export async function codexReauthorizeCore(_request: Request, accountId: string,
 export async function codexCallbackCore(request: Request, deps: CodexRouteDeps) {
   if (!hostAllowed(request, deps)) return redirect(deps, 'invalid_host');
   const url = new URL(request.url);
-  if (url.searchParams.has('error')) return redirect(deps, 'error');
   const state = url.searchParams.get('state') || '';
-  const code = url.searchParams.get('code') || '';
-  if (!state || !code) return redirect(deps, 'invalid_request');
+  if (!state) {
+    if (url.searchParams.has('error')) return redirect(deps, 'error');
+    return redirect(deps, 'invalid_request');
+  }
   const session = await deps.consumeOAuthSession(state);
   if (!session) return redirect(deps, 'invalid_state');
+  if (url.searchParams.has('error')) return redirect(deps, 'error');
+  const code = url.searchParams.get('code') || '';
+  if (!code) return redirect(deps, 'invalid_request');
   try {
     const credential = await deps.exchangeAuthorizationCode(code, session);
     const account = await deps.createAccount({ accountId: (session as any).accountId, name: session.accountName, method: 'browser', credential });

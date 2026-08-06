@@ -3,15 +3,20 @@ package main
 import (
 	"context"
 	"flag"
-	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/controlplane"
-	"github.com/1jehuang/2papi/internal/resilience"
-	"github.com/1jehuang/2papi/internal/server"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/1jehuang/2papi/internal/config"
+	"github.com/1jehuang/2papi/internal/controlplane"
+	"github.com/1jehuang/2papi/internal/resilience"
+	"github.com/1jehuang/2papi/internal/server"
 )
+
+var supportedSnapshotSchemas = []int{1, 2}
+
+const supportedEnvelopeVersion = 2
 
 func main() {
 	cfg := flag.String("config", "config/example.yaml", "config path")
@@ -24,8 +29,8 @@ func main() {
 	gw := server.NewRuntimeServer(snap, st)
 	if cp := controlPlaneClientFromEnv(); cp != nil {
 		poll := pollIntervalFromEnv()
-		version, checksum := adoptOnce(context.Background(), cp, gw, 0, "")
-		go pollControlPlane(cp, gw, poll, version, checksum)
+		identity := adoptOnce(context.Background(), cp, gw, controlplane.SnapshotIdentity{})
+		go pollControlPlane(cp, gw, poll, identity)
 	}
 	rt := gw.Runtime()
 	srv := &http.Server{Addr: rt.Snap.Server.Addr, Handler: gw.Routes(), ReadTimeout: rt.Snap.ReadTimeout, WriteTimeout: rt.Snap.WriteTimeout}
@@ -57,30 +62,33 @@ func pollIntervalFromEnv() time.Duration {
 	return 15 * time.Second
 }
 
-func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration, version int, checksum string) {
+func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration, identity controlplane.SnapshotIdentity) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for range t.C {
-		version, checksum = adoptOnce(context.Background(), cp, gw, version, checksum)
+		identity = adoptOnce(context.Background(), cp, gw, identity)
 	}
 }
 
-func adoptOnce(ctx context.Context, cp *controlplane.Client, gw *server.Server, currentVersion int, currentChecksum string) (int, string) {
-	snap, version, checksum, err := cp.Fetch(ctx)
+func adoptOnce(ctx context.Context, cp *controlplane.Client, gw *server.Server, current controlplane.SnapshotIdentity) controlplane.SnapshotIdentity {
+	if err := cp.Heartbeat(ctx, supportedSnapshotSchemas, supportedEnvelopeVersion); err != nil {
+		log.Printf("control-plane heartbeat failed: %v", err)
+	}
+	snap, identity, err := cp.Fetch(ctx)
 	if err != nil {
 		log.Printf("control-plane snapshot adoption failed: %v", err)
-		if version > 0 && checksum != "" {
-			_ = cp.Ack(ctx, controlplane.Ack{Version: version, Checksum: checksum, Success: false, Error: err.Error()})
+		if identity.ConfigVersion > 0 || identity.ConfigChecksum != "" || identity.RuntimeChecksum != "" {
+			_ = cp.Ack(ctx, controlplane.AckForIdentity(identity, false, err.Error()))
 		}
-		return currentVersion, currentChecksum
+		return current
 	}
-	if version == currentVersion && checksum == currentChecksum {
-		return currentVersion, currentChecksum
+	if identity.Equal(current) {
+		return current
 	}
 	gw.Adopt(snap)
-	if err := cp.Ack(ctx, controlplane.Ack{Version: version, Checksum: checksum, Success: true}); err != nil {
+	if err := cp.Ack(ctx, controlplane.AckForIdentity(identity, true, "")); err != nil {
 		log.Printf("control-plane snapshot ack failed: %v", err)
 	}
-	log.Printf("adopted control-plane snapshot version=%d checksum=%s", version, checksum)
-	return version, checksum
+	log.Printf("adopted control-plane snapshot config_version=%d schema_version=%d envelope_version=%d config_checksum=%s runtime_checksum=%s", identity.ConfigVersion, identity.SchemaVersion, identity.EnvelopeVersion, identity.ConfigChecksum, identity.RuntimeChecksum)
+	return identity
 }

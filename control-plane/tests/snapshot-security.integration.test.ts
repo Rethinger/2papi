@@ -37,6 +37,7 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     const published = await c.query("INSERT INTO config_versions (status,checksum,snapshot,published_at) VALUES ('published','legacy',$1,now()) RETURNING version", [JSON.stringify(legacy)]);
     const rolled = await c.query("INSERT INTO config_versions (status,checksum,snapshot,source_version) VALUES ('rolled_back','legacy2',$1,$2) RETURNING version", [JSON.stringify(legacy), published.rows[0].version]);
     await c.query("INSERT INTO config_versions (status,checksum,snapshot,errors,source_version) VALUES ('draft','bad',$1,$2,$3)", [JSON.stringify({ accounts: [{ name: 'missing', api_key: 'integration-secret' }] }), JSON.stringify([{ code: 'prior' }]), rolled.rows[0].version]);
+    await c.query("INSERT INTO config_versions (status,checksum,snapshot,errors,source_version) VALUES ('draft','unsafe-nested',$1,$2,$3)", [JSON.stringify({ ...legacy, metadata: { nested: { access_token: 'must-not-survive' } } }), JSON.stringify([{ code: 'prior-unsafe' }]), rolled.rows[0].version]);
     await c.query(await sql('002_snapshot_security.sql'));
     await c.query(await sql('003_codex_provider.sql'));
     await sanitizeHistoricalConfigVersions(c);
@@ -48,6 +49,8 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     assert.equal(Number(rows.rows[1].source_version), Number(published.rows[0].version));
     assert.equal(rows.rows[2].status, 'invalid');
     assert.deepEqual(rows.rows[2].errors.at(-1), { code: 'snapshot_reconstruction_failed', migration: '002_snapshot_security' });
+    assert.equal(rows.rows[3].status, 'invalid');
+    assert.deepEqual(rows.rows[3].errors, [{ code: 'prior-unsafe' }, { code: 'snapshot_reconstruction_failed', migration: '002_snapshot_security' }]);
     for (const row of rows.rows.slice(0, 2)) {
       assert.equal(row.checksum, row.config_checksum);
       const body = JSON.stringify(row.snapshot);
@@ -70,6 +73,8 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     }
     const idx = await c.query("SELECT indexdef FROM pg_indexes WHERE indexname='provider_operations_one_active_reset'");
     assert.match(idx.rows[0].indexdef, /WHERE .*quota_reset.*pending.*unknown/i);
+    const marker = (await c.query("SELECT result FROM snapshot_migration_state WHERE migration='002_snapshot_security'" )).rows[0].result;
+    assert.deepEqual(marker, { reconstructed: 2, invalid: 2 });
   });
 });
 

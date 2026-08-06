@@ -32,12 +32,33 @@ async function reconstruct(client: PoolClient, legacy: any): Promise<{ ok: true;
     if (!legacy || !Array.isArray(legacy.accounts) || !Array.isArray(legacy.models) || !Array.isArray(legacy.virtual_keys)) return { ok: false };
     const accounts = [];
     for (const a of legacy.accounts) {
-      if (!a?.name || !a?.base_url) return { ok: false };
-      const r = await client.query(`SELECT a.*, p.adapter FROM accounts a JOIN providers p ON p.id=a.provider_id WHERE a.name=$1`, [a.name]);
-      if (!r.rows[0]) return { ok: false };
-      const row = r.rows[0];
+      if (!a?.name) return { ok: false };
+      const r = await client.query(`SELECT a.*, p.adapter, p.base_url provider_base_url FROM accounts a JOIN providers p ON p.id=a.provider_id WHERE a.name=$1`, [a.name]);
+      const matches = r.rows.filter((row: any) => legacyAccountMatches(a, row));
+      if (matches.length !== 1) return { ok: false };
+      const row = matches[0];
       accounts.push({ id: row.id, name: row.name, adapter: row.adapter ?? 'openai-compatible', base_url: row.base_url, credential_revision: Number(row.credential_revision ?? 1), enabled: row.enabled, priority: row.priority, weight: row.weight, max_concurrency: row.max_concurrency, cost: Number(row.cost) });
     }
     return { ok: true, snapshot: { version: 2, metadata: legacy.metadata ?? {}, server: legacy.server, virtual_keys: legacy.virtual_keys, models: legacy.models, accounts, routing: legacy.routing, resilience: legacy.resilience } };
   } catch { return { ok: false }; }
+}
+
+function legacyAccountMatches(legacy: any, row: any) {
+  if (legacy.adapter && legacy.adapter !== row.adapter) return false;
+  const legacyUrl = normalizeUrl(legacy.base_url);
+  if (!legacyUrl) return false;
+  return legacyUrl === normalizeUrl(row.base_url) || legacyUrl === normalizeUrl(row.provider_base_url);
+}
+
+function normalizeUrl(value: unknown) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  try {
+    const u = new URL(value);
+    u.hash = '';
+    u.search = '';
+    u.pathname = u.pathname.replace(/\/+$/, '');
+    return u.toString().replace(/\/+$/, '').toLowerCase();
+  } catch {
+    return value.replace(/\/+$/, '').toLowerCase();
+  }
 }

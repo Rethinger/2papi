@@ -73,4 +73,40 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
   });
 });
 
+test('historical reconstruction rejects changed base url instead of matching by name only', options, async () => {
+  await tx(async c => {
+    await c.query('TRUNCATE snapshot_migration_state,config_versions,model_account_mappings,model_aliases,accounts,providers,secret_records,virtual_keys CASCADE');
+    await seedBase(c);
+    const changedUrl = { version: 1, metadata: {}, server: { addr: ':8080' }, virtual_keys: [{ name: 'sec-key', key_hash: 'c'.repeat(64), models: ['sec-model'], rpm: 60 }], models: [{ alias: 'sec-model', upstream_model: 'gpt-4o-mini', accounts: ['sec-primary'] }], accounts: [{ name: 'sec-primary', base_url: 'http://old-upstream:9001', api_key: 'integration-secret', enabled: true, priority: 1, weight: 1, max_concurrency: 100, cost: 0 }], routing: { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2 }, resilience: {} };
+    const missingUrl = { ...changedUrl, accounts: [{ ...changedUrl.accounts[0], base_url: undefined }] };
+    await c.query("INSERT INTO config_versions (status,checksum,snapshot) VALUES ('draft','changed-url',$1),('draft','missing-url',$2)", [JSON.stringify(changedUrl), JSON.stringify(missingUrl)]);
+    await c.query(await sql('002_snapshot_security.sql'));
+    await sanitizeHistoricalConfigVersions(c);
+    const rows = (await c.query('SELECT status,errors FROM config_versions ORDER BY version')).rows;
+    assert.equal(rows.length, 2);
+    for (const row of rows) {
+      assert.equal(row.status, 'invalid');
+      assert.deepEqual(row.errors.at(-1), { code: 'snapshot_reconstruction_failed', migration: '002_snapshot_security' });
+    }
+  });
+});
+
+test('historical reconstruction rejects ambiguous legacy name matches', options, async () => {
+  await tx(async c => {
+    await c.query('TRUNCATE snapshot_migration_state,config_versions,model_account_mappings,model_aliases,accounts,providers,secret_records,virtual_keys CASCADE');
+    await c.query('ALTER TABLE accounts DROP CONSTRAINT IF EXISTS accounts_name_key');
+    await seedBase(c);
+    const provider = await c.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('sec2','Security 2','openai-compatible','http://upstream:9001') RETURNING id");
+    const secret = await insertSecret(c, 'account_credential', { api_key: 'other-secret' });
+    await c.query("INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url) VALUES ($1,$2,'sec-primary','Duplicate','http://upstream:9001')", [provider.rows[0].id, secret]);
+    const legacy = { version: 1, metadata: {}, server: { addr: ':8080' }, virtual_keys: [{ name: 'sec-key', key_hash: 'c'.repeat(64), models: ['sec-model'], rpm: 60 }], models: [{ alias: 'sec-model', upstream_model: 'gpt-4o-mini', accounts: ['sec-primary'] }], accounts: [{ name: 'sec-primary', base_url: 'http://upstream:9001', api_key: 'integration-secret', enabled: true, priority: 1, weight: 1, max_concurrency: 100, cost: 0 }], routing: { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2 }, resilience: {} };
+    await c.query("INSERT INTO config_versions (status,checksum,snapshot) VALUES ('draft','legacy',$1)", [JSON.stringify(legacy)]);
+    await c.query(await sql('002_snapshot_security.sql'));
+    await sanitizeHistoricalConfigVersions(c);
+    const row = (await c.query('SELECT status,errors FROM config_versions')).rows[0];
+    assert.equal(row.status, 'invalid');
+    assert.deepEqual(row.errors.at(-1), { code: 'snapshot_reconstruction_failed', migration: '002_snapshot_security' });
+  });
+});
+
 test.after(async () => { await pool?.end(); });

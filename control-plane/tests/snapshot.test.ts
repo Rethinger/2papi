@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { compileSnapshot } from '../lib/control.ts';
 import { encryptSecretJson } from '../lib/crypto.ts';
 import { sha256Canonical } from '../lib/canonical-json.ts';
-import { materializeRuntimeSnapshot, materializeLegacyRuntimeSnapshot, runtimeSnapshotFromPublishedRow } from '../lib/snapshots.ts';
+import { materializeRuntimeSnapshot, materializeLegacyRuntimeSnapshot, runtimeSnapshotFromPublishedRow, legacyRuntimeSnapshotFromPublishedRow } from '../lib/snapshots.ts';
 
 const enc = encryptSecretJson({ api_key: 'upstream-primary' });
 const buf = (v: string) => Buffer.from(v, 'base64');
@@ -81,9 +81,20 @@ test('internal snapshot helper loads only published declarative rows and returns
   const { client, queries } = mockClient({ published: { version: 12, checksum: 'declarative', snapshot: declarative } });
   const envelope = await runtimeSnapshotFromPublishedRow(client, 12);
   assert.equal(envelope?.version, 12);
-  assert.equal(envelope?.snapshot.version, 1);
-  assert.equal(envelope?.snapshot.accounts[0].api_key, 'upstream-primary');
+  assert.equal(envelope?.snapshot.version, 2);
+  assert.deepEqual(envelope?.snapshot.accounts[0].credential, { api_key: 'upstream-primary' });
+  assert.equal(envelope?.snapshot.secret, 'dev-secret-change-me');
   assert.equal(envelope?.checksum, sha256Canonical(envelope?.snapshot));
   assert.ok(queries.some(q => q.sql.includes('status=$2') && (q.params as unknown[])[1] === 'published'));
   assert.equal(queries.some(q => /^\s*(INSERT|UPDATE)/i.test(q.sql)), false);
+});
+
+test('legacy internal snapshot helper remains explicit transitional v1', async () => {
+  const { client } = mockClient({ published: { version: 13, checksum: 'declarative', snapshot: declarative } });
+  const envelope = await legacyRuntimeSnapshotFromPublishedRow(client, 13);
+  assert.equal(envelope?.version, 13);
+  assert.equal(envelope?.snapshot.version, 1);
+  assert.equal(envelope?.snapshot.accounts[0].api_key, 'upstream-primary');
+  assert.equal('credential' in envelope?.snapshot.accounts[0], false);
+  assert.equal(envelope?.checksum, sha256Canonical(envelope?.snapshot));
 });

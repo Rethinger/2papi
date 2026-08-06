@@ -9,8 +9,13 @@ test('canonical snapshot fixture is byte-stable', async () => {
   const rootHashFixture = fileURLToPath(new URL('../../test/fixtures/runtime-snapshot-v2.sha256', import.meta.url));
   const localFixture = fileURLToPath(new URL('./fixtures/runtime-snapshot-v2.json', import.meta.url));
   const localHashFixture = fileURLToPath(new URL('./fixtures/runtime-snapshot-v2.sha256', import.meta.url));
-  const fixture = await exists(localFixture) ? localFixture : rootFixture;
-  const hashFixture = await exists(localHashFixture) ? localHashFixture : rootHashFixture;
+  const rootExists = await exists(rootFixture);
+  const localExists = await exists(localFixture);
+  assert.ok(rootExists || localExists, 'runtime snapshot v2 fixture missing');
+  if (rootExists && localExists) assert.equal(await fs.readFile(localFixture, 'utf8'), await fs.readFile(rootFixture, 'utf8'));
+  if (rootExists && await exists(localHashFixture)) assert.equal(await fs.readFile(localHashFixture, 'utf8'), await fs.readFile(rootHashFixture, 'utf8'));
+  const fixture = rootExists ? rootFixture : localFixture;
+  const hashFixture = rootExists ? rootHashFixture : localHashFixture;
   const raw = await fs.readFile(fixture, 'utf8');
   const expected = (await fs.readFile(hashFixture, 'utf8')).trim();
   const parsed = JSON.parse(raw);

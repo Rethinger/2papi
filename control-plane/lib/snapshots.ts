@@ -54,14 +54,27 @@ export async function materializeLegacyRuntimeSnapshot(client: PoolClient, decla
   return { version: 1, metadata: declarative.metadata ?? {}, secret: env.GATEWAY_SHARED_SECRET, server: declarative.server, virtual_keys: declarative.virtual_keys, models: declarative.models, accounts, routing: declarative.routing, resilience: declarative.resilience };
 }
 
-export async function runtimeSnapshotFromPublishedRow(client: PoolClient, version?: string | number) {
+async function publishedDeclarativeSnapshot(client: PoolClient, version?: string | number) {
   const q = version
     ? await client.query('SELECT version,snapshot FROM config_versions WHERE version=$1 AND status=$2', [version, 'published'])
     : await client.query("SELECT version,snapshot FROM config_versions WHERE status='published' ORDER BY version DESC LIMIT 1");
   const row = q.rows[0];
   if (!row) return null;
-  const snapshot = await materializeLegacyRuntimeSnapshot(client, row.snapshot);
-  return { version: Number(row.version), checksum: sha256Canonical(snapshot), snapshot };
+  return { version: Number(row.version), declarative: row.snapshot };
+}
+
+export async function runtimeSnapshotFromPublishedRow(client: PoolClient, version?: string | number) {
+  const row = await publishedDeclarativeSnapshot(client, version);
+  if (!row) return null;
+  const snapshot = await materializeRuntimeSnapshot(client, row.declarative);
+  return { version: row.version, checksum: sha256Canonical(snapshot), snapshot };
+}
+
+export async function legacyRuntimeSnapshotFromPublishedRow(client: PoolClient, version?: string | number) {
+  const row = await publishedDeclarativeSnapshot(client, version);
+  if (!row) return null;
+  const snapshot = await materializeLegacyRuntimeSnapshot(client, row.declarative);
+  return { version: row.version, checksum: sha256Canonical(snapshot), snapshot };
 }
 
 function b64(v: Buffer) { return v.toString('base64'); }

@@ -6,6 +6,21 @@ import { decryptSecretJson, type EncryptedSecretRecord } from './crypto';
 export type CompiledDeclarativeSnapshot = { snapshot: any; checksum: string; schemaVersion: number };
 export type RuntimeSnapshot = any;
 
+export function credentialDigestFromDeclarative(snapshot: any) {
+  const identity = (snapshot.accounts ?? [])
+    .map((account: any) => ({ id: account.id ?? account.name, credential_revision: Number(account.credential_revision ?? 1) }))
+    .sort((a: any, b: any) => String(a.id).localeCompare(String(b.id)));
+  return sha256Canonical(identity);
+}
+
+export async function credentialDigestForDeclarative(client: PoolClient, declarative: any) {
+  const accountIds = (declarative.accounts ?? []).map((account: any) => account.id);
+  if (accountIds.length === 0) return credentialDigestFromDeclarative(declarative);
+  const rows = await client.query('SELECT id,credential_revision FROM accounts WHERE id = ANY($1::uuid[])', [accountIds]);
+  if (rows.rows.length !== accountIds.length) throw new Error('snapshot account credential identity is incomplete');
+  return credentialDigestFromDeclarative({ accounts: rows.rows });
+}
+
 export async function compileDeclarativeSnapshot(client: PoolClient): Promise<CompiledDeclarativeSnapshot> {
   const accountsR = await client.query(`SELECT a.*, p.adapter FROM accounts a JOIN providers p ON p.id=a.provider_id WHERE a.enabled ORDER BY a.priority, a.name`);
   const modelsR = await client.query('SELECT * FROM model_aliases WHERE enabled ORDER BY alias');
@@ -28,17 +43,18 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
 }
 
 async function credentialByAccountId(client: PoolClient, accountIds: string[]) {
-  const rows = await client.query(`SELECT a.id account_id, sr.* FROM accounts a JOIN secret_records sr ON sr.id=a.secret_record_id WHERE a.id = ANY($1::uuid[])`, [accountIds]);
-  return new Map(rows.rows.map((r: any) => [r.account_id, decryptSecretJson<any>(rowToEncrypted(r))]));
+  const rows = await client.query(`SELECT a.id account_id, a.credential_revision, sr.* FROM accounts a JOIN secret_records sr ON sr.id=a.secret_record_id WHERE a.id = ANY($1::uuid[])`, [accountIds]);
+  return new Map(rows.rows.map((row: any) => [row.account_id, { credential: decryptSecretJson<any>(rowToEncrypted(row)), revision: Number(row.credential_revision ?? 1) }]));
 }
 
 export async function materializeRuntimeSnapshot(client: PoolClient, declarative: any): Promise<RuntimeSnapshot> {
   const accountIds = (declarative.accounts ?? []).map((a: any) => a.id);
   const secrets = await credentialByAccountId(client, accountIds);
   const accounts = (declarative.accounts ?? []).map((a: any) => {
-    const credential = secrets.get(a.id);
-    if (!credential) throw new Error(`account ${a.id} missing credential`);
-    return { ...a, credential };
+    const current = secrets.get(a.id);
+    if (!current) throw new Error(`account ${a.id} missing credential`);
+    const kind = a.adapter === 'openai-codex' ? 'oauth' : 'api_key';
+    return { ...a, credential_revision: current.revision, credential: { ...current.credential, kind, revision: current.revision } };
   });
   return { ...declarative, version: 2, secret: env.GATEWAY_SHARED_SECRET, accounts };
 }
@@ -47,9 +63,9 @@ export async function materializeLegacyRuntimeSnapshot(client: PoolClient, decla
   const accountIds = (declarative.accounts ?? []).map((a: any) => a.id);
   const secrets = await credentialByAccountId(client, accountIds);
   const accounts = (declarative.accounts ?? []).map((a: any) => {
-    const credential = secrets.get(a.id);
-    if (!credential?.api_key) throw new Error(`account ${a.id} missing credential`);
-    return { name: a.name, base_url: a.base_url, api_key: credential.api_key, enabled: a.enabled, priority: a.priority, weight: a.weight, max_concurrency: a.max_concurrency, cost: a.cost };
+    const current = secrets.get(a.id);
+    if (!current?.credential?.api_key) throw new Error(`account ${a.id} missing credential`);
+    return { name: a.name, base_url: a.base_url, api_key: current.credential.api_key, enabled: a.enabled, priority: a.priority, weight: a.weight, max_concurrency: a.max_concurrency, cost: a.cost };
   });
   return { version: 1, metadata: declarative.metadata ?? {}, secret: env.GATEWAY_SHARED_SECRET, server: declarative.server, virtual_keys: declarative.virtual_keys, models: declarative.models, accounts, routing: declarative.routing, resilience: declarative.resilience };
 }

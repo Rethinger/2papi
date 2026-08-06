@@ -20,7 +20,7 @@ const declarative = {
 };
 
 function secretRows() {
-  return [{ id: accountId, key_version: enc.key_version, data_key_nonce: buf(enc.data_key_nonce), data_key_ciphertext: buf(enc.data_key_ciphertext), data_key_tag: buf(enc.data_key_tag), secret_nonce: buf(enc.secret_nonce), secret_ciphertext: buf(enc.secret_ciphertext), secret_tag: buf(enc.secret_tag) }];
+  return [{ id: accountId, credential_revision: 1, key_version: enc.key_version, data_key_nonce: buf(enc.data_key_nonce), data_key_ciphertext: buf(enc.data_key_ciphertext), data_key_tag: buf(enc.data_key_tag), secret_nonce: buf(enc.secret_nonce), secret_ciphertext: buf(enc.secret_ciphertext), secret_tag: buf(enc.secret_tag) }];
 }
 
 function mockClient(extra?: { noSecret?: boolean; published?: any }) {
@@ -28,7 +28,7 @@ function mockClient(extra?: { noSecret?: boolean; published?: any }) {
   const query = async (sql: string, params?: unknown[]) => {
     queries.push({ sql, params });
     if (sql.startsWith('SELECT a.*, p.adapter FROM accounts')) return { rows: declarative.accounts };
-    if (sql.startsWith('SELECT a.id account_id, sr.* FROM accounts')) return { rows: extra?.noSecret ? [] : secretRows().map(row => ({ ...row, account_id: accountId })) };
+    if (sql.startsWith('SELECT a.id account_id, a.credential_revision, sr.* FROM accounts')) return { rows: extra?.noSecret ? [] : secretRows().map(row => ({ ...row, account_id: accountId })) };
     if (sql.startsWith('SELECT * FROM model_aliases')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini' }] };
     if (sql.startsWith('SELECT mam')) return { rows: [{ alias: 'gpt-dev', account_name: 'primary' }] };
     if (sql.startsWith('SELECT * FROM routing_settings')) return { rows: [{ strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: declarative.resilience }] };
@@ -64,6 +64,8 @@ test('v2 runtime materialization keeps structured credentials in memory only', a
   assert.equal(runtime.version, 2);
   assert.equal(runtime.secret, 'dev-secret-change-me');
   assert.equal(runtime.accounts[0].credential.api_key, 'upstream-primary');
+  assert.equal(runtime.accounts[0].credential.kind, 'api_key');
+  assert.equal(runtime.accounts[0].credential.revision, 1);
   assert.equal(runtime.accounts[0].id, accountId);
   assert.equal(runtime.accounts[0].credential_revision, 1);
 });
@@ -82,7 +84,7 @@ test('internal snapshot helper loads only published declarative rows and returns
   const envelope = await runtimeSnapshotFromPublishedRow(client, 12);
   assert.equal(envelope?.version, 12);
   assert.equal(envelope?.snapshot.version, 2);
-  assert.deepEqual(envelope?.snapshot.accounts[0].credential, { api_key: 'upstream-primary' });
+  assert.deepEqual(envelope?.snapshot.accounts[0].credential, { api_key: 'upstream-primary', kind: 'api_key', revision: 1 });
   assert.equal(envelope?.snapshot.secret, 'dev-secret-change-me');
   assert.equal(envelope?.checksum, sha256Canonical(envelope?.snapshot));
   assert.ok(queries.some(q => q.sql.includes('status=$2') && (q.params as unknown[])[1] === 'published'));

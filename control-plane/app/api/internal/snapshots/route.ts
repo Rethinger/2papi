@@ -1,5 +1,5 @@
 import { pool } from '@/lib/db';
-import { ok, problem, requireInternal, ApiError } from '@/lib/api';
+import { ok, problem, readJsonBounded, requireInternal, ApiError } from '@/lib/api';
 import { env } from '@/lib/env';
 import { runtimeSnapshotFromPublishedRow } from '@/lib/snapshots';
 
@@ -22,7 +22,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     requireInternal(req, env.INTERNAL_SERVICE_TOKEN);
-    const body = await req.json() as { gateway_id?: string; version?: number; checksum?: string; status?: 'adopted'|'rejected'; error?: string };
+    const body = await readJsonBounded<{ gateway_id?: string; version?: number; checksum?: string; status?: 'adopted'|'rejected'; error?: string }>(req, 64 * 1024);
     if (!body.gateway_id || !body.version || !body.checksum || !body.status) throw new ApiError(400, 'validation_failed', 'gateway_id, version, checksum and status are required');
     const q = await pool.query('INSERT INTO gateway_config_acks (gateway_id,version,checksum,status,error) VALUES ($1,$2,$3,$4,$5) RETURNING *', [body.gateway_id, body.version, body.checksum, body.status, body.error ?? null]);
     return ok(q.rows[0], 201);

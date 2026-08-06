@@ -30,3 +30,10 @@ test('readJsonBounded rejects actual bytes before JSON.parse', async () => {
 test('readJsonBounded parses valid bounded JSON', async () => {
   assert.deepEqual(await readJsonBounded<{ ok: boolean }>(req(`Bearer ${token}`, '{"ok":true}'), 32), { ok: true });
 });
+
+test('readJsonBounded maps malformed JSON to a 400 API error', async () => {
+  await assert.rejects(
+    readJsonBounded(req(`Bearer ${token}`, '{"broken":'), 1024),
+    (error: any) => error instanceof ApiError && error.status === 400 && error.code === 'invalid_json',
+  );
+});

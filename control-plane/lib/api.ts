@@ -32,5 +32,9 @@ export async function readJsonBounded<T>(req: Request, maxBytes: number): Promis
   const bytes = Buffer.from(await req.arrayBuffer());
   if (bytes.length > maxBytes) throw new ApiError(413, 'payload_too_large', 'Request body exceeds maximum size');
   if (bytes.length === 0) return {} as T;
-  return JSON.parse(bytes.toString('utf8')) as T;
+  try {
+    return JSON.parse(bytes.toString('utf8')) as T;
+  } catch {
+    throw new ApiError(400, 'invalid_json', 'Request body is not valid JSON');
+  }
 }

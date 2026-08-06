@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
 import { decryptSecretJson, encryptSecretJson, type EncryptedSecretRecord } from './crypto';
-import { compileDeclarativeSnapshot, materializeLegacyRuntimeSnapshot } from './snapshots';
+import { compileDeclarativeSnapshot, credentialDigestForDeclarative, materializeLegacyRuntimeSnapshot, materializeRuntimeSnapshot } from './snapshots';
 import { sha256Canonical } from './canonical-json';
 import { env } from './env';
 import { ApiError } from './api';
@@ -54,10 +54,51 @@ export async function upsertGatewayHeartbeat(client: PoolClient, input: { gatewa
   await client.query(`INSERT INTO gateway_instances (gateway_id,supported_schemas,envelope_version,last_seen_at) VALUES ($1,$2,$3,now()) ON CONFLICT (gateway_id) DO UPDATE SET supported_schemas=EXCLUDED.supported_schemas,envelope_version=EXCLUDED.envelope_version,last_seen_at=now()`, [input.gateway_id, input.supported_schemas, input.envelope_version]);
 }
 
+export async function persistGatewayAck(client: PoolClient, input: {
+  gateway_id: string;
+  version: number;
+  checksum: string;
+  status: 'adopted' | 'rejected';
+  error?: string;
+  schema_version?: number;
+  config_checksum?: string;
+  credential_digest?: string;
+  runtime_checksum?: string;
+  envelope_version?: number;
+}) {
+  if ((input.envelope_version ?? 1) >= 2) {
+    const gateway = (await client.query('SELECT supported_schemas,envelope_version FROM gateway_instances WHERE gateway_id=$1 FOR UPDATE', [input.gateway_id])).rows[0];
+    if (!gateway || Number(gateway.envelope_version) < 2 || !(gateway.supported_schemas ?? []).includes(input.schema_version ?? 0)) {
+      throw new ApiError(409, 'gateway_capability_mismatch', 'Acknowledgement exceeds the persisted gateway capability');
+    }
+    const version = (await client.query('SELECT schema_version,config_checksum,checksum,snapshot FROM config_versions WHERE version=$1', [input.version])).rows[0];
+    if (!version) throw new ApiError(404, 'config_version_not_found', 'Acknowledged configuration version does not exist');
+    const expectedCredentialDigest = await credentialDigestForDeclarative(client, version.snapshot);
+    const runtime = await materializeRuntimeSnapshot(client, version.snapshot);
+    const expectedRuntimeChecksum = sha256Canonical(runtime);
+    if (
+      Number(version.schema_version) !== input.schema_version ||
+      (version.config_checksum ?? version.checksum) !== input.config_checksum ||
+      expectedCredentialDigest !== input.credential_digest ||
+      expectedRuntimeChecksum !== input.runtime_checksum
+    ) {
+      throw new ApiError(409, 'ack_identity_mismatch', 'Acknowledgement identity does not match the materialized configuration');
+    }
+  }
+  const q = await client.query(
+    `INSERT INTO gateway_config_acks
+     (gateway_id,version,checksum,status,error,schema_version,config_checksum,credential_digest,runtime_checksum,envelope_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [input.gateway_id, input.version, input.checksum, input.status, input.error ?? null, input.schema_version ?? 1, input.config_checksum ?? input.checksum, input.credential_digest ?? null, input.runtime_checksum ?? input.checksum, input.envelope_version ?? 1],
+  );
+  return q.rows[0];
+}
+
 export async function assertSchemaV2Publishable(client: PoolClient) {
-  const active = await client.query(`SELECT gateway_id FROM gateway_instances WHERE last_seen_at >= now() - ($1::int * interval '1 second') ORDER BY gateway_id FOR UPDATE`, [gatewayCapabilityTtlSeconds()]);
+  const active = await client.query(`SELECT gateway_id,supported_schemas,envelope_version FROM gateway_instances WHERE last_seen_at >= now() - ($1::int * interval '1 second') ORDER BY gateway_id FOR UPDATE`, [gatewayCapabilityTtlSeconds()]);
   if (active.rows.length < env.MIN_ACTIVE_GATEWAYS) throw new ApiError(409, 'insufficient_active_gateways', `At least ${env.MIN_ACTIVE_GATEWAYS} active gateway(s) required`);
   for (const g of active.rows) {
+    if (Number(g.envelope_version) < 2 || !(g.supported_schemas ?? []).includes(2)) throw new ApiError(426, 'upgrade_required', `Gateway ${g.gateway_id} does not advertise schema v2 envelope support`);
     const ack = await client.query(`SELECT envelope_version,schema_version,status FROM gateway_config_acks WHERE gateway_id=$1 ORDER BY acknowledged_at DESC,id DESC LIMIT 1`, [g.gateway_id]);
     const row = ack.rows[0];
     if (!row || row.status !== 'adopted' || Number(row.envelope_version) < 2 || Number(row.schema_version) < 2) throw new ApiError(426, 'upgrade_required', `Gateway ${g.gateway_id} has not adopted schema v2 envelope`);

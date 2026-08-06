@@ -36,6 +36,15 @@ async function withRollback<T>(fn: (client: any) => Promise<T>): Promise<T> {
   }
 }
 
+async function seedPublishReadyGateway(client: any) {
+  const baseline = await client.query(
+    "INSERT INTO config_versions (status,checksum,config_checksum,schema_version,snapshot) VALUES ('rolled_back','gateway-ready','gateway-ready',2,$1) RETURNING version",
+    [JSON.stringify({ version: 2, metadata: {}, server: {}, virtual_keys: [], models: [], accounts: [], routing: {}, resilience: {} })],
+  );
+  await client.query("INSERT INTO gateway_instances (gateway_id,supported_schemas,envelope_version,last_seen_at) VALUES ('itest-ready',ARRAY[1,2],2,now()) ON CONFLICT (gateway_id) DO UPDATE SET supported_schemas=EXCLUDED.supported_schemas,envelope_version=EXCLUDED.envelope_version,last_seen_at=now()");
+  await client.query("INSERT INTO gateway_config_acks (gateway_id,version,checksum,status,schema_version,envelope_version,config_checksum) VALUES ('itest-ready',$1,'gateway-ready','adopted',2,2,'gateway-ready')", [baseline.rows[0].version]);
+}
+
 async function seedMinimal(client: any) {
   const provider = await client.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('itest','Integration','openai-compatible','http://upstream:9001') RETURNING id");
   const secret = await insertSecret(client, 'account_credential', { api_key: 'integration-secret' });
@@ -51,7 +60,7 @@ async function seedMinimal(client: any) {
 }
 
 test('migrations create every control-plane table', options, async () => {
-  const names = ['providers', 'secret_records', 'accounts', 'model_aliases', 'model_account_mappings', 'routing_settings', 'virtual_keys', 'system_settings', 'audit_events', 'config_versions', 'gateway_config_acks'];
+  const names = ['providers', 'secret_records', 'accounts', 'model_aliases', 'model_account_mappings', 'routing_settings', 'virtual_keys', 'system_settings', 'audit_events', 'config_versions', 'gateway_config_acks', 'gateway_instances', 'snapshot_migration_state'];
   const found = await pool!.query('SELECT table_name FROM information_schema.tables WHERE table_schema=$1', ['public']);
   const present = new Set(found.rows.map(row => row.table_name));
   for (const name of names) assert.ok(present.has(name), `missing table ${name}`);
@@ -114,6 +123,7 @@ test('credentials are unreadable in storage but decrypt during compilation', opt
 
 test('draft, publish, and rollback move the published pointer', options, async () => {
   await withRollback(async client => {
+    await seedPublishReadyGateway(client);
     await seedMinimal(client);
     const draft = await storeDraft(client);
     assert.equal(draft.status, 'draft');
@@ -141,6 +151,7 @@ test('draft, publish, and rollback move the published pointer', options, async (
 
 test('gateway acknowledgements reference real versions', options, async () => {
   await withRollback(async client => {
+    await seedPublishReadyGateway(client);
     await seedMinimal(client);
     await storeDraft(client);
     const published = await publishLatest(client);

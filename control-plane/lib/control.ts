@@ -71,8 +71,11 @@ export async function persistGatewayAck(client: PoolClient, input: {
     if (!gateway || Number(gateway.envelope_version) < 2 || !(gateway.supported_schemas ?? []).includes(input.schema_version ?? 0)) {
       throw new ApiError(409, 'gateway_capability_mismatch', 'Acknowledgement exceeds the persisted gateway capability');
     }
-    const version = (await client.query('SELECT schema_version,config_checksum,checksum,snapshot FROM config_versions WHERE version=$1', [input.version])).rows[0];
+    const version = (await client.query('SELECT status,schema_version,config_checksum,checksum,snapshot FROM config_versions WHERE version=$1', [input.version])).rows[0];
     if (!version) throw new ApiError(404, 'config_version_not_found', 'Acknowledged configuration version does not exist');
+    if (version.status !== 'published') {
+      throw new ApiError(409, 'ack_version_not_published', 'Acknowledged configuration version is not published');
+    }
     const expectedCredentialDigest = await credentialDigestForDeclarative(client, version.snapshot);
     const runtime = await materializeRuntimeSnapshot(client, version.snapshot);
     const expectedRuntimeChecksum = sha256Canonical(runtime);

@@ -104,13 +104,14 @@ test('v1-only active gateways block Codex publish and receive 426 until a comple
   await tx(async c => {
     await c.query('TRUNCATE gateway_config_acks,gateway_instances,config_versions,model_account_mappings,model_aliases,accounts,providers,secret_records,virtual_keys CASCADE');
     await seed(c, 'openai-codex');
+    const accepted = await storeDraft(c);
+    await c.query("UPDATE config_versions SET status='published', published_at=now() WHERE version=$1", [accepted.version]);
     const draft = await storeDraft(c);
     await c.query("INSERT INTO gateway_instances (gateway_id,supported_schemas,envelope_version,last_seen_at) VALUES ('gw-v1',ARRAY[1],1,now())");
 
     await assert.rejects(publishLatest(c), (error: any) => error.status === 426);
     assert.equal((await c.query("SELECT status FROM config_versions WHERE status='draft'")).rowCount, 1);
 
-    await c.query("UPDATE config_versions SET status='published', published_at=now() WHERE version=$1", [draft.version]);
     await assert.rejects(
       snapshotEnvelope(c, new Request('http://control/api/internal/v1/snapshot', { headers: { 'x-gateway-id': 'gw-v1' } })),
       (error: any) => error.status === 426 && error.code === 'upgrade_required',
@@ -119,11 +120,10 @@ test('v1-only active gateways block Codex publish and receive 426 until a comple
     const adopted: any = await snapshotEnvelope(c, v2Request('gw-v1'));
     assert.equal(adopted.snapshot.accounts[0].credential.kind, 'oauth');
     assert.equal(adopted.snapshot.accounts[0].credential.revision, 1);
-    await c.query("UPDATE config_versions SET status='draft', published_at=null WHERE version=$1", [draft.version]);
     await assert.rejects(
       persistGatewayAck(c, {
         gateway_id: 'gw-v1',
-        version: Number(draft.version),
+        version: Number(accepted.version),
         checksum: adopted.runtime_checksum,
         status: 'adopted',
         schema_version: adopted.schema_version,
@@ -134,9 +134,23 @@ test('v1-only active gateways block Codex publish and receive 426 until a comple
       }),
       (error: any) => error.status === 409 && error.code === 'ack_identity_mismatch',
     );
+    await assert.rejects(
+      persistGatewayAck(c, {
+        gateway_id: 'gw-v1',
+        version: Number(draft.version),
+        checksum: adopted.runtime_checksum,
+        status: 'adopted',
+        schema_version: adopted.schema_version,
+        config_checksum: adopted.config_checksum,
+        credential_digest: adopted.credential_digest,
+        runtime_checksum: adopted.runtime_checksum,
+        envelope_version: 2,
+      }),
+      (error: any) => error.status === 409 && error.code === 'ack_version_not_published',
+    );
     await persistGatewayAck(c, {
       gateway_id: 'gw-v1',
-      version: Number(draft.version),
+      version: Number(accepted.version),
       checksum: adopted.runtime_checksum,
       status: 'adopted',
       schema_version: adopted.schema_version,
@@ -151,6 +165,8 @@ test('v1-only active gateways block Codex publish and receive 426 until a comple
       { schema_version: 2, config_checksum: adopted.config_checksum, credential_digest: adopted.credential_digest, runtime_checksum: adopted.runtime_checksum, envelope_version: 2 },
     );
     await assert.doesNotReject(assertSchemaV2Publishable(c));
+    await assert.doesNotReject(publishLatest(c));
+    assert.equal((await c.query('SELECT status FROM config_versions WHERE version=$1', [draft.version])).rows[0].status, 'published');
 
     await c.query("UPDATE gateway_instances SET supported_schemas=ARRAY[1], envelope_version=1 WHERE gateway_id='gw-v1'");
     await assert.rejects(assertSchemaV2Publishable(c), (error: any) => error.status === 426);

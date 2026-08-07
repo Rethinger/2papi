@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -21,6 +23,13 @@ type Client struct {
 	GatewayID string
 	HTTP      *http.Client
 }
+
+type CredentialUpdateResult struct {
+	CredentialRevision int64  `json:"credential_revision"`
+	CredentialDigest   string `json:"credential_digest"`
+}
+
+var ErrCredentialRevisionConflict = errors.New("credential revision conflict")
 
 type SnapshotIdentity struct {
 	ConfigVersion    int64
@@ -176,6 +185,66 @@ func (c *Client) Ack(ctx context.Context, ack Ack) error {
 		return fmt.Errorf("ack status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (c *Client) UpdateCredentials(ctx context.Context, accountID string, expectedRevision int64, credential config.Credential) (CredentialUpdateResult, error) {
+	var out CredentialUpdateResult
+	if strings.TrimSpace(accountID) == "" {
+		return out, errors.New("account ID required")
+	}
+	if expectedRevision <= 0 {
+		return out, errors.New("expected credential revision must be positive")
+	}
+	body := struct {
+		ExpectedRevision int64             `json:"expected_revision"`
+		Credential       config.Credential `json:"credential"`
+	}{ExpectedRevision: expectedRevision, Credential: credential}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.BaseURL+"/api/internal/v1/accounts/"+url.PathEscape(accountID)+"/credentials", bytes.NewReader(b))
+	if err != nil {
+		return out, err
+	}
+	c.authorize(req)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return out, err
+	}
+	defer resp.Body.Close()
+	respBody, err := readBounded(resp.Body, 256<<10)
+	if err != nil {
+		return out, err
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return out, ErrCredentialRevisionConflict
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, fmt.Errorf("credential update status %d", resp.StatusCode)
+	}
+	var envelope struct {
+		Data CredentialUpdateResult `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return out, err
+	}
+	if envelope.Data.CredentialRevision <= expectedRevision || envelope.Data.CredentialDigest == "" {
+		return out, errors.New("credential update response is incomplete")
+	}
+	return envelope.Data, nil
+}
+
+func readBounded(r io.Reader, limit int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, errors.New("response body too large")
+	}
+	return body, nil
 }
 
 func (c *Client) Heartbeat(ctx context.Context, schemas []int, envelopeVersion int) error {

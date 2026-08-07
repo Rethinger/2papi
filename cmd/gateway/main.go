@@ -2,14 +2,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/1jehuang/2papi/internal/adapter"
 	"github.com/1jehuang/2papi/internal/config"
 	"github.com/1jehuang/2papi/internal/controlplane"
+	"github.com/1jehuang/2papi/internal/operations"
 	"github.com/1jehuang/2papi/internal/resilience"
 	"github.com/1jehuang/2papi/internal/server"
 )
@@ -34,8 +39,52 @@ func main() {
 	}
 	rt := gw.Runtime()
 	srv := &http.Server{Addr: rt.Snap.Server.Addr, Handler: gw.Routes(), ReadTimeout: rt.Snap.ReadTimeout, WriteTimeout: rt.Snap.WriteTimeout}
+	internalAddr := os.Getenv("GATEWAY_INTERNAL_ADDR")
+	if internalAddr == "" {
+		internalAddr = ":8081"
+	}
+	internalSrv := &http.Server{Addr: internalAddr, Handler: operations.NewDynamicServer(func() *adapter.Registry { return gw.Runtime().Proxy.Registry }, internalTokenFromEnv()).Routes(), ReadTimeout: rt.Snap.ReadTimeout, WriteTimeout: rt.Snap.WriteTimeout}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	log.Printf("gateway internal operations listening on %s", internalAddr)
 	log.Printf("gateway listening on %s", rt.Snap.Server.Addr)
-	log.Fatal(srv.ListenAndServe())
+	if err := serveGateway(ctx, srv, internalSrv); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func serveGateway(ctx context.Context, servers ...*http.Server) error {
+	errs := make(chan error, len(servers))
+	for _, server := range servers {
+		server := server
+		go func() {
+			err := server.ListenAndServe()
+			if errors.Is(err, http.ErrServerClosed) {
+				err = nil
+			}
+			errs <- err
+		}()
+	}
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case runErr = <-errs:
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, server := range servers {
+		if err := server.Shutdown(shutdownCtx); err != nil && runErr == nil {
+			runErr = err
+		}
+	}
+	return runErr
+}
+
+func internalTokenFromEnv() string {
+	if token := os.Getenv("CONTROL_PLANE_INTERNAL_TOKEN"); token != "" {
+		return token
+	}
+	return os.Getenv("INTERNAL_SERVICE_TOKEN")
 }
 
 func controlPlaneClientFromEnv() *controlplane.Client {

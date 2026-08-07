@@ -15,6 +15,7 @@ const EnvSchema = z.object({
   SNAPSHOT_POLL_INTERVAL_SECONDS: z.coerce.number().int().positive().default(30),
   GATEWAY_CAPABILITY_TTL_SECONDS: z.coerce.number().int().positive().optional(),
   MIN_ACTIVE_GATEWAYS: z.coerce.number().int().nonnegative().default(1),
+  GATEWAY_INTERNAL_URL: z.string().url().default('http://127.0.0.1:8081'),
 });
 
 export const env = EnvSchema.parse(process.env);

@@ -29,8 +29,26 @@ export async function readJsonBounded<T>(req: Request, maxBytes: number): Promis
     if (!Number.isFinite(parsed) || parsed < 0) throw new ApiError(400, 'invalid_content_length', 'Invalid content-length header');
     if (parsed > maxBytes) throw new ApiError(413, 'payload_too_large', 'Request body exceeds maximum size');
   }
-  const bytes = Buffer.from(await req.arrayBuffer());
-  if (bytes.length > maxBytes) throw new ApiError(413, 'payload_too_large', 'Request body exceeds maximum size');
+  const chunks: Buffer[] = [];
+  let size = 0;
+  const reader = req.body?.getReader();
+  if (reader) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxBytes) {
+          await reader.cancel();
+          throw new ApiError(413, 'payload_too_large', 'Request body exceeds maximum size');
+        }
+        chunks.push(Buffer.from(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  const bytes = Buffer.concat(chunks, size);
   if (bytes.length === 0) return {} as T;
   try {
     return JSON.parse(bytes.toString('utf8')) as T;

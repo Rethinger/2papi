@@ -1,10 +1,12 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -166,5 +168,71 @@ func TestHeartbeatHeadersAndBody(t *testing.T) {
 	defer ts.Close()
 	if err := New(ts.URL, "token", "gw").Heartbeat(context.Background(), []int{1, 2}, 2); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUpdateCredentialsUsesBoundedAuthenticatedCAS(t *testing.T) {
+	credential := config.Credential{Kind: "oauth", AccessToken: "new-access-token", RefreshToken: "new-refresh-token", IDToken: "new-id-token", Revision: 7}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/internal/v1/accounts/account-1/credentials" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("X-Gateway-ID") != "gw" {
+			t.Fatalf("missing authenticated gateway headers: %v", r.Header)
+		}
+		var body struct {
+			ExpectedRevision int64             `json:"expected_revision"`
+			Credential       config.Credential `json:"credential"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.ExpectedRevision != 7 || body.Credential.AccessToken != credential.AccessToken {
+			t.Fatalf("body=%+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"credential_revision": 8, "credential_digest": "sha256:digest"}})
+	}))
+	defer ts.Close()
+
+	result, err := New(ts.URL, "token", "gw").UpdateCredentials(context.Background(), "account-1", 7, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CredentialRevision != 8 || result.CredentialDigest != "sha256:digest" {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestUpdateCredentialsMapsConflictAndBoundsResponseWithoutLeakingBody(t *testing.T) {
+	credential := config.Credential{Kind: "oauth", AccessToken: "access-token-must-not-leak", Revision: 7}
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+		check   func(error) bool
+	}{
+		{
+			name: "conflict",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "access-token-must-not-leak", http.StatusConflict)
+			},
+			check: func(err error) bool { return errors.Is(err, ErrCredentialRevisionConflict) },
+		},
+		{
+			name: "oversized",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(bytes.Repeat([]byte("x"), (256<<10)+1))
+			},
+			check: func(err error) bool { return err != nil && strings.Contains(err.Error(), "too large") },
+		},
+	} {
+		ts := httptest.NewServer(tc.handler)
+		_, err := New(ts.URL, "token", "gw").UpdateCredentials(context.Background(), "account-1", 7, credential)
+		ts.Close()
+		if !tc.check(err) {
+			t.Fatalf("%s err=%v", tc.name, err)
+		}
+		if err != nil && strings.Contains(err.Error(), credential.AccessToken) {
+			t.Fatalf("%s leaked credential in error: %v", tc.name, err)
+		}
 	}
 }

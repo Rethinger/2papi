@@ -35,6 +35,7 @@ services:
       GATEWAY_SHARED_SECRET: dev-secret-change-me
       CONTROL_PLANE_BIND_HOST: 0.0.0.0
       DASHBOARD_PUBLIC_URL: http://localhost:13000
+      GATEWAY_INTERNAL_URL: http://gateway:8081
     ports:
       - "127.0.0.1:13000:3000"
       - "127.0.0.1:1455:3000"
@@ -56,6 +57,7 @@ services:
       CONTROL_PLANE_URL: http://control-plane:3000
       CONTROL_PLANE_INTERNAL_TOKEN: dev-internal-service-token
       CONTROL_PLANE_POLL_INTERVAL: 2s
+      GATEWAY_INTERNAL_ADDR: :8081
       GATEWAY_ID: gateway-compose
     depends_on:
       control-plane:

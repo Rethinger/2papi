@@ -57,7 +57,20 @@ type Operation struct {
 }
 
 type OperationResult struct {
-	Data json.RawMessage
+	Data               json.RawMessage
+	WarningCode        string
+	CredentialRevision int64
+}
+
+type OperationError struct {
+	Code string
+}
+
+func (e *OperationError) Error() string {
+	if e == nil || e.Code == "" {
+		return "provider operation failed"
+	}
+	return e.Code
 }
 
 type Registry struct {

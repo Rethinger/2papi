@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -38,18 +39,27 @@ type SnapshotRefreshTrigger interface {
 	TriggerSnapshotRefresh(reason string)
 }
 
+type CodexRateLimitObservation struct {
+	Account     string
+	PublicModel string
+	Header      http.Header
+	JSON        json.RawMessage
+}
+
 type Options struct {
-	TestMode       bool
-	AuthBaseURL    string
-	BackendBaseURL string
-	ClientVersion  string
-	Now            func() time.Time
+	TestMode               bool
+	AuthBaseURL            string
+	BackendBaseURL         string
+	ClientVersion          string
+	Now                    func() time.Time
+	CodexRateLimitObserver func(context.Context, CodexRateLimitObservation)
 }
 
 type Adapter struct {
-	client *http.Client
-	auth   *tokenManager
-	models *modelClient
+	client  *http.Client
+	auth    *tokenManager
+	models  *modelClient
+	options Options
 }
 
 func New(client *http.Client, sink CredentialSink, refresh SnapshotRefreshTrigger, options Options) *Adapter {
@@ -57,7 +67,7 @@ func New(client *http.Client, sink CredentialSink, refresh SnapshotRefreshTrigge
 		client = http.DefaultClient
 	}
 	options = normalizeOptions(options)
-	return &Adapter{client: client, auth: newTokenManager(client, sink, refresh, options), models: newModelClient(client, options)}
+	return &Adapter{client: client, auth: newTokenManager(client, sink, refresh, options), models: newModelClient(client, options), options: options}
 }
 
 func Register(reg *adapter.Registry, client *http.Client, sink CredentialSink, refresh SnapshotRefreshTrigger, options Options) error {
@@ -88,7 +98,12 @@ func normalizeOptions(o Options) Options {
 }
 
 func (a *Adapter) Execute(ctx context.Context, ex adapter.Execution) (*adapter.Result, error) {
-	return nil, &adapter.CapabilityError{Kind: adapter.OperationKind(ex.Endpoint)}
+	switch ex.Endpoint {
+	case adapter.EndpointResponses:
+		return a.executeResponses(ctx, ex)
+	default:
+		return nil, &adapter.CapabilityError{Kind: adapter.OperationKind(ex.Endpoint)}
+	}
 }
 
 func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.OperationResult, error) {

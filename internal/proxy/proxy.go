@@ -50,6 +50,14 @@ func Error(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": msg, "type": "gateway_error", "code": code}})
 }
 func (p *Proxy) Chat(w http.ResponseWriter, r *http.Request, meta protocol.ChatMetadata, body []byte) {
+	p.Endpoint(w, r, adapter.EndpointChatCompletions, meta, body)
+}
+
+func (p *Proxy) Responses(w http.ResponseWriter, r *http.Request, meta protocol.EndpointMetadata, body []byte) {
+	p.Endpoint(w, r, adapter.EndpointResponses, meta, body)
+}
+
+func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapter.Endpoint, meta protocol.EndpointMetadata, body []byte) {
 	aff := router.AffinityKey(r.Header.Get("X-Gateway-Session"), meta.User, meta.Model, meta.Metadata)
 	plan, model := p.Router.Plan(meta.Model, aff)
 	if len(plan) == 0 {
@@ -66,7 +74,7 @@ func (p *Proxy) Chat(w http.ResponseWriter, r *http.Request, meta protocol.ChatM
 			continue
 		}
 		start := time.Now()
-		status, committed, cool := p.try(w, r, acct, model, body, attempts)
+		status, committed, cool := p.try(w, r, endpoint, acct, model, body, attempts)
 		p.State.Release(acct.Name)
 		if r.Context().Err() != nil {
 			return
@@ -90,12 +98,12 @@ func (p *Proxy) Chat(w http.ResponseWriter, r *http.Request, meta protocol.ChatM
 	}
 	Error(w, 502, "all upstream attempts failed")
 }
-func (p *Proxy) try(w http.ResponseWriter, r *http.Request, acct config.Account, model config.Model, body []byte, attempt int) (int, bool, time.Duration) {
+func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.Endpoint, acct config.Account, model config.Model, body []byte, attempt int) (int, bool, time.Duration) {
 	ad, ok := p.Registry.Get(acct.Adapter)
 	if !ok {
 		return 0, false, p.Snap.Cooldown
 	}
-	result, err := ad.Execute(r.Context(), adapter.Execution{Endpoint: adapter.EndpointChatCompletions, Request: r, Account: acct, Model: model, PublicModel: model.Alias, Body: body})
+	result, err := ad.Execute(r.Context(), adapter.Execution{Endpoint: endpoint, Request: r, Account: acct, Model: model, PublicModel: model.Alias, Body: body})
 	if err != nil {
 		if errorsIsContextDone(err) || r.Context().Err() != nil {
 			return 0, true, p.Snap.Cooldown

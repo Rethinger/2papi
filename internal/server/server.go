@@ -48,6 +48,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("ready")) })
 	mux.HandleFunc("/v1/models", s.models)
 	mux.HandleFunc("/v1/chat/completions", s.chat)
+	mux.HandleFunc("/v1/responses", s.responses)
 	return mux
 }
 
@@ -113,4 +114,40 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rt.Proxy.Chat(w, r, meta, body)
+}
+
+func (s *Server) responses(w http.ResponseWriter, r *http.Request) {
+	rt := s.Runtime()
+	if r.Method != http.MethodPost {
+		proxy.Error(w, 405, "method not allowed")
+		return
+	}
+	vk, ok := rt.Auth.Authenticate(r)
+	if !ok {
+		proxy.Error(w, 401, "unauthorized")
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<20))
+	if err != nil {
+		proxy.Error(w, 400, "invalid body")
+		return
+	}
+	meta, err := protocol.ParseEndpoint(body)
+	if err != nil || meta.Model == "" {
+		proxy.Error(w, 400, "model required")
+		return
+	}
+	if _, ok := rt.Snap.ModelsByAlias[meta.Model]; !ok {
+		proxy.Error(w, 404, "unknown model")
+		return
+	}
+	if !policy.Allows(vk, meta.Model) {
+		proxy.Error(w, 403, "model not allowed")
+		return
+	}
+	if !rt.Auth.AllowRate(vk) {
+		proxy.Error(w, 429, "rate limit exceeded")
+		return
+	}
+	rt.Proxy.Responses(w, r, meta, body)
 }

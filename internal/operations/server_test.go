@@ -52,6 +52,7 @@ func TestOperationServerAuthBodyAndDispatch(t *testing.T) {
 		if tc.token != "" {
 			r.Header.Set("Authorization", "Bearer "+tc.token)
 		}
+		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != tc.want {
@@ -86,6 +87,7 @@ func TestOperationServerRejectsOversizedBody(t *testing.T) {
 	body = append(body, suffix...)
 	r := httptest.NewRequest(http.MethodPost, "/internal/v1/provider-operations", bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer secret-token")
+	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusRequestEntityTooLarge {
@@ -97,6 +99,7 @@ func TestOperationServerRejectsUnknownAdapter(t *testing.T) {
 	h := NewServer(adapter.NewRegistry(), "secret-token").Routes()
 	r := httptest.NewRequest(http.MethodPost, "/internal/v1/provider-operations", bytes.NewReader([]byte(`{"operation":"discover_models","account":{"adapter":"missing"},"input":{}}`)))
 	r.Header.Set("Authorization", "Bearer secret-token")
+	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != 400 {
@@ -119,6 +122,7 @@ func TestOperationServerRejectsUnknownOperationEmptyTokenAndTrailingJSON(t *test
 		h := NewServer(reg, tc.token).Routes()
 		r := httptest.NewRequest(http.MethodPost, "/internal/v1/provider-operations", strings.NewReader(tc.body))
 		r.Header.Set("Authorization", "Bearer "+tc.token)
+		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != tc.want {
@@ -139,6 +143,7 @@ func TestOperationServerUsesCurrentRegistryAndTypedResult(t *testing.T) {
 	request := func() *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/internal/v1/provider-operations", strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer secret-token")
+		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w
@@ -162,6 +167,18 @@ func TestOperationServerUsesCurrentRegistryAndTypedResult(t *testing.T) {
 	fa.err = &adapter.OperationError{Code: "credential_revision_conflict"}
 	if conflict := request(); conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "credential_revision_conflict") {
 		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
+	}
+}
+
+func TestOperationServerRequiresJSONContentType(t *testing.T) {
+	h := NewServer(adapter.NewRegistry(), "secret-token").Routes()
+	r := httptest.NewRequest(http.MethodPost, "/internal/v1/provider-operations", strings.NewReader(`{}`))
+	r.Header.Set("Authorization", "Bearer secret-token")
+	r.Header.Set("Content-Type", "text/plain")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusUnsupportedMediaType || !strings.Contains(w.Body.String(), "unsupported_media_type") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

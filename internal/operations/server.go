@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"time"
 
@@ -80,6 +81,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validBearer(r, s.token) {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		writeErr(w, http.StatusUnsupportedMediaType, "unsupported_media_type")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxOperationBody)

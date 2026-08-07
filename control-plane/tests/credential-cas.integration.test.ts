@@ -128,6 +128,22 @@ test('credential CAS rejects oversized request before JSON parsing', options, as
   assert.equal(response.status, 413);
 });
 
+test('credential CAS requires application/json content type', options, async () => {
+  const { PUT } = await import('../app/api/internal/v1/accounts/[id]/credentials/route.ts');
+  const request = new Request('http://local/api/internal/v1/accounts/00000000-0000-0000-0000-000000000000/credentials', {
+    method: 'PUT',
+    headers: {
+      authorization: `Bearer ${process.env.INTERNAL_SERVICE_TOKEN ?? 'dev-internal-service-token'}`,
+      'x-gateway-id': 'gateway-test',
+      'content-type': 'text/plain',
+    },
+    body: '{}',
+  });
+  const response = await PUT(request as any, { params: { id: '00000000-0000-0000-0000-000000000000' } });
+  assert.equal(response.status, 415);
+  assert.equal((await response.json()).error.code, 'unsupported_media_type');
+});
+
 test('one-shot provider dispatch works before publish and does not retain or expose credentials', options, async () => {
   const client = await pool!.connect();
   const secret = await insertEncrypted(client, {

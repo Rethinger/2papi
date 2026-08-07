@@ -37,6 +37,10 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (!gatewayID || !/^[A-Za-z0-9._:-]{1,128}$/.test(gatewayID)) {
       throw new ApiError(403, 'gateway_required', 'Credentials may only be updated by a gateway service');
     }
+    const contentType = req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+    if (contentType !== 'application/json') {
+      throw new ApiError(415, 'unsupported_media_type', 'Content-Type must be application/json');
+    }
     const { id } = await ctx.params;
     const body = BodySchema.parse(await readJsonBounded<unknown>(req, 256 * 1024));
     const result = await tx(async client => {

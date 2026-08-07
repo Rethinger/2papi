@@ -69,6 +69,50 @@ test('discovery persists partial per-account results and marks missing models un
   });
 });
 
+test('discovery recursively removes credential-bearing raw metadata before bounding and persistence', options, async () => {
+  await withRollback(async client => {
+    const seeded = await seedAccounts(client);
+    const secretValues = [
+      'oauth-secret-value',
+      'token-secret-value',
+      'api-key-secret-value',
+      'authorization-secret-value',
+      'cookie-secret-value',
+      'client-secret-value',
+      'password-secret-value',
+      'private-key-secret-value',
+      'credential-secret-value',
+    ];
+    await discoverModelsForScope(client, { scope: 'account_id', account_id: seeded.accountOne }, { gatewayOperation: async () => ({ data: { models: [{
+      slug: 'secret-filtered-model',
+      safeField: 'safe-value',
+      oauth: secretValues[0],
+      accessToken: secretValues[1],
+      API_KEY: secretValues[2],
+      Authorization: secretValues[3],
+      Cookie: secretValues[4],
+      client_secret: secretValues[5],
+      password: secretValues[6],
+      nested: {
+        privateKey: secretValues[7],
+        safeNested: 'nested-safe-value',
+        array: [{ credential: secretValues[8], visible: 'visible-safe-value' }],
+      },
+      huge: 'x'.repeat(70000),
+    }] } }) });
+
+    const row = await client.query('SELECT raw_metadata, octet_length(raw_metadata::text)::int size FROM discovered_models WHERE account_id=$1 AND upstream_model=$2', [seeded.accountOne, 'secret-filtered-model']);
+    const metadataText = JSON.stringify(row.rows[0].raw_metadata);
+    assert.ok(row.rows[0].size <= 32768);
+    for (const forbidden of ['oauth', 'accessToken', 'API_KEY', 'Authorization', 'Cookie', 'client_secret', 'password', 'privateKey', 'credential', ...secretValues]) {
+      assert.equal(metadataText.includes(forbidden), false, `raw_metadata leaked ${forbidden}`);
+    }
+    assert.equal(metadataText.includes('safeField'), true);
+    assert.equal(metadataText.includes('safeNested'), true);
+    assert.equal(metadataText.includes('visible-safe-value'), true);
+  });
+});
+
 test('grouped discovered models aggregate identical slugs for the UI', options, async () => {
   await withRollback(async client => {
     await seedAccounts(client);

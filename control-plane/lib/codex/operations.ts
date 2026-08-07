@@ -9,6 +9,7 @@ const METADATA_LIMIT = 32 * 1024;
 const CONCURRENCY = 4;
 const ALIAS_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const TRAILING_SEPARATOR_RE = /[._:\/-]$/;
+const SECRET_METADATA_KEY_PARTS = ['oauth', 'token', 'apikey', 'authorization', 'cookie', 'clientsecret', 'password', 'privatekey', 'secret', 'credential', 'bearer', 'session'];
 
 type GatewayOperation = (account: AccountRow, client: Queryable) => Promise<{ data: unknown; warning_code?: string }>;
 
@@ -74,10 +75,11 @@ function parseModels(data: unknown): ParsedModel[] {
 }
 
 function sanitizeMetadata(input: unknown) {
-  let text = JSON.stringify(input ?? {});
-  if (Buffer.byteLength(text) <= METADATA_LIMIT) return input ?? {};
+  const filtered = filterSecretMetadata(input ?? {});
+  let text = JSON.stringify(filtered);
+  if (Buffer.byteLength(text) <= METADATA_LIMIT) return filtered;
   const out: Record<string, unknown> = { truncated: true };
-  for (const [key, value] of Object.entries((input as any) ?? {})) {
+  for (const [key, value] of Object.entries((filtered as any) ?? {})) {
     const next = JSON.stringify({ ...out, [key]: value });
     if (Buffer.byteLength(next) > METADATA_LIMIT) continue;
     out[key] = value;
@@ -88,6 +90,22 @@ function sanitizeMetadata(input: unknown) {
     text = JSON.stringify(out);
   }
   return out;
+}
+
+function filterSecretMetadata(input: unknown): unknown {
+  if (Array.isArray(input)) return input.map(item => filterSecretMetadata(item));
+  if (!input || typeof input !== 'object') return input;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (isSecretMetadataKey(key)) continue;
+    out[key] = filterSecretMetadata(value);
+  }
+  return out;
+}
+
+function isSecretMetadataKey(key: string) {
+  const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  return SECRET_METADATA_KEY_PARTS.some(part => normalized.includes(part));
 }
 
 async function persistAccountModelsAtomic(client: Queryable, account: AccountRow, models: ParsedModel[]) {

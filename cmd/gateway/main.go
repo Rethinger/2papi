@@ -88,6 +88,7 @@ func adoptOnce(ctx context.Context, cp *controlplane.Client, gw *server.Server, 
 	gw.Adopt(snap)
 	if err := cp.Ack(ctx, controlplane.AckForIdentity(identity, true, "")); err != nil {
 		log.Printf("control-plane snapshot ack failed: %v", err)
+		return current
 	}
 	log.Printf("adopted control-plane snapshot config_version=%d schema_version=%d envelope_version=%d config_checksum=%s runtime_checksum=%s", identity.ConfigVersion, identity.SchemaVersion, identity.EnvelopeVersion, identity.ConfigChecksum, identity.RuntimeChecksum)
 	return identity

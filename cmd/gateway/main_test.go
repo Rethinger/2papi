@@ -133,3 +133,64 @@ func TestAdoptOnceAdoptsWhenIdentityFieldChanges(t *testing.T) {
 		t.Fatalf("identity=%+v", identity)
 	}
 }
+
+func TestAdoptOnceRetriesAcknowledgementAfterFailure(t *testing.T) {
+	cfg := config.Config{
+		Version:     1,
+		Secret:      "secret",
+		VirtualKeys: []config.VirtualKey{{Name: "dev", Key: "sk-dev", Models: []string{"gpt-dev"}, RPM: 60}},
+		Models:      []config.Model{{Alias: "gpt-dev", UpstreamModel: "upstream", Accounts: []string{"primary"}}},
+		Accounts:    []config.Account{{Name: "primary", BaseURL: "http://upstream", APIKey: "upstream-key", Enabled: true}},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	checksum := hex.EncodeToString(sum[:])
+	var acknowledgements atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/internal/v1/gateway-heartbeats":
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/internal/v1/snapshot":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"config_version":    7,
+				"schema_version":    2,
+				"config_checksum":   "config-digest",
+				"credential_digest": "cred",
+				"runtime_checksum":  checksum,
+				"snapshot":          json.RawMessage(raw),
+			})
+		case "/api/internal/v1/gateway-acks":
+			if acknowledgements.Add(1) == 1 {
+				http.Error(w, "temporary failure", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	fallback, err := config.Build(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := server.NewRuntimeServer(fallback, resilience.New())
+	client := controlplane.New(upstream.URL, "internal-token", "gateway-test")
+	want := controlplane.SnapshotIdentity{ConfigVersion: 7, SchemaVersion: 2, ConfigChecksum: "config-digest", CredentialDigest: "cred", RuntimeChecksum: checksum, EnvelopeVersion: 2}
+
+	identity := adoptOnce(context.Background(), client, gateway, controlplane.SnapshotIdentity{})
+	if !identity.Equal(controlplane.SnapshotIdentity{}) {
+		t.Fatalf("identity after failed ack=%+v, want zero identity", identity)
+	}
+	identity = adoptOnce(context.Background(), client, gateway, identity)
+	if !identity.Equal(want) {
+		t.Fatalf("identity after ack retry=%+v, want %+v", identity, want)
+	}
+	if acknowledgements.Load() != 2 {
+		t.Fatalf("acknowledgements=%d, want 2", acknowledgements.Load())
+	}
+}

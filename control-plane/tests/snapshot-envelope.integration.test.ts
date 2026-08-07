@@ -38,6 +38,7 @@ async function migrate() {
   await pool!.query((await sql('001_schema.sql')).replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
   await pool!.query(await sql('002_snapshot_security.sql'));
   await pool!.query(await sql('003_codex_provider.sql'));
+  await pool!.query(await sql('004_gateway_ack_idempotency.sql'));
 }
 
 async function seed(c: any, adapter = 'openai-compatible') {
@@ -148,17 +149,21 @@ test('v1-only active gateways block Codex publish and receive 426 until a comple
       }),
       (error: any) => error.status === 409 && error.code === 'ack_version_not_published',
     );
-    await persistGatewayAck(c, {
+    const acceptedAck = {
       gateway_id: 'gw-v1',
       version: Number(accepted.version),
       checksum: adopted.runtime_checksum,
-      status: 'adopted',
+      status: 'adopted' as const,
       schema_version: adopted.schema_version,
       config_checksum: adopted.config_checksum,
       credential_digest: adopted.credential_digest,
       runtime_checksum: adopted.runtime_checksum,
       envelope_version: 2,
-    });
+    };
+    const firstAck = await persistGatewayAck(c, acceptedAck);
+    const retriedAck = await persistGatewayAck(c, acceptedAck);
+    assert.equal(retriedAck.id, firstAck.id);
+    assert.equal((await c.query("SELECT count(*)::int n FROM gateway_config_acks WHERE gateway_id='gw-v1' AND status='adopted'")).rows[0].n, 1);
     const ack = (await c.query("SELECT schema_version,config_checksum,credential_digest,runtime_checksum,envelope_version FROM gateway_config_acks WHERE gateway_id='gw-v1'")).rows[0];
     assert.deepEqual(
       { ...ack, schema_version: Number(ack.schema_version), envelope_version: Number(ack.envelope_version) },

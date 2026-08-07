@@ -91,7 +91,20 @@ export async function persistGatewayAck(client: PoolClient, input: {
   const q = await client.query(
     `INSERT INTO gateway_config_acks
      (gateway_id,version,checksum,status,error,schema_version,config_checksum,credential_digest,runtime_checksum,envelope_version)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (
+       gateway_id,
+       version,
+       status,
+       schema_version,
+       (COALESCE(config_checksum, checksum)),
+       (COALESCE(credential_digest, '')),
+       (COALESCE(runtime_checksum, checksum)),
+       envelope_version
+     ) DO UPDATE SET
+       error=EXCLUDED.error,
+       acknowledged_at=now()
+     RETURNING *`,
     [input.gateway_id, input.version, input.checksum, input.status, input.error ?? null, input.schema_version ?? 1, input.config_checksum ?? input.checksum, input.credential_digest ?? null, input.runtime_checksum ?? input.checksum, input.envelope_version ?? 1],
   );
   return q.rows[0];

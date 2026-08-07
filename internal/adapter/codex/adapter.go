@@ -94,13 +94,13 @@ func (a *Adapter) Execute(ctx context.Context, ex adapter.Execution) (*adapter.R
 func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.OperationResult, error) {
 	switch op.Kind {
 	case adapter.OperationDiscoverModels:
-		cred, rev, err := a.auth.accessToken(ctx, op.Account, false)
+		cred, rev, warning, err := a.auth.accessToken(ctx, op.Account, false)
 		if err != nil {
 			return adapter.OperationResult{}, err
 		}
 		data, err := a.models.discover(ctx, cred)
 		if isUnauthorized(err) {
-			cred, rev, err = a.auth.accessToken(ctx, op.Account, true)
+			cred, rev, warning, err = a.auth.accessToken(ctx, op.Account, true)
 			if err != nil {
 				return adapter.OperationResult{}, err
 			}
@@ -112,15 +112,15 @@ func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.Op
 		if err != nil {
 			return adapter.OperationResult{}, err
 		}
-		return adapter.OperationResult{Data: data, CredentialRevision: rev}, nil
+		return adapter.OperationResult{Data: data, CredentialRevision: rev, WarningCode: warning}, nil
 	case adapter.OperationValidateCredentials:
-		cred, rev, err := a.auth.accessToken(ctx, op.Account, false)
+		cred, rev, warning, err := a.auth.accessToken(ctx, op.Account, false)
 		if err != nil {
 			return adapter.OperationResult{}, err
 		}
 		err = a.models.validate(ctx, cred)
 		if isUnauthorized(err) {
-			cred, rev, err = a.auth.accessToken(ctx, op.Account, true)
+			cred, rev, warning, err = a.auth.accessToken(ctx, op.Account, true)
 			if err != nil {
 				return adapter.OperationResult{}, err
 			}
@@ -132,7 +132,7 @@ func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.Op
 		if err != nil {
 			return adapter.OperationResult{}, err
 		}
-		return adapter.OperationResult{Data: []byte(`{"valid":true}`), CredentialRevision: rev}, nil
+		return adapter.OperationResult{Data: []byte(`{"valid":true}`), CredentialRevision: rev, WarningCode: warning}, nil
 	default:
 		return adapter.OperationResult{}, &adapter.CapabilityError{Kind: op.Kind}
 	}

@@ -78,3 +78,28 @@ func TestDiscoverRefreshesOnceOn401(t *testing.T) {
 		t.Fatalf("model calls=%d", modelCalls)
 	}
 }
+
+func TestDiscoverReturnsPersistenceDegradedWarning(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			_, _ = w.Write([]byte(`{"access_token":"fresh","expires_in":3600}`))
+		case "/backend-api/codex/models":
+			if r.Header.Get("Authorization") != "Bearer fresh" {
+				t.Errorf("auth=%q", r.Header.Get("Authorization"))
+			}
+			_, _ = w.Write([]byte(`{"models":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+	a := New(ts.Client(), &fakeSink{fails: 10}, nil, Options{TestMode: true, AuthBaseURL: ts.URL, BackendBaseURL: ts.URL, Now: time.Now})
+	out, err := a.Operate(context.Background(), adapter.Operation{Kind: adapter.OperationDiscoverModels, Account: config.Account{ID: "id", Credential: config.Credential{AccessToken: "old", RefreshToken: "refresh", ExpiresAt: time.Now().Add(-time.Hour).Format(time.RFC3339), Revision: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.WarningCode != "credential_persistence_degraded" || out.CredentialRevision != 1 {
+		t.Fatalf("out=%+v", out)
+	}
+}

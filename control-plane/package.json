@@ -7,7 +7,7 @@
     "dev": "next dev -H 127.0.0.1 -p 3000",
     "build": "next build",
     "start": "next start -H ${HOSTNAME:-127.0.0.1} -p ${PORT:-3000}",
-    "test": "node --import tsx --test --test-concurrency=1 tests/canonical-json.test.ts tests/codex-auth.test.ts tests/codex-auth-routes.test.ts tests/credential-cas.integration.test.ts tests/encryption.test.ts tests/i18n.test.ts tests/integration.test.ts tests/internal-auth.test.ts tests/migration-atomicity.test.ts tests/snapshot.test.ts tests/snapshot-envelope.integration.test.ts tests/snapshot-security.integration.test.ts tests/validation.test.ts",
+    "test": "node --import tsx --test --test-concurrency=1 tests/canonical-json.test.ts tests/codex-auth.test.ts tests/codex-auth-routes.test.ts tests/codex-discovery.integration.test.ts tests/credential-cas.integration.test.ts tests/encryption.test.ts tests/i18n.test.ts tests/integration.test.ts tests/internal-auth.test.ts tests/migration-atomicity.test.ts tests/snapshot.test.ts tests/snapshot-envelope.integration.test.ts tests/snapshot-security.integration.test.ts tests/validation.test.ts",
     "migrate": "node --import tsx scripts/migrate.ts",
     "seed": "node --import tsx scripts/seed.ts"
   },

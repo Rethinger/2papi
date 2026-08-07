@@ -114,7 +114,7 @@ async function loadRuntimeAccount(client: Queryable, accountID: string): Promise
 }
 
 function isPool(client: Queryable): client is Pool {
-  return typeof (client as Pool).connect === 'function';
+  return typeof (client as Pool).connect === 'function' && typeof (client as PoolClient).release !== 'function';
 }
 
 function operationTimeout(kind: OperationKind): number {

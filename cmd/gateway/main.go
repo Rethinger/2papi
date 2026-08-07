@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/1jehuang/2papi/internal/adapter"
+	adaptercodex "github.com/1jehuang/2papi/internal/adapter/codex"
 	"github.com/1jehuang/2papi/internal/config"
 	"github.com/1jehuang/2papi/internal/controlplane"
 	"github.com/1jehuang/2papi/internal/operations"
@@ -34,8 +35,13 @@ func main() {
 	gw := server.NewRuntimeServer(snap, st)
 	if cp := controlPlaneClientFromEnv(); cp != nil {
 		poll := pollIntervalFromEnv()
+		trigger := newSnapshotRefreshTrigger()
+		installCodexAdapter(gw, cp, trigger)
 		identity := adoptOnce(context.Background(), cp, gw, controlplane.SnapshotIdentity{})
-		go pollControlPlane(cp, gw, poll, identity)
+		installCodexAdapter(gw, cp, trigger)
+		go pollControlPlane(cp, gw, poll, identity, trigger)
+	} else {
+		installCodexAdapter(gw, nil, newSnapshotRefreshTrigger())
 	}
 	rt := gw.Runtime()
 	srv := &http.Server{Addr: rt.Snap.Server.Addr, Handler: gw.Routes(), ReadTimeout: rt.Snap.ReadTimeout, WriteTimeout: rt.Snap.WriteTimeout}
@@ -111,11 +117,38 @@ func pollIntervalFromEnv() time.Duration {
 	return 15 * time.Second
 }
 
-func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration, identity controlplane.SnapshotIdentity) {
+type snapshotRefreshTrigger struct{ ch chan struct{} }
+
+func newSnapshotRefreshTrigger() *snapshotRefreshTrigger {
+	return &snapshotRefreshTrigger{ch: make(chan struct{}, 1)}
+}
+
+func (t *snapshotRefreshTrigger) TriggerSnapshotRefresh(reason string) {
+	select {
+	case t.ch <- struct{}{}:
+	default:
+	}
+}
+
+func installCodexAdapter(gw *server.Server, cp *controlplane.Client, trigger adaptercodex.SnapshotRefreshTrigger) {
+	rt := gw.Runtime()
+	var sink adaptercodex.CredentialSink
+	if cp != nil {
+		sink = adaptercodex.ControlPlaneSink{Client: cp}
+	}
+	_ = adaptercodex.Register(rt.Proxy.Registry, rt.Proxy.Client, sink, trigger, adaptercodex.Options{})
+}
+
+func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration, identity controlplane.SnapshotIdentity, trigger *snapshotRefreshTrigger) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
-	for range t.C {
+	for {
+		select {
+		case <-t.C:
+		case <-trigger.ch:
+		}
 		identity = adoptOnce(context.Background(), cp, gw, identity)
+		installCodexAdapter(gw, cp, trigger)
 	}
 }
 

@@ -50,4 +50,12 @@ test('provider route strategy updates are restricted and create a draft', option
   await assert.rejects(() => updateProviderModelStrategy(pool! as any, seeded.targetId, 'manual' as any), (error: any) => error.status === 400);
 });
 
+test('the final public model can also be deleted', options, async () => {
+  await pool!.query('TRUNCATE audit_events,config_versions,model_account_mappings,model_aliases,discovered_models,accounts,providers,virtual_keys CASCADE');
+  const seeded = await seed();
+  await pool!.query("DELETE FROM model_aliases WHERE alias='route-survivor'");
+  await assert.doesNotReject(() => deleteModelRoute(pool! as any, seeded.targetId));
+  assert.equal((await pool!.query('SELECT count(*)::int n FROM model_aliases')).rows[0].n, 0);
+});
+
 test.after(async () => { if (pool) { await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); await pool.end(); } });

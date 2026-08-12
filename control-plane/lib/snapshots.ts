@@ -25,15 +25,25 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   const accountsR = await client.query(`SELECT a.*, p.adapter FROM accounts a JOIN providers p ON p.id=a.provider_id WHERE a.enabled ORDER BY a.priority, a.name`);
   const modelsR = await client.query('SELECT * FROM model_aliases WHERE enabled ORDER BY alias');
   const mapsR = await client.query(`SELECT mam.*, a.name account_name, ma.alias FROM model_account_mappings mam JOIN accounts a ON a.id=mam.account_id JOIN model_aliases ma ON ma.id=mam.model_alias_id WHERE mam.enabled AND a.enabled ORDER BY mam.tier, mam.position`);
+  const providerPoolsR = await client.query(
+    `SELECT ma.alias,a.name account_name
+     FROM model_aliases ma
+     JOIN accounts a ON a.provider_id=ma.provider_id AND a.enabled=true
+     JOIN discovered_models dm ON dm.provider_id=ma.provider_id AND dm.account_id=a.id AND dm.upstream_model=ma.upstream_model AND dm.available=true
+     WHERE ma.enabled=true AND ma.provider_id IS NOT NULL
+     ORDER BY ma.alias,a.priority,a.name`,
+  );
   const routingR = await client.query('SELECT * FROM routing_settings WHERE id=true');
   const keysR = await client.query('SELECT * FROM virtual_keys WHERE enabled ORDER BY name');
   const accounts = accountsR.rows.map((account: any) => ({ id: account.id, name: account.name, adapter: account.adapter, base_url: account.base_url, credential_revision: Number(account.credential_revision ?? 1), enabled: account.enabled, priority: account.priority, weight: account.weight, max_concurrency: account.max_concurrency, cost: Number(account.cost) }));
   const byAlias = new Map<string, string[]>();
   for (const m of mapsR.rows) byAlias.set(m.alias, [...(byAlias.get(m.alias) ?? []), m.account_name]);
+  const providerByAlias = new Map<string, string[]>();
+  for (const m of providerPoolsR.rows) providerByAlias.set(m.alias, [...(providerByAlias.get(m.alias) ?? []), m.account_name]);
   const models = modelsR.rows.map((m: any) => {
-    const accountNames = byAlias.get(m.alias) ?? [];
+    const accountNames = m.provider_id ? providerByAlias.get(m.alias) ?? [] : byAlias.get(m.alias) ?? [];
     if (accountNames.length === 0) throw new Error(`model ${m.alias} has no eligible accounts`);
-    return { alias: m.alias, upstream_model: m.upstream_model, accounts: accountNames };
+    return { alias: m.alias, upstream_model: m.upstream_model, accounts: accountNames, ...(m.provider_id ? { routing_strategy: m.routing_strategy } : {}) };
   });
   if (models.length === 0) throw new Error('at least one model required');
   const routing = routingR.rows[0] ?? { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: { cooldown: '30s', circuit_failures: 3, circuit_reset: '1m' } };

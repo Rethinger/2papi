@@ -179,14 +179,23 @@ export async function groupedDiscoveredModels(client: Queryable) {
   });
 }
 
-export async function importSelection(client: PoolClient, input: { alias: string; upstream_model: string; account_ids: string[]; enabled?: boolean }) {
+export async function importSelection(client: PoolClient, input: { alias: string; provider_id: string; upstream_model: string; routing_strategy: 'round_robin' | 'quota_failover'; enabled?: boolean }) {
   const alias = validatePublicAlias(input.alias);
   await assertAliasAvailable(client, alias);
-  const inserted = await client.query('INSERT INTO model_aliases (alias,upstream_model,enabled) VALUES ($1,$2,$3) RETURNING *', [alias, input.upstream_model, input.enabled ?? true]);
-  for (let i = 0; i < input.account_ids.length; i++) {
-    await client.query('INSERT INTO model_account_mappings (model_alias_id,account_id,position) VALUES ($1,$2,$3)', [inserted.rows[0].id, input.account_ids[i], i]);
-  }
-  await audit(client, 'import_selection', 'model_alias', inserted.rows[0].id, { alias, upstream_model: input.upstream_model, account_count: input.account_ids.length });
+  const provider = await client.query('SELECT id FROM providers WHERE id=$1 AND enabled=true FOR UPDATE', [input.provider_id]);
+  if (!provider.rows[0]) throw new ApiError(404, 'provider_not_found', 'Enabled provider not found');
+  const eligibility = await client.query(
+    `SELECT count(DISTINCT a.id)::int count FROM accounts a
+     JOIN discovered_models dm ON dm.account_id=a.id AND dm.provider_id=a.provider_id
+     WHERE a.provider_id=$1 AND a.enabled=true AND dm.upstream_model=$2 AND dm.available=true`,
+    [input.provider_id, input.upstream_model],
+  );
+  if (Number(eligibility.rows[0]?.count ?? 0) === 0) throw new ApiError(409, 'model_unavailable', 'Model is unavailable on all enabled provider accounts');
+  const inserted = await client.query(
+    'INSERT INTO model_aliases (alias,upstream_model,provider_id,routing_strategy,enabled) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+    [alias, input.upstream_model, input.provider_id, input.routing_strategy, input.enabled ?? true],
+  );
+  await audit(client, 'import_selection', 'model_alias', inserted.rows[0].id, { alias, provider_id: input.provider_id, upstream_model: input.upstream_model, routing_strategy: input.routing_strategy });
   await storeDraft(client);
   return inserted.rows[0];
 }

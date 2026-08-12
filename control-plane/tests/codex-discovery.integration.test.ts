@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { Pool } from 'pg';
 import { insertSecret } from '../lib/control.ts';
 import { discoverModelsForScope, gatewayDiscoverModels, groupedDiscoveredModels, importSelection, renameModelAlias, validatePublicAlias } from '../lib/codex/operations.ts';
@@ -236,7 +237,7 @@ test('alias validation is exact, case-insensitive, and rejects whitespace/contro
     await assert.rejects(async () => validatePublicAlias('bad alias'), { code: 'invalid_model_alias' });
     await assert.rejects(async () => validatePublicAlias('bad\n'), { code: 'invalid_model_alias' });
     await assert.rejects(async () => validatePublicAlias('luna-code/'), { code: 'invalid_model_alias' });
-    await assert.rejects(() => importSelection(client, { alias: 'Luna-Code', upstream_model: 'luna-code', account_ids: [] }), { code: 'model_alias_conflict' });
+    await assert.rejects(() => importSelection(client, { alias: 'Luna-Code', provider_id: crypto.randomUUID(), upstream_model: 'luna-code', routing_strategy: 'round_robin' }), { code: 'model_alias_conflict' });
   });
 });
 
@@ -245,8 +246,11 @@ test('import selection creates a draft alias and mappings without publishing', o
     const seeded = await seedAccounts(client);
     await client.query("INSERT INTO virtual_keys (name,key_hash,key_prefix,models,rpm) VALUES ('import-vk',$1,'sk-import',ARRAY[]::text[],60)", ['d'.repeat(64)]);
     await discoverModelsForScope(client, { scope: 'account_id', account_id: seeded.accountOne }, { gatewayOperation: async () => ({ data: { models: [{ slug: 'luna-code' }] } }) });
-    const imported = await importSelection(client, { alias: 'luna-code', upstream_model: 'luna-code', account_ids: [seeded.accountOne] });
+    const imported = await importSelection(client, { alias: 'luna-code', provider_id: seeded.providerId, upstream_model: 'luna-code', routing_strategy: 'round_robin' });
     assert.equal(imported.alias, 'luna-code');
+    assert.equal(imported.provider_id, seeded.providerId);
+    assert.equal(imported.routing_strategy, 'round_robin');
+    assert.equal((await client.query('SELECT count(*)::int n FROM model_account_mappings WHERE model_alias_id=$1', [imported.id])).rows[0].n, 0);
     const drafts = await client.query("SELECT count(*)::int n FROM config_versions WHERE status='draft'");
     const pubs = await client.query("SELECT count(*)::int n FROM config_versions WHERE status='published'");
     assert.equal(drafts.rows[0].n, 1);

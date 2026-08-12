@@ -29,8 +29,9 @@ function mockClient(extra?: { noSecret?: boolean; published?: any }) {
     queries.push({ sql, params });
     if (sql.startsWith('SELECT a.*, p.adapter FROM accounts')) return { rows: declarative.accounts };
     if (sql.startsWith('SELECT a.id account_id, a.credential_revision, sr.* FROM accounts')) return { rows: extra?.noSecret ? [] : secretRows().map(row => ({ ...row, account_id: accountId })) };
-    if (sql.startsWith('SELECT * FROM model_aliases')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini' }] };
+    if (sql.startsWith('SELECT * FROM model_aliases')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', provider_id: null, routing_strategy: 'manual' }] };
     if (sql.startsWith('SELECT mam')) return { rows: [{ alias: 'gpt-dev', account_name: 'primary' }] };
+    if (sql.includes('FROM model_aliases ma') && sql.includes('JOIN discovered_models dm')) return { rows: [] };
     if (sql.startsWith('SELECT * FROM routing_settings')) return { rows: [{ strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: declarative.resilience }] };
     if (sql.startsWith('SELECT * FROM virtual_keys')) return { rows: declarative.virtual_keys };
     if (sql.startsWith('SELECT version,snapshot FROM config_versions')) return { rows: extra?.published ? [extra.published] : [] };

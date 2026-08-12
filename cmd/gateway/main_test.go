@@ -194,3 +194,19 @@ func TestAdoptOnceRetriesAcknowledgementAfterFailure(t *testing.T) {
 		t.Fatalf("acknowledgements=%d, want 2", acknowledgements.Load())
 	}
 }
+
+func TestCodexOptionsUseOverridesOnlyInTestMode(t *testing.T) {
+	t.Setenv("CODEX_TEST_MODE", "true")
+	t.Setenv("CODEX_AUTH_ORIGIN", "http://fake-upstream:9010")
+	t.Setenv("CODEX_CHATGPT_ORIGIN", "http://fake-upstream:9010")
+	options := codexOptionsFromEnv()
+	if !options.TestMode || options.AuthBaseURL != "http://fake-upstream:9010" || options.BackendBaseURL != "http://fake-upstream:9010" {
+		t.Fatalf("options=%+v", options)
+	}
+
+	t.Setenv("CODEX_TEST_MODE", "false")
+	options = codexOptionsFromEnv()
+	if options.TestMode || options.AuthBaseURL != "" || options.BackendBaseURL != "" {
+		t.Fatalf("production options must ignore overrides: %+v", options)
+	}
+}

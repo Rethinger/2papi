@@ -49,6 +49,13 @@ func TestDiscoverModelsHeadersAndPayload(t *testing.T) {
 	}
 }
 
+func TestDefaultClientVersionIsSemanticVersion(t *testing.T) {
+	options := normalizeOptions(Options{TestMode: true})
+	if options.ClientVersion != "1.0.0" {
+		t.Fatalf("client version=%q", options.ClientVersion)
+	}
+}
+
 func TestDiscoverRefreshesOnceOn401(t *testing.T) {
 	var modelCalls int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

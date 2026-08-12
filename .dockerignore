@@ -1,0 +1,9 @@
+.git
+.superpowers
+artifacts
+control-plane/node_modules
+control-plane/.next
+control-plane/*.tsbuildinfo
+panel-audit-*.png
+coverage.out
+*.log

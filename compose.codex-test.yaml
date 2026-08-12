@@ -1,0 +1,11 @@
+services:
+  control-plane:
+    environment:
+      CODEX_TEST_MODE: "true"
+      CODEX_AUTH_ORIGIN: http://fake-upstream:9010
+      CODEX_CHATGPT_ORIGIN: http://fake-upstream:9010
+  gateway:
+    environment:
+      CODEX_TEST_MODE: "true"
+      CODEX_AUTH_ORIGIN: http://fake-upstream:9010
+      CODEX_CHATGPT_ORIGIN: http://fake-upstream:9010

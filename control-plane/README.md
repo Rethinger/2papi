@@ -2,6 +2,8 @@
 
 Phase A dashboard and control-plane foundation. The root `compose.yaml` integrates it with PostgreSQL, Redis, and the Go gateway.
 
+The dashboard includes local-only OpenAI Codex OAuth/Device Code/auth-file onboarding, model discovery, and durable quota-reset operations. See [../docs/codex-provider.md](../docs/codex-provider.md) for operator requirements and release validation commands.
+
 ## Required services
 
 - PostgreSQL 17, private service, `DATABASE_URL=postgres://postgres:postgres@postgres:5432/papi_control`

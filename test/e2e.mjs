@@ -93,7 +93,9 @@ async function run() {
 
   // 3. Attach the account to an existing model alias
   const models = await api('models');
-  const testModel = models[0];
+  const testModel = models.find(model => model.enabled && model.alias === 'gpt-dev')
+    ?? models.find(model => model.enabled);
+  assert.ok(testModel, 'no enabled model is available for the generic E2E route');
   state.modelId = testModel.id;
   state.baselineAccountIds = testModel.accounts.slice();
   if (!state.baselineAccountIds.includes(state.accountId)) {

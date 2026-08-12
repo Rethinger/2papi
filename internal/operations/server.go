@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"time"
@@ -126,6 +127,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	rev := acct.Credential.Revision
 	req = Request{}
 	if err != nil {
+		log.Printf("provider operation failed: operation=%s adapter=%s error=%v", req.Operation, req.Account.Adapter, err)
 		var capErr *adapter.CapabilityError
 		if errors.As(err, &capErr) {
 			writeErr(w, http.StatusBadRequest, "unknown_operation")

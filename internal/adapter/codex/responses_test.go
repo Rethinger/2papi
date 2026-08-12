@@ -81,6 +81,82 @@ func TestResponsesRequestRewriteRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestResponsesRequestRewriteConvertsStringInputForCodexBackend(t *testing.T) {
+	out, err := rewriteResponsesRequestModel([]byte(`{"model":"public","input":"hello"}`), "upstream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Model string `json:"model"`
+		Store bool   `json:"store"`
+		Input []struct {
+			Type    string `json:"type"`
+			Role    string `json:"role"`
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Model != "upstream" || payload.Store || len(payload.Input) != 1 || payload.Input[0].Type != "message" || payload.Input[0].Role != "user" || len(payload.Input[0].Content) != 1 || payload.Input[0].Content[0].Type != "input_text" || payload.Input[0].Content[0].Text != "hello" {
+		t.Fatalf("unexpected payload: %s", out)
+	}
+}
+
+func TestResponsesRequestRewriteForcesStoreFalse(t *testing.T) {
+	out, err := rewriteResponsesRequestModel([]byte(`{"model":"public","input":[],"store":true}`), "upstream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Store bool `json:"store"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Store {
+		t.Fatalf("store was not forced false: %s", out)
+	}
+}
+
+func TestCollectResponsesSSEForNonStreamingClient(t *testing.T) {
+	stream := strings.NewReader("data: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\n" +
+		"data: {\"type\":\"codex.rate_limits\",\"plan_type\":\"plus\"}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"model\":\"upstream\",\"output\":[]}}\n\n" +
+		"data: [DONE]\n\n")
+	out, rateLimits, err := collectResponsesSSE(stream, "upstream", "public", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(out, &response); err != nil {
+		t.Fatal(err)
+	}
+	output, ok := response["output"].([]any)
+	if response["id"] != "r1" || response["model"] != "public" || !ok || len(output) != 1 || !strings.Contains(string(out), "OK") || !strings.Contains(string(rateLimits), "plan_type") {
+		t.Fatalf("response=%s rate_limits=%s", out, rateLimits)
+	}
+}
+
+func TestCollectResponsesSSERewritesVersionedCanonicalModel(t *testing.T) {
+	stream := strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"model\":\"gpt-5.4-mini-2026-03-17\",\"output\":[]}}\n\n")
+	out, _, err := collectResponsesSSE(stream, "gpt-5.4-mini", "public-mini", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(out, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["model"] != "public-mini" {
+		t.Fatalf("model not rewritten: %s", out)
+	}
+}
+
 func TestResponsesRewritePreservesTrailingResponseBytes(t *testing.T) {
 	in := []byte(`{"model":"upstream"} trailing`)
 	out, observed, err := rewriteJSONModelAndRateLimits(bytes.NewReader(in), "upstream", "public", 16<<20)

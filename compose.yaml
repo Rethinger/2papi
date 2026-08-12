@@ -70,7 +70,7 @@ services:
     volumes: [".:/src"]
     command: go run ./test/fakeupstream
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9001/v1/chat/completions > /dev/null && curl -fsS http://127.0.0.1:9002/v1/chat/completions > /dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9001/healthz > /dev/null && curl -fsS http://127.0.0.1:9002/healthz > /dev/null && curl -fsS http://127.0.0.1:9003/healthz > /dev/null && curl -fsS http://127.0.0.1:9010/healthz > /dev/null"]
       interval: 2s
       timeout: 2s
       retries: 30

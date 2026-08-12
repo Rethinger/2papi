@@ -2,6 +2,8 @@
 
 A Go MVP for an OpenAI-compatible gateway with virtual-key auth, rate limits, sticky multi-account routing, cooldowns, circuits, and pre-stream failover.
 
+OpenAI Codex account setup, model discovery, quota/reset safety, and validation are documented in [docs/codex-provider.md](docs/codex-provider.md).
+
 ## Features
 
 - `/healthz`, `/readyz`, `/v1/models`, `/v1/chat/completions`.

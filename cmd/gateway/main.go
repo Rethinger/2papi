@@ -136,7 +136,19 @@ func installCodexAdapter(gw *server.Server, cp *controlplane.Client, trigger ada
 	if cp != nil {
 		sink = adaptercodex.ControlPlaneSink{Client: cp}
 	}
-	_ = adaptercodex.Register(rt.Proxy.Registry, rt.Proxy.Client, sink, trigger, adaptercodex.Options{})
+	_ = adaptercodex.Register(rt.Proxy.Registry, rt.Proxy.Client, sink, trigger, codexOptionsFromEnv())
+}
+
+func codexOptionsFromEnv() adaptercodex.Options {
+	testMode := os.Getenv("CODEX_TEST_MODE") == "true" || os.Getenv("CODEX_TEST_MODE") == "1"
+	if !testMode {
+		return adaptercodex.Options{}
+	}
+	return adaptercodex.Options{
+		TestMode:       true,
+		AuthBaseURL:    os.Getenv("CODEX_AUTH_ORIGIN"),
+		BackendBaseURL: os.Getenv("CODEX_CHATGPT_ORIGIN"),
+	}
 }
 
 func pollControlPlane(cp *controlplane.Client, gw *server.Server, interval time.Duration, identity controlplane.SnapshotIdentity, trigger *snapshotRefreshTrigger) {

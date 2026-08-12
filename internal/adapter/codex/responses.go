@@ -23,6 +23,7 @@ func (a *Adapter) executeResponses(ctx context.Context, ex adapter.Execution) (*
 	if ex.Model.UpstreamModel == "" || ex.PublicModel == "" {
 		return nil, fmt.Errorf("invalid model mapping")
 	}
+	clientWantsStream := isStreamingRequest(ex.Body)
 	body, err := rewriteResponsesRequestModel(ex.Body, ex.Model.UpstreamModel)
 	if err != nil {
 		return nil, err
@@ -35,7 +36,7 @@ func (a *Adapter) executeResponses(ctx context.Context, ex adapter.Execution) (*
 	if err != nil {
 		return nil, err
 	}
-	resp, err := a.doResponsesRequest(ctx, ex, u, body, cred)
+	resp, err := a.doResponsesRequest(ctx, ex, u, body, cred, true)
 	if err != nil {
 		return nil, err
 	}
@@ -46,17 +47,27 @@ func (a *Adapter) executeResponses(ctx context.Context, ex adapter.Execution) (*
 		if err != nil {
 			return nil, err
 		}
-		resp, err = a.doResponsesRequest(ctx, ex, u, body, cred)
+		resp, err = a.doResponsesRequest(ctx, ex, u, body, cred, true)
 	}
 	if err != nil {
 		return nil, err
 	}
 	a.observeRateLimits(ctx, ex, resp.Header, nil)
 	out := resp.Body
-	if isStreamingRequest(ex.Body) {
+	if clientWantsStream {
 		out = rewriteResponsesSSE(resp.Body, ex.Model.UpstreamModel, ex.PublicModel, func(raw json.RawMessage) {
 			a.observeRateLimits(context.Background(), ex, nil, raw)
 		})
+	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		b, rawRateLimits, err := collectResponsesSSE(resp.Body, ex.Model.UpstreamModel, ex.PublicModel, 16<<20)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		a.observeRateLimits(ctx, ex, nil, rawRateLimits)
+		out = io.NopCloser(bytes.NewReader(b))
+		resp.Header.Set("Content-Type", "application/json")
+		resp.Header.Set("Content-Length", strconv.Itoa(len(b)))
 	} else {
 		b, rawRateLimits, err := rewriteJSONModelAndRateLimits(resp.Body, ex.Model.UpstreamModel, ex.PublicModel, 16<<20)
 		resp.Body.Close()
@@ -70,7 +81,7 @@ func (a *Adapter) executeResponses(ctx context.Context, ex adapter.Execution) (*
 	return &adapter.Result{Status: resp.StatusCode, Header: safeResponseHeaders(resp.Header), Body: out}, nil
 }
 
-func (a *Adapter) doResponsesRequest(ctx context.Context, ex adapter.Execution, u string, body []byte, cred config.Credential) (*http.Response, error) {
+func (a *Adapter) doResponsesRequest(ctx context.Context, ex adapter.Execution, u string, body []byte, cred config.Credential, upstreamStream bool) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -78,7 +89,7 @@ func (a *Adapter) doResponsesRequest(ctx context.Context, ex adapter.Execution, 
 	copySafeRequestHeaders(req.Header, ex.Request.Header)
 	req.Header.Set("Authorization", "Bearer "+cred.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", acceptHeader(ex.Request.Header.Get("Accept"), isStreamingRequest(ex.Body)))
+	req.Header.Set("Accept", acceptHeader(ex.Request.Header.Get("Accept"), upstreamStream))
 	req.Header.Set("ChatGPT-Account-ID", cred.ChatGPTAccountID)
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
 	req.Header.Set("User-Agent", a.options.ClientVersion)
@@ -145,6 +156,19 @@ func rewriteResponsesRequestModel(b []byte, upstream string) ([]byte, error) {
 	if _, ok := m["model"]; !ok {
 		return nil, fmt.Errorf("invalid json: model required")
 	}
+	if input, ok := m["input"]; ok {
+		var text string
+		if json.Unmarshal(input, &text) == nil {
+			message := []map[string]any{{
+				"type":    "message",
+				"role":    "user",
+				"content": []map[string]string{{"type": "input_text", "text": text}},
+			}}
+			m["input"], _ = json.Marshal(message)
+		}
+	}
+	m["store"] = json.RawMessage("false")
+	m["stream"] = json.RawMessage("true")
 	raw, _ := json.Marshal(upstream)
 	m["model"] = raw
 	return json.Marshal(m)
@@ -242,7 +266,7 @@ func rewriteJSONModelBytes(b []byte, upstream, public string) ([]byte, json.RawM
 	}
 	if raw, ok := payload["model"]; ok {
 		var cur string
-		if json.Unmarshal(raw, &cur) == nil && cur == upstream {
+		if json.Unmarshal(raw, &cur) == nil && cur != "" {
 			repl, _ := json.Marshal(public)
 			payload["model"] = repl
 		}
@@ -279,13 +303,80 @@ func rewriteNestedResponseModel(raw json.RawMessage, upstream, public string) (j
 		return nil, false
 	}
 	var cur string
-	if json.Unmarshal(modelRaw, &cur) != nil || cur != upstream {
+	if json.Unmarshal(modelRaw, &cur) != nil || cur == "" {
 		return nil, false
 	}
 	repl, _ := json.Marshal(public)
 	response["model"] = repl
 	out, err := json.Marshal(response)
 	return out, err == nil
+}
+
+func collectResponsesSSE(r io.Reader, upstream, public string, limit int64) ([]byte, json.RawMessage, error) {
+	b, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, nil, fmt.Errorf("upstream response body exceeds limit")
+	}
+	trimmed := bytes.TrimSpace(b)
+	if !bytes.HasPrefix(trimmed, []byte("data:")) && !bytes.HasPrefix(trimmed, []byte("event:")) {
+		return rewriteJSONModelBytes(b, upstream, public)
+	}
+	var final json.RawMessage
+	var rateLimits json.RawMessage
+	outputItems := map[int]json.RawMessage{}
+	for _, line := range bytes.Split(b, []byte{'\n'}) {
+		data, ok := sseDataPayload(bytes.TrimSuffix(line, []byte{'\r'}))
+		if !ok || bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+			continue
+		}
+		var event map[string]json.RawMessage
+		if json.Unmarshal(data, &event) != nil {
+			continue
+		}
+		var typ string
+		_ = json.Unmarshal(event["type"], &typ)
+		if typ == "codex.rate_limits" {
+			rateLimits = append(json.RawMessage(nil), data...)
+		}
+		if typ == "response.output_item.done" {
+			var outputIndex int
+			if item, ok := event["item"]; ok && json.Valid(item) && json.Unmarshal(event["output_index"], &outputIndex) == nil {
+				outputItems[outputIndex] = append(json.RawMessage(nil), item...)
+			}
+		}
+		if typ == "response.completed" || typ == "response.failed" || typ == "response.incomplete" {
+			if response, ok := event["response"]; ok && json.Valid(response) {
+				final = append(json.RawMessage(nil), response...)
+			}
+		}
+	}
+	if len(final) == 0 {
+		return nil, rateLimits, fmt.Errorf("codex stream did not contain a final response")
+	}
+	if len(outputItems) > 0 {
+		var response map[string]json.RawMessage
+		if json.Unmarshal(final, &response) == nil {
+			ordered := make([]json.RawMessage, 0, len(outputItems))
+			for index := 0; len(ordered) < len(outputItems); index++ {
+				if item, ok := outputItems[index]; ok {
+					ordered = append(ordered, item)
+				}
+			}
+			if output, err := json.Marshal(ordered); err == nil {
+				response["output"] = output
+				if assembled, err := json.Marshal(response); err == nil {
+					final = assembled
+				}
+			}
+		}
+	}
+	if rewritten, changed := rewriteNestedResponseModel(final, upstream, public); changed {
+		final = rewritten
+	}
+	return final, rateLimits, nil
 }
 
 func rewriteResponsesSSE(r io.ReadCloser, upstream, public string, observe func(json.RawMessage)) io.ReadCloser {

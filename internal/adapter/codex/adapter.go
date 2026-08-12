@@ -18,7 +18,9 @@ const Name = "openai-codex"
 const (
 	productionAuthBaseURL    = "https://auth.openai.com"
 	productionBackendBaseURL = "https://chatgpt.com"
-	defaultClientVersion     = "codex-gateway/1"
+	// The Codex catalog endpoint requires a semantic version and uses it to
+	// decide which models are compatible with the client.
+	defaultClientVersion = "1.0.0"
 )
 
 var (
@@ -59,6 +61,7 @@ type Adapter struct {
 	client  *http.Client
 	auth    *tokenManager
 	models  *modelClient
+	quota   *quotaClient
 	options Options
 }
 
@@ -67,7 +70,7 @@ func New(client *http.Client, sink CredentialSink, refresh SnapshotRefreshTrigge
 		client = http.DefaultClient
 	}
 	options = normalizeOptions(options)
-	return &Adapter{client: client, auth: newTokenManager(client, sink, refresh, options), models: newModelClient(client, options), options: options}
+	return &Adapter{client: client, auth: newTokenManager(client, sink, refresh, options), models: newModelClient(client, options), quota: newQuotaClient(client, options), options: options}
 }
 
 func Register(reg *adapter.Registry, client *http.Client, sink CredentialSink, refresh SnapshotRefreshTrigger, options Options) error {
@@ -99,6 +102,8 @@ func normalizeOptions(o Options) Options {
 
 func (a *Adapter) Execute(ctx context.Context, ex adapter.Execution) (*adapter.Result, error) {
 	switch ex.Endpoint {
+	case adapter.EndpointChatCompletions:
+		return a.executeChat(ctx, ex)
 	case adapter.EndpointResponses:
 		return a.executeResponses(ctx, ex)
 	default:
@@ -148,6 +153,57 @@ func (a *Adapter) Operate(ctx context.Context, op adapter.Operation) (adapter.Op
 			return adapter.OperationResult{}, err
 		}
 		return adapter.OperationResult{Data: []byte(`{"valid":true}`), CredentialRevision: rev, WarningCode: warning}, nil
+	case adapter.OperationReadUsage:
+		cred, rev, warning, err := a.auth.accessToken(ctx, op.Account, false)
+		if err != nil {
+			return adapter.OperationResult{}, err
+		}
+		data, err := a.quota.readUsage(ctx, cred)
+		if isUnauthorized(err) {
+			cred, rev, warning, err = a.auth.accessToken(ctx, op.Account, true)
+			if err != nil {
+				return adapter.OperationResult{}, err
+			}
+			data, err = a.quota.readUsage(ctx, cred)
+		}
+		if err != nil {
+			return adapter.OperationResult{}, err
+		}
+		return adapter.OperationResult{Data: data, CredentialRevision: rev, WarningCode: warning}, nil
+	case adapter.OperationListResetCredits:
+		cred, rev, warning, err := a.auth.accessToken(ctx, op.Account, false)
+		if err != nil {
+			return adapter.OperationResult{}, err
+		}
+		data, err := a.quota.listResetCredits(ctx, cred)
+		if isUnauthorized(err) {
+			cred, rev, warning, err = a.auth.accessToken(ctx, op.Account, true)
+			if err != nil {
+				return adapter.OperationResult{}, err
+			}
+			data, err = a.quota.listResetCredits(ctx, cred)
+		}
+		if err != nil {
+			return adapter.OperationResult{}, err
+		}
+		return adapter.OperationResult{Data: data, CredentialRevision: rev, WarningCode: warning}, nil
+	case adapter.OperationConsumeResetCredit:
+		cred, rev, warning, err := a.auth.accessToken(ctx, op.Account, false)
+		if err != nil {
+			return adapter.OperationResult{}, err
+		}
+		data, err := a.quota.consumeResetCredit(ctx, cred, op.Input)
+		if isUnauthorized(err) {
+			cred, rev, warning, err = a.auth.accessToken(ctx, op.Account, true)
+			if err != nil {
+				return adapter.OperationResult{}, err
+			}
+			data, err = a.quota.consumeResetCredit(ctx, cred, op.Input)
+		}
+		if err != nil {
+			return adapter.OperationResult{}, err
+		}
+		return adapter.OperationResult{Data: data, CredentialRevision: rev, WarningCode: warning}, nil
 	default:
 		return adapter.OperationResult{}, &adapter.CapabilityError{Kind: op.Kind}
 	}

@@ -12,6 +12,12 @@ export const ok = (data: unknown, status = 200) => NextResponse.json({ data }, {
 export function problem(error: unknown) {
   if (error instanceof ZodError) return NextResponse.json({ error: { code: 'validation_failed', message: 'Request validation failed', issues: error.issues } }, { status: 400 });
   if (error instanceof ApiError) return NextResponse.json({ error: { code: error.code, message: error.message, details: redactSecrets(error.details) } }, { status: error.status });
+  if (process.env.CODEX_TEST_MODE === 'true' || process.env.CODEX_TEST_MODE === '1') {
+    const diagnostic = error instanceof Error
+      ? { name: error.name, message: error.message.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 300), stack: error.stack?.split('\n').slice(0, 8).join('\n') }
+      : { type: typeof error };
+    console.error('unhandled control-plane API error', diagnostic);
+  }
   return NextResponse.json({ error: { code: 'internal_error', message: 'Internal server error' } }, { status: 500 });
 }
 

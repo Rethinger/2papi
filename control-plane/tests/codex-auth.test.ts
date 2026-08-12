@@ -138,6 +138,46 @@ test('auth.json normalization is strict and refreshes expired imports once', asy
   await server.close();
 });
 
+test('auth.json normalization accepts the current Codex CLI cache shape', async () => {
+  const { privateKey, jwk } = authKeys();
+  let refreshes = 0;
+  const server = await fakeAuthServer((req, res) => {
+    if (req.url === '/.well-known/jwks.json') res.end(JSON.stringify({ keys: [jwk] }));
+    else if (req.url === '/oauth/token') { refreshes++; res.writeHead(500).end(); }
+    else res.writeHead(404).end();
+  });
+  const { clearJwksCacheForTests } = await import('../lib/codex/jwt.ts');
+  clearJwksCacheForTests();
+  const { parseCodexAuthFile } = await import('../lib/codex/auth-file.ts');
+  const accessExp = Math.floor(Date.now() / 1000) + 1800;
+  const accessToken = signToken(privateKey, 'kid-1', { iss: process.env.CODEX_AUTH_ORIGIN, aud: ['https://api.openai.com/v1'], exp: accessExp, sub: 'sub-1', 'https://api.openai.com/auth': { chatgpt_account_id: 'acct', chatgpt_user_id: 'user-1', email: 'verified@example.com', chatgpt_plan_type: 'plus' } });
+  const expiredIDToken = idToken(privateKey, { exp: Math.floor(Date.now() / 1000) - 1 });
+  const credential = await parseCodexAuthFile(JSON.stringify({
+    auth_mode: 'chatgpt',
+    openai_api_key: null,
+    tokens: {
+      id_token: expiredIDToken,
+      access_token: accessToken,
+      refresh_token: 'rt-current',
+      account_id: 'acct',
+    },
+    last_refresh: new Date().toISOString(),
+    agent_identity: null,
+    personal_access_token: null,
+    bedrock_api_key: null,
+    _meta: { plan_type: 'untrusted', email: 'untrusted@example.com', imported_at: new Date().toISOString() },
+  }));
+  assert.equal(credential.access_token, accessToken);
+  assert.equal(credential.chatgpt_account_id, 'acct');
+  assert.equal(credential.email, 'verified@example.com');
+  assert.equal(credential.plan_type, 'plus');
+  assert.equal(credential.expires_at, new Date(accessExp * 1000).toISOString());
+  assert.equal(credential.auth_method, 'auth_file');
+  assert.equal(refreshes, 0);
+  await assert.rejects(() => parseCodexAuthFile(JSON.stringify({ auth_mode: 'apikey', openai_api_key: 'sk-secret', tokens: {} })), /api_key/);
+  await server.close();
+});
+
 test('Device Code polling preserves pending state and authorizes once', async () => {
   let polls = 0;
   let deviceNonce = '';

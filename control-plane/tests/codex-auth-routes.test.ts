@@ -30,6 +30,8 @@ function clientReturningAccount(revision = 2, calls: any[] = []) {
     query: async (sql: string, params?: any[]) => {
       calls.push({ sql, params });
       if (sql.includes('FROM providers')) return { rows: [{ id: 'provider-1' }] };
+      if (sql.includes('FROM accounts WHERE id=$1')) return { rows: [{ id: params?.[0], secret_record_id: null }] };
+      if (sql.includes('FROM accounts')) return { rows: [] };
       if (sql.includes('RETURNING id, name, credential_revision')) return { rows: [{ id: 'acct-row', name: params?.[1], credential_revision: revision }] };
       return { rows: [] };
     },
@@ -183,6 +185,24 @@ test('createCodexAccount atomically increments credential revision on rotation/u
   const result = await createCodexAccount(clientReturningAccount(5, updateCalls), { accountId: 'existing', method: 'browser', credential: { kind: 'oauth', access_token: 's', chatgpt_account_id: 'acct' } as any }, accountDeps(updateCalls));
   assert.equal(result.revision, 5);
   assert.match(updateCalls.find(c => c.sql?.includes('UPDATE accounts')).sql, /credential_revision=COALESCE\(credential_revision, 0\)\+1/);
+});
+
+test('auth.json import updates the matching Codex identity and removes its replaced secret', async () => {
+  const calls: any[] = [];
+  const client = {
+    query: async (sql: string, params?: any[]) => {
+      calls.push({ sql, params });
+      if (sql.includes('FROM providers')) return { rows: [{ id: 'provider-1' }] };
+      if (sql.includes('external_account_id') && sql.includes('FOR UPDATE')) return { rows: [{ id: 'existing-account', secret_record_id: 'old-secret' }] };
+      if (sql.includes('UPDATE accounts')) return { rows: [{ id: 'existing-account', name: 'codex-existing', credential_revision: 9 }] };
+      if (sql.includes('INSERT INTO accounts')) return { rows: [{ id: 'duplicate-account', name: 'codex-user-example-com', credential_revision: 1 }] };
+      return { rows: [] };
+    },
+  } as any;
+  const result = await createCodexAccount(client, { method: 'import', credential: { kind: 'oauth', access_token: 'new', chatgpt_account_id: 'same-identity', email: 'user@example.com' } as any }, accountDeps(calls));
+  assert.deepEqual(result, { id: 'existing-account', revision: 9 });
+  assert.equal(calls.some(call => call.sql?.includes('INSERT INTO accounts')), false);
+  assert.ok(calls.some(call => call.sql === 'DELETE FROM secret_records WHERE id=$1' && call.params?.[0] === 'old-secret'));
 });
 
 test('createCodexAccount fails when provider row or required account update is missing', async () => {

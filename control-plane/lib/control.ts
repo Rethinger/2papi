@@ -8,7 +8,18 @@ import { ApiError } from './api';
 
 export const ProviderSchema = z.object({ slug: z.string().min(1), name: z.string().min(1), adapter: z.string().default('openai-compatible'), base_url: z.string().url(), enabled: z.boolean().default(true), metadata: z.record(z.string(), z.unknown()).default({}) });
 export const AccountSchema = z.object({ provider_id: z.string().uuid(), name: z.string().min(1), display_name: z.string().min(1), base_url: z.string().url(), enabled: z.boolean().default(true), priority: z.number().int().default(1), weight: z.number().int().positive().default(1), max_concurrency: z.number().int().positive().default(100), cost: z.number().nonnegative().default(0), credential: z.object({ api_key: z.string().min(1) }).optional(), metadata: z.record(z.string(), z.unknown()).default({}) });
-export const ModelSchema = z.object({ alias: z.string().min(1), upstream_model: z.string().min(1), enabled: z.boolean().default(true), accounts: z.array(z.string().uuid()).min(1) });
+const ModelBaseSchema = z.object({ alias: z.string().min(1), upstream_model: z.string().min(1), enabled: z.boolean().default(true) });
+const ManualModelSchema = ModelBaseSchema.extend({
+  provider_id: z.null().optional(),
+  routing_strategy: z.literal('manual').default('manual'),
+  accounts: z.array(z.string().uuid()).min(1),
+});
+const ProviderModelSchema = ModelBaseSchema.extend({
+  provider_id: z.string().uuid(),
+  routing_strategy: z.enum(['round_robin', 'quota_failover']),
+  accounts: z.never().optional(),
+});
+export const ModelSchema = z.union([ProviderModelSchema, ManualModelSchema]);
 export const RoutingSchema = z.object({ strategy: z.enum(['balanced','priority','weighted']).default('balanced'), sticky_ttl: z.string().default('1h'), max_attempts: z.number().int().positive().default(2), resilience: z.object({ cooldown: z.string().default('30s'), circuit_failures: z.number().int().positive().default(3), circuit_reset: z.string().default('1m') }).default({ cooldown: '30s', circuit_failures: 3, circuit_reset: '1m' }) });
 export const VirtualKeySchema = z.object({ name: z.string().min(1), plaintext_key: z.string().min(8).optional(), enabled: z.boolean().default(true), models: z.array(z.string()).default([]), rpm: z.number().int().positive().default(60) });
 

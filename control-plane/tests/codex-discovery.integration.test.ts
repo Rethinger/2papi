@@ -125,6 +125,22 @@ test('grouped discovered models aggregate identical slugs for the UI', options, 
   });
 });
 
+test('discovery persists models from the OpenAI-compatible data envelope', options, async () => {
+  await withRollback(async client => {
+    const seeded = await seedAccounts(client);
+    const result = await discoverModelsForScope(client, { scope: 'account_id', account_id: seeded.accountOne }, {
+      gatewayOperation: async () => ({ data: { object: 'list', data: [{ id: 'gpt-api-model', owned_by: 'provider' }] } }),
+    });
+
+    assert.equal(result.results[0].status, 'succeeded');
+    assert.equal(result.results[0].model_count, 1);
+    const stored = await client.query('SELECT upstream_model,display_name,available FROM discovered_models WHERE account_id=$1', [seeded.accountOne]);
+    assert.deepEqual(stored.rows.map((row: any) => row.upstream_model), ['gpt-api-model']);
+    assert.equal(stored.rows[0].display_name, 'gpt-api-model');
+    assert.equal(stored.rows[0].available, true);
+  });
+});
+
 test('discovery scopes provider_id and account_id, caps concurrency at four, and returns safe partial errors', options, async () => {
   await withRollback(async client => {
     const seeded = await seedAccounts(client);

@@ -65,7 +65,13 @@ async function accountsForScope(client: Queryable, scope: DiscoveryScope): Promi
 }
 
 function parseModels(data: unknown): ParsedModel[] {
-  const raw: unknown[] = Array.isArray((data as any)?.models) ? (data as any).models : Array.isArray(data) ? data : [];
+  const raw: unknown[] = Array.isArray((data as any)?.models)
+    ? (data as any).models
+    : Array.isArray((data as any)?.data)
+      ? (data as any).data
+      : Array.isArray(data)
+        ? data
+        : [];
   return raw.map(item => {
     const parsed = DiscoveryModelSchema.parse(item);
     const upstream = parsed.slug ?? parsed.id ?? parsed.name;

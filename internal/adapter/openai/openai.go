@@ -132,7 +132,12 @@ func joinBaseURL(base, endpoint string) (string, error) {
 	if e.IsAbs() || e.Host != "" || e.RawQuery != "" || e.ForceQuery || e.Fragment != "" {
 		return "", fmt.Errorf("endpoint path must not include scheme, host, query, or fragment")
 	}
-	return u.JoinPath(strings.TrimPrefix(e.Path, "/")).String(), nil
+	basePath := strings.TrimSuffix(u.Path, "/")
+	endpointPath := strings.TrimPrefix(e.Path, "/")
+	if strings.HasSuffix(basePath, "/v1") && strings.HasPrefix(endpointPath, "v1/") {
+		endpointPath = strings.TrimPrefix(endpointPath, "v1/")
+	}
+	return u.JoinPath(endpointPath).String(), nil
 }
 
 func copyHeaders(dst, src http.Header) {

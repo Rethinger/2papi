@@ -40,6 +40,7 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     await c.query("INSERT INTO config_versions (status,checksum,snapshot,errors,source_version) VALUES ('draft','unsafe-nested',$1,$2,$3)", [JSON.stringify({ ...legacy, metadata: { nested: { access_token: 'must-not-survive' } } }), JSON.stringify([{ code: 'prior-unsafe' }]), rolled.rows[0].version]);
     await c.query(await sql('002_snapshot_security.sql'));
     await c.query(await sql('003_codex_provider.sql'));
+    await c.query(await sql('006_provider_model_pools.sql'));
     await sanitizeHistoricalConfigVersions(c);
 
     const rows = await c.query('SELECT version,status,snapshot,checksum,config_checksum,errors,source_version,published_at FROM config_versions ORDER BY version');

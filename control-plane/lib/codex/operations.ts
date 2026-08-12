@@ -168,7 +168,7 @@ export async function groupedDiscoveredModels(client: Queryable) {
     group.account_count++;
     if (row.available) {
       group.available_account_count++;
-      group.metadata_items.push(normalizeModelMetadata({ ...record(row.raw_metadata), capabilities: row.capabilities, supported_in_api: row.supported_in_api }));
+      group.metadata_items.push(normalizeModelMetadata({ ...record(row.raw_metadata), capabilities: row.capabilities }));
     }
     grouped.set(key, group);
   }

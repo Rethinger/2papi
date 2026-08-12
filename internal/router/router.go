@@ -75,6 +75,9 @@ func (r *Router) Plan(modelAlias, aff string) ([]config.Account, config.Model) {
 	default:
 		c = r.balanced(c)
 	}
+	if strategy == "quota_failover" {
+		return c, m
+	}
 	return limit(c, r.snap.Routing.MaxAttempts), m
 }
 func (r *Router) balanced(c []config.Account) []config.Account {

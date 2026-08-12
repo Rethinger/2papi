@@ -45,7 +45,6 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
     if (accountNames.length === 0) throw new Error(`model ${m.alias} has no eligible accounts`);
     return { alias: m.alias, upstream_model: m.upstream_model, accounts: accountNames, ...(m.provider_id ? { routing_strategy: m.routing_strategy } : {}) };
   });
-  if (models.length === 0) throw new Error('at least one model required');
   const routing = routingR.rows[0] ?? { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: { cooldown: '30s', circuit_failures: 3, circuit_reset: '1m' } };
   const snapshot = { version: 2, metadata: {}, server: { addr: ':8080', read_timeout: '10s', write_timeout: '0s' }, virtual_keys: keysR.rows.map((k: any) => ({ name: k.name, key_hash: k.key_hash, models: k.models, rpm: k.rpm })), models, accounts, routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience: routing.resilience };
   if (snapshot.virtual_keys.length === 0) throw new Error('at least one virtual key required');

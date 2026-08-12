@@ -127,7 +127,7 @@ func TestProviderModelStrategies(t *testing.T) {
 	r.CommitAffinity("same", "secondary")
 	for i := 0; i < 2; i++ {
 		plan, _ := r.Plan("model", "same")
-		if len(plan) == 0 || plan[0].Name != "primary" {
+		if len(plan) != 2 || plan[0].Name != "primary" {
 			t.Fatalf("quota failover reordered before 429: %+v", plan)
 		}
 	}

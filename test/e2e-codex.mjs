@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 
 const base = 'http://127.0.0.1:13000/api/control/v1/';
 const gatewayBase = 'http://127.0.0.1:18080';

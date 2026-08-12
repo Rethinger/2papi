@@ -120,7 +120,7 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.End
 	defer result.Body.Close()
 	if result.Status == 429 || result.Status >= 500 {
 		io.Copy(io.Discard, result.Body)
-		return result.Status, false, ParseRetryAfter(result.Header.Get("Retry-After"), p.Snap.Cooldown)
+		return result.Status, false, ParseQuotaCooldown(result.Header, p.Snap.Cooldown, time.Now())
 	}
 	out := result.Body
 	if !isStreamingRequest(body) {
@@ -221,14 +221,53 @@ func isHopByHopHeader(lower string) bool {
 	}
 }
 func ParseRetryAfter(v string, def time.Duration) time.Duration {
+	return parseRetryAfterAt(v, def, time.Now())
+}
+func parseRetryAfterAt(v string, def time.Duration, now time.Time) time.Duration {
 	if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
 		if n < 0 || n > int64((1<<63-1)/time.Second) {
 			return def
 		}
 		return time.Duration(n) * time.Second
 	}
-	if t, err := http.ParseTime(v); err == nil && time.Until(t) > 0 {
-		return time.Until(t)
+	if t, err := http.ParseTime(v); err == nil && t.After(now) {
+		return t.Sub(now)
 	}
 	return def
+}
+func ParseQuotaCooldown(h http.Header, def time.Duration, now time.Time) time.Duration {
+	const max = 7 * 24 * time.Hour
+	if raw := strings.TrimSpace(h.Get("Retry-After")); raw != "" {
+		return clampCooldown(parseRetryAfterAt(raw, def, now), max)
+	}
+	var earliest time.Duration
+	for name, values := range h {
+		lower := strings.ToLower(name)
+		if !strings.HasPrefix(lower, "x-") || (!strings.HasSuffix(lower, "-primary-reset-at") && !strings.HasSuffix(lower, "-secondary-reset-at")) {
+			continue
+		}
+		for _, raw := range values {
+			seconds, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+			if err != nil {
+				continue
+			}
+			d := time.Unix(seconds, 0).Sub(now)
+			if d > 0 && (earliest == 0 || d < earliest) {
+				earliest = d
+			}
+		}
+	}
+	if earliest == 0 {
+		earliest = def
+	}
+	return clampCooldown(earliest, max)
+}
+func clampCooldown(value, max time.Duration) time.Duration {
+	if value < 0 {
+		return 0
+	}
+	if value > max {
+		return max
+	}
+	return value
 }

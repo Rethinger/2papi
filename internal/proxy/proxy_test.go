@@ -234,6 +234,23 @@ func TestParseRetryAfterAcceptsZeroAndRejectsOverflow(t *testing.T) {
 	}
 }
 
+func TestQuotaCooldownUsesCodexResetHeaderAndIsBounded(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	h := http.Header{}
+	h.Set("X-Codex-Primary-Reset-At", fmt.Sprint(now.Add(90*time.Second).Unix()))
+	if got := proxy.ParseQuotaCooldown(h, 5*time.Second, now); got != 90*time.Second {
+		t.Fatalf("reset cooldown=%s", got)
+	}
+	h.Set("X-Codex-Primary-Reset-At", fmt.Sprint(now.Add(30*24*time.Hour).Unix()))
+	if got := proxy.ParseQuotaCooldown(h, 5*time.Second, now); got != 7*24*time.Hour {
+		t.Fatalf("unbounded cooldown=%s", got)
+	}
+	h.Set("Retry-After", "12")
+	if got := proxy.ParseQuotaCooldown(h, 5*time.Second, now); got != 12*time.Second {
+		t.Fatalf("retry-after priority=%s", got)
+	}
+}
+
 func TestCanceledContextDoesNotRetryOrWriteSynthetic502(t *testing.T) {
 	snap, err := config.Build(config.Config{Version: 1, Secret: "s", VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"m"}, RPM: 10}}, Models: []config.Model{{Alias: "m", UpstreamModel: "up", Accounts: []string{"a", "b"}}}, Accounts: []config.Account{{Name: "a", BaseURL: "http://a", APIKey: "a", Enabled: true, Priority: 1, Weight: 1, MaxConcurrency: 10}, {Name: "b", BaseURL: "http://b", APIKey: "b", Enabled: true, Priority: 2, Weight: 1, MaxConcurrency: 10}}, Routing: config.Routing{Strategy: "priority", MaxAttempts: 2}, Resilience: config.Resilience{CircuitFailures: 1}})
 	if err != nil {

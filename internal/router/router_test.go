@@ -104,3 +104,36 @@ func TestAffinityAndAffinityKey(t *testing.T) {
 		t.Fatalf("derived affinity should be stable and non-empty: %q %q", a, b)
 	}
 }
+
+func TestProviderModelStrategies(t *testing.T) {
+	snap := routerSnapshot(t, "priority", 2)
+	model := snap.ModelsByAlias["model"]
+	model.RoutingStrategy = "round_robin"
+	snap.ModelsByAlias["model"] = model
+	r := New(snap, resilience.New())
+	r.CommitAffinity("same", "secondary")
+	want := []string{"primary", "secondary", "primary", "secondary"}
+	for i, expected := range want {
+		plan, _ := r.Plan("model", "same")
+		if len(plan) == 0 || plan[0].Name != expected {
+			t.Fatalf("round robin %d=%+v want %s", i, plan, expected)
+		}
+	}
+
+	model.RoutingStrategy = "quota_failover"
+	snap.ModelsByAlias["model"] = model
+	state := resilience.New()
+	r = New(snap, state)
+	r.CommitAffinity("same", "secondary")
+	for i := 0; i < 2; i++ {
+		plan, _ := r.Plan("model", "same")
+		if len(plan) == 0 || plan[0].Name != "primary" {
+			t.Fatalf("quota failover reordered before 429: %+v", plan)
+		}
+	}
+	state.Cooldown("primary", time.Hour)
+	plan, _ := r.Plan("model", "same")
+	if len(plan) == 0 || plan[0].Name != "secondary" {
+		t.Fatalf("cooling primary not skipped: %+v", plan)
+	}
+}

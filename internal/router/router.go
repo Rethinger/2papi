@@ -18,10 +18,11 @@ type Router struct {
 	state    *resilience.State
 	mu       sync.Mutex
 	affinity map[string]Affinity
+	cursor   map[string]uint64
 }
 
 func New(s *config.Snapshot, st *resilience.State) *Router {
-	return &Router{snap: s, state: st, affinity: map[string]Affinity{}}
+	return &Router{snap: s, state: st, affinity: map[string]Affinity{}, cursor: map[string]uint64{}}
 }
 func (r *Router) Plan(modelAlias, aff string) ([]config.Account, config.Model) {
 	m := r.snap.ModelsByAlias[modelAlias]
@@ -37,7 +38,11 @@ func (r *Router) Plan(modelAlias, aff string) ([]config.Account, config.Model) {
 	if len(c) == 0 {
 		return nil, m
 	}
-	if aff != "" {
+	strategy := m.RoutingStrategy
+	if strategy == "" {
+		strategy = r.snap.Routing.Strategy
+	}
+	if aff != "" && strategy != "round_robin" && strategy != "quota_failover" {
 		r.mu.Lock()
 		v, ok := r.affinity[aff]
 		r.mu.Unlock()
@@ -50,7 +55,15 @@ func (r *Router) Plan(modelAlias, aff string) ([]config.Account, config.Model) {
 			}
 		}
 	}
-	switch r.snap.Routing.Strategy {
+	switch strategy {
+	case "round_robin":
+		r.mu.Lock()
+		start := int(r.cursor[m.Alias] % uint64(len(c)))
+		r.cursor[m.Alias]++
+		r.mu.Unlock()
+		c = append(append([]config.Account(nil), c[start:]...), c[:start]...)
+	case "quota_failover":
+		// Preserve provider-declared order until a real 429 puts an account into cooldown.
 	case "priority", "fallback-chain":
 		sort.SliceStable(c, func(i, j int) bool { return c[i].Priority < c[j].Priority })
 	case "fastest":

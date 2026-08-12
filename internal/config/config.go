@@ -35,9 +35,10 @@ type VirtualKey struct {
 	hash    []byte
 }
 type Model struct {
-	Alias         string   `yaml:"alias" json:"alias"`
-	UpstreamModel string   `yaml:"upstream_model" json:"upstream_model"`
-	Accounts      []string `yaml:"accounts" json:"accounts"`
+	Alias           string   `yaml:"alias" json:"alias"`
+	UpstreamModel   string   `yaml:"upstream_model" json:"upstream_model"`
+	Accounts        []string `yaml:"accounts" json:"accounts"`
+	RoutingStrategy string   `yaml:"routing_strategy,omitempty" json:"routing_strategy,omitempty"`
 }
 type Account struct {
 	ID             string     `yaml:"id,omitempty" json:"id,omitempty"`
@@ -177,12 +178,18 @@ func Build(c Config) (*Snapshot, error) {
 		s.Config.Accounts[i] = a
 		s.AccountsByName[a.Name] = a
 	}
-	for _, m := range c.Models {
+	for i, m := range c.Models {
 		if m.Alias == "" || m.UpstreamModel == "" || len(m.Accounts) == 0 {
 			return nil, errors.New("model alias/upstream_model/accounts required")
 		}
 		if _, exists := s.ModelsByAlias[m.Alias]; exists {
 			return nil, fmt.Errorf("duplicate model %s", m.Alias)
+		}
+		if m.RoutingStrategy == "" {
+			m.RoutingStrategy = c.Routing.Strategy
+		}
+		if !validModelRoutingStrategy(m.RoutingStrategy) {
+			return nil, fmt.Errorf("unsupported model routing strategy %s", m.RoutingStrategy)
 		}
 		eligible := false
 		for _, an := range m.Accounts {
@@ -197,6 +204,8 @@ func Build(c Config) (*Snapshot, error) {
 		if !eligible {
 			return nil, fmt.Errorf("model %s has no enabled account", m.Alias)
 		}
+		c.Models[i] = m
+		s.Config.Models[i] = m
 		s.ModelsByAlias[m.Alias] = m
 	}
 	for _, k := range c.VirtualKeys {
@@ -219,6 +228,14 @@ func Build(c Config) (*Snapshot, error) {
 		return nil, errors.New("at least one virtual key required")
 	}
 	return s, nil
+}
+func validModelRoutingStrategy(strategy string) bool {
+	switch strategy {
+	case "balanced", "priority", "weighted", "fallback-chain", "fastest", "cheapest", "quota-drain", "round_robin", "quota_failover":
+		return true
+	default:
+		return false
+	}
 }
 func parseDur(v string, d time.Duration) (time.Duration, error) {
 	if v == "" {

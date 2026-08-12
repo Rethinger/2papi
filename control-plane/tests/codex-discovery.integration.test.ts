@@ -125,6 +125,25 @@ test('grouped discovered models aggregate identical slugs for the UI', options, 
   });
 });
 
+test('grouped discovered models keep identical upstream names isolated by provider', options, async () => {
+  await withRollback(async client => {
+    const first = await seedAccounts(client);
+    const otherProvider = await client.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('api-it','API IT','openai-compatible','https://api.example.test/v1') RETURNING id");
+    const otherSecret = await insertSecret(client, 'api_key', { api_key: 'safe-test-key' });
+    const otherAccount = await client.query("INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url,enabled) VALUES ($1,$2,'api-one','API One','https://api.example.test/v1',true) RETURNING id", [otherProvider.rows[0].id, otherSecret]);
+    await discoverModelsForScope(client, { scope: 'account_id', account_id: first.accountOne }, { gatewayOperation: async () => ({ data: { models: [{ slug: 'gpt-5.6-luna', context_window: 272000, supported_in_api: true }] } }) });
+    await discoverModelsForScope(client, { scope: 'account_id', account_id: otherAccount.rows[0].id }, { gatewayOperation: async () => ({ data: { data: [{ id: 'gpt-5.6-luna', tool_call: true, owned_by: 'api-owner' }] } }) });
+
+    const luna = (await groupedDiscoveredModels(client)).filter(model => model.upstream_model === 'gpt-5.6-luna');
+    assert.equal(luna.length, 2);
+    assert.deepEqual(luna.map(model => model.provider_id).sort(), [first.providerId, otherProvider.rows[0].id].sort());
+    assert.deepEqual(Object.keys(luna.find(model => model.provider_id === first.providerId).accounts), [first.accountOne]);
+    assert.deepEqual(Object.keys(luna.find(model => model.provider_id === otherProvider.rows[0].id).accounts), [otherAccount.rows[0].id]);
+    assert.equal(luna.find(model => model.provider_id === first.providerId).metadata.context_window, 272000);
+    assert.equal(luna.find(model => model.provider_id === otherProvider.rows[0].id).metadata.tools, true);
+  });
+});
+
 test('discovery persists models from the OpenAI-compatible data envelope', options, async () => {
   await withRollback(async client => {
     const seeded = await seedAccounts(client);

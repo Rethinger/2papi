@@ -7,7 +7,9 @@ ALTER TABLE model_aliases
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'model_aliases_routing_strategy_check'
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'model_aliases_routing_strategy_check'
+      AND conrelid = 'model_aliases'::regclass
   ) THEN
     ALTER TABLE model_aliases
       ADD CONSTRAINT model_aliases_routing_strategy_check

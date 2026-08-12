@@ -12,12 +12,14 @@ import {
   HomeIcon,
   KeyIcon,
   PlusIcon,
+  PencilIcon,
   PulseIcon,
   RocketIcon,
   ServerIcon,
   ShieldLockIcon,
   StackIcon,
   SyncIcon,
+  TrashIcon,
 } from '@primer/octicons-react';
 import { FormEvent, useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import {
@@ -30,6 +32,12 @@ import {
   type MessageKey,
   type Translator,
 } from './i18n';
+import { CODEX_AUTH_CHANNEL } from './codex-client';
+import { CodexAccountModal } from './components/codex-account-modal';
+import { CodexAccountCard } from './components/codex-account-card';
+import { ModelDiscoveryModal } from './components/model-discovery-modal';
+import { ModelCard } from './components/model-card';
+import { accountDefaultsForProvider } from './account-form';
 
 type ResourceMap = {
   overview: Record<string, number | null>;
@@ -44,6 +52,8 @@ type ResourceMap = {
 
 type View = 'overview' | 'accounts' | 'models' | 'keys' | 'audit' | 'settings';
 type UiError = { detail: string; fallback: MessageKey } | null;
+type EditingResource = { kind: 'provider' | 'account' | 'model' | 'key'; item: any } | null;
+type DeletingResource = { kind: 'provider' | 'account' | 'model'; item: any } | null;
 
 const emptyData: ResourceMap = {
   overview: {},
@@ -187,8 +197,12 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
   const [data, setData] = useState<ResourceMap>(emptyData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<UiError>(null);
-  const [modal, setModal] = useState<'provider' | 'account' | 'model' | 'key' | 'routing' | null>(null);
+  const [modal, setModal] = useState<'provider' | 'account' | 'codex' | 'discovery' | 'model' | 'key' | 'routing' | null>(null);
+  const [discoveryAccountId, setDiscoveryAccountId] = useState<string | undefined>();
   const [rotating, setRotating] = useState<any>(null);
+  const [editing, setEditing] = useState<EditingResource>(null);
+  const [deleting, setDeleting] = useState<DeletingResource>(null);
+  const [accountDraft, setAccountDraft] = useState({ providerId: '', baseURL: '' });
   const [createdKey, setCreatedKey] = useState('');
   const [isPending, startTransition] = useTransition();
   const t = useMemo(() => createTranslator(locale), [locale]);
@@ -202,6 +216,21 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
       // Storage can be unavailable in hardened browsers. The server-selected locale remains valid.
     }
   }, [initialLocale]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('codex_status');
+    if (!status) return;
+    const accountId = params.get('account_id') ?? undefined;
+    const channel = new BroadcastChannel(CODEX_AUTH_CHANNEL);
+    channel.postMessage({ status, accountId });
+    channel.close();
+    params.delete('codex_status');
+    params.delete('account_id');
+    const query = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+    if (window.name === '2papi-codex-auth') window.setTimeout(() => window.close(), 250);
+  }, []);
 
   const selectLocale = useCallback((nextLocale: Locale) => {
     setLocale(nextLocale);
@@ -231,11 +260,31 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    const channel = new BroadcastChannel(CODEX_AUTH_CHANNEL);
+    channel.onmessage = event => {
+      if ((event.data as { status?: string }).status === 'connected') void load();
+    };
+    return () => channel.close();
+  }, [load]);
+
   const latestVersion = data.versions[0];
   const enabledAccounts = data.accounts.filter(account => account.enabled);
   const providerById = useMemo(
     () => new Map(data.providers.map(provider => [provider.id, provider])),
     [data.providers],
+  );
+  const codexProviderIds = useMemo(
+    () => new Set(data.providers.filter(provider => provider.adapter === 'openai-codex').map(provider => provider.id)),
+    [data.providers],
+  );
+  const codexAccounts = useMemo(
+    () => data.accounts.filter(account => codexProviderIds.has(account.provider_id)),
+    [codexProviderIds, data.accounts],
+  );
+  const standardAccounts = useMemo(
+    () => data.accounts.filter(account => !codexProviderIds.has(account.provider_id)),
+    [codexProviderIds, data.accounts],
   );
   const currentNavLabel = t(nav.find(item => item[0] === view)?.[1] ?? 'nav.overview');
 
@@ -277,12 +326,12 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
         provider_id: form.get('provider_id'),
         name: form.get('name'),
         display_name: form.get('display_name'),
-        base_url: form.get('base_url'),
+        base_url: accountDraft.baseURL,
         enabled: true,
         priority: Number(form.get('priority') || 1),
-        weight: Number(form.get('weight') || 1),
+        weight: 1,
         max_concurrency: Number(form.get('max_concurrency') || 100),
-        cost: Number(form.get('cost') || 0),
+        cost: 0,
         credential: { api_key: form.get('api_key') },
         metadata: {},
       }),
@@ -382,6 +431,69 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
     }));
   }
 
+  function toggleResource(resource: 'providers' | 'models' | 'virtual-keys', item: any) {
+    mutate(() => api(`${resource}/${item.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled: !item.enabled }),
+    }));
+  }
+
+  function openAccountModal() {
+    setAccountDraft({ providerId: '', baseURL: '' });
+    setModal('account');
+  }
+
+  function deleteResource() {
+    if (!deleting) return;
+    const resource = deleting.kind === 'provider' ? 'providers' : deleting.kind === 'model' ? 'models' : 'accounts';
+    startTransition(async () => {
+      setError(null);
+      try {
+        await api(`${resource}/${deleting.item.id}`, { method: 'DELETE' });
+        setDeleting(null);
+        await load();
+      } catch (cause) { setError(uiError(cause, 'error.actionFailed')); }
+    });
+  }
+
+  function updateModelStrategy(model: any, routing_strategy: 'round_robin' | 'quota_failover') {
+    mutate(() => api(`models/${model.id}`, { method: 'PATCH', body: JSON.stringify({ routing_strategy }) }));
+  }
+
+  function submitEditing(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+    const form = new FormData(event.currentTarget);
+    const routes = { provider: 'providers', account: 'accounts', model: 'models', key: 'virtual-keys' } as const;
+    let body: Record<string, unknown>;
+    switch (editing.kind) {
+      case 'provider':
+        body = { name: form.get('name'), base_url: form.get('base_url') };
+        break;
+      case 'account':
+        body = {
+          display_name: form.get('display_name'), base_url: form.get('base_url'),
+          priority: Number(form.get('priority')),
+          max_concurrency: Number(form.get('max_concurrency')),
+        };
+        break;
+      case 'model':
+        body = { alias: form.get('alias'), upstream_model: form.get('upstream_model'), ...(!editing.item.provider_id ? { accounts: form.getAll('accounts') } : {}) };
+        break;
+      case 'key':
+        body = { name: form.get('name'), rpm: Number(form.get('rpm')), models: form.getAll('models') };
+        break;
+    }
+    startTransition(async () => {
+      setError(null);
+      try {
+        await api(`${routes[editing.kind]}/${editing.item.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        setEditing(null);
+        await load();
+      } catch (cause) { setError(uiError(cause, 'error.actionFailed')); }
+    });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -448,7 +560,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
                 <h1>{t('overview.title')}</h1>
                 <p>{t('overview.description')}</p>
               </div>
-              <button className="primary" onClick={() => setModal('account')}>
+              <button className="primary" onClick={openAccountModal}>
                 <PlusIcon size={16} />{t('action.connectAccount')}
               </button>
             </div>
@@ -476,7 +588,6 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
                         </div>
                         <div className="account-meta">
                           <span>{t('overview.pool.priority')} <b>{account.priority}</b></span>
-                          <span>{t('overview.pool.weight')} <b>{account.weight}</b></span>
                           <span>{t('overview.pool.limit')} <b>{account.max_concurrency}</b></span>
                         </div>
                         <div className="quota"><span style={{ width: `${capacity}%` }} /></div>
@@ -485,7 +596,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
                     );
                   })}
                   {!data.accounts.length && (
-                    <button className="empty-card" onClick={() => setModal('account')}>
+                    <button className="empty-card" onClick={openAccountModal}>
                       <PlusIcon size={24} /><b>{t('overview.pool.emptyTitle')}</b><span>{t('overview.pool.emptyBody')}</span>
                     </button>
                   )}
@@ -530,31 +641,70 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
             title={t('accounts.title')}
             description={t('accounts.description')}
             action={<>
+              <button className="primary codex-action" onClick={() => setModal('codex')}><PlusIcon size={16} />{t('action.addCodexAccount')}</button>
               <button className="secondary" onClick={() => setModal('provider')}><PlusIcon size={16} />{t('action.addProvider')}</button>
-              <button className="primary" onClick={() => setModal('account')}><PlusIcon size={16} />{t('action.addAccount')}</button>
+              <button className="secondary" onClick={openAccountModal}><PlusIcon size={16} />{t('action.addAccount')}</button>
             </>}
           >
+            <div className="section-heading">
+              <div><h2>{t('accounts.providersTitle')}</h2><p>{t('accounts.providersDescription')}</p></div>
+            </div>
+            <div className="table-card provider-table">
+              <table>
+                <thead><tr><th>{t('accounts.column.provider')}</th><th>{t('accounts.column.endpoint')}</th><th>{t('accounts.column.status')}</th><th /></tr></thead>
+                <tbody>{data.providers.map(provider => <tr key={provider.id}>
+                  <td><div className="cell-title"><span className="provider-glyph"><CpuIcon size={16} /></span><div><b>{provider.name}</b><small>{provider.slug} · {provider.adapter}</small></div></div></td>
+                  <td><code className="truncate">{provider.base_url}</code></td>
+                  <td><Status good={provider.enabled}>{provider.enabled ? t('accounts.enabled') : t('accounts.disabled')}</Status></td>
+                  <td><div className="row-actions"><button className="ghost" onClick={() => setEditing({ kind: 'provider', item: provider })}><PencilIcon size={13} />{t('action.edit')}</button><button className="ghost" onClick={() => toggleResource('providers', provider)}>{provider.enabled ? t('action.disable') : t('action.enable')}</button><button className="danger-quiet" onClick={() => setDeleting({ kind: 'provider', item: provider })}><TrashIcon size={13} />{t('action.delete')}</button></div></td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <div className="section-heading">
+              <div><h2>{t('accounts.codexTitle')}</h2><p>{t('accounts.codexDescription')}</p></div>
+              <button className="ghost" onClick={() => { setDiscoveryAccountId(undefined); setModal('discovery'); }} disabled={!codexAccounts.length}><SyncIcon size={14} />{t('action.discoverModels')}</button>
+            </div>
+            <div className="codex-account-grid">
+              {codexAccounts.map(account => (
+                <CodexAccountCard
+                  key={account.id}
+                  account={account}
+                  t={t}
+                  onChanged={load}
+                  onDiscover={() => { setDiscoveryAccountId(account.id); setModal('discovery'); }}
+                  onToggle={() => toggleAccount(account)}
+                  onEdit={() => setEditing({ kind: 'account', item: account })}
+                  onDelete={() => setDeleting({ kind: 'account', item: account })}
+                  onError={cause => setError(uiError(cause, 'error.codexActionFailed'))}
+                />
+              ))}
+              {!codexAccounts.length && <button className="empty-state codex-empty" onClick={() => setModal('codex')}><PlusIcon size={24} /><b>{t('action.addCodexAccount')}</b><span>{t('codex.modal.secureBody')}</span></button>}
+            </div>
+            <div className="section-heading standard-heading"><div><h2>{t('accounts.standardTitle')}</h2></div></div>
             <div className="table-card">
               <table>
                 <thead><tr><th>{t('accounts.column.account')}</th><th>{t('accounts.column.provider')}</th><th>{t('accounts.column.endpoint')}</th><th>{t('accounts.column.routing')}</th><th>{t('accounts.column.credential')}</th><th>{t('accounts.column.status')}</th><th /></tr></thead>
                 <tbody>
-                  {data.accounts.map(account => (
+                  {standardAccounts.map(account => (
                     <tr key={account.id}>
                       <td><div className="cell-title"><span className="provider-glyph"><ServerIcon size={16} /></span><div><b>{account.display_name}</b><small>{account.name}</small></div></div></td>
                       <td>{providerById.get(account.provider_id)?.name ?? t('accounts.unknown')}</td>
                       <td><code className="truncate">{account.base_url}</code></td>
-                      <td>P{account.priority} · W{account.weight}</td>
+                      <td>P{account.priority}</td>
                       <td><Status good={account.secret_present}>{account.secret_present ? t('accounts.encrypted', { version: account.key_version }) : t('accounts.missing')}</Status></td>
                       <td><Status good={account.enabled}>{account.enabled ? t('accounts.enabled') : t('accounts.disabled')}</Status></td>
                       <td><div className="row-actions">
+                        <button className="ghost" onClick={() => { setDiscoveryAccountId(account.id); setModal('discovery'); }} disabled={isPending || !account.enabled}><SyncIcon size={14} />{t('action.discoverModels')}</button>
                         <button className="ghost" onClick={() => setRotating(account)} disabled={isPending}><ShieldLockIcon size={14} />{t('action.rotate')}</button>
+                        <button className="ghost" onClick={() => setEditing({ kind: 'account', item: account })} disabled={isPending}><PencilIcon size={13} />{t('action.edit')}</button>
                         <button className="ghost" onClick={() => toggleAccount(account)} disabled={isPending}>{account.enabled ? t('action.disable') : t('action.enable')}</button>
+                        <button className="danger-quiet" onClick={() => setDeleting({ kind: 'account', item: account })} disabled={isPending}><TrashIcon size={13} />{t('action.delete')}</button>
                       </div></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {!data.accounts.length && <Empty title={t('accounts.emptyTitle')} body={t('accounts.emptyBody')} onClick={() => setModal('account')} />}
+              {!standardAccounts.length && <Empty title={t('accounts.emptyTitle')} body={t('accounts.emptyBody')} onClick={openAccountModal} />}
             </div>
           </ResourcePage>
         )}
@@ -564,18 +714,13 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
             eyebrow={t('models.eyebrow')}
             title={t('models.title')}
             description={t('models.description')}
-            action={<button className="primary" onClick={() => setModal('model')}><PlusIcon size={16} />{t('action.newModelRoute')}</button>}
+            action={<>
+              <button className="secondary" onClick={() => { setDiscoveryAccountId(undefined); setModal('discovery'); }}><SyncIcon size={16} />{t('action.discoverModels')}</button>
+              <button className="primary" onClick={() => setModal('model')}><PlusIcon size={16} />{t('action.newModelRoute')}</button>
+            </>}
           >
             <div className="model-grid">
-              {data.models.map(model => (
-                <article className="model-card" key={model.id}>
-                  <header><span className="provider-glyph tone-2"><GitBranchIcon size={16} /></span><Status good={model.enabled}>{model.enabled ? t('models.available') : t('models.disabled')}</Status></header>
-                  <h3>{model.alias}</h3>
-                  <code>{model.upstream_model}</code>
-                  <div className="route-chips">{model.accounts.map((id: string) => <span key={id}>{data.accounts.find(account => account.id === id)?.name ?? id.slice(0, 8)}</span>)}</div>
-                  <footer><span>{modelAccountCount(model.accounts.length, locale, t)}</span><span>{data.routing?.strategy ?? 'balanced'}</span></footer>
-                </article>
-              ))}
+              {data.models.map(model => <ModelCard key={model.id} model={model} locale={locale} t={t} onEdit={() => setEditing({ kind: 'model', item: model })} onToggle={() => toggleResource('models', model)} onDelete={() => setDeleting({ kind: 'model', item: model })} onStrategy={strategy => updateModelStrategy(model, strategy)} />)}
               {!data.models.length && <Empty title={t('models.emptyTitle')} body={t('models.emptyBody')} onClick={() => setModal('model')} />}
             </div>
           </ResourcePage>
@@ -590,7 +735,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
           >
             <div className="table-card">
               <table>
-                <thead><tr><th>{t('keys.column.name')}</th><th>{t('keys.column.prefix')}</th><th>{t('keys.column.models')}</th><th>{t('keys.column.rpm')}</th><th>{t('keys.column.created')}</th><th>{t('keys.column.status')}</th></tr></thead>
+                <thead><tr><th>{t('keys.column.name')}</th><th>{t('keys.column.prefix')}</th><th>{t('keys.column.models')}</th><th>{t('keys.column.rpm')}</th><th>{t('keys.column.created')}</th><th>{t('keys.column.status')}</th><th /></tr></thead>
                 <tbody>
                   {data.keys.map(key => (
                     <tr key={key.id}>
@@ -600,6 +745,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
                       <td>{key.rpm}</td>
                       <td>{new Date(key.created_at).toLocaleDateString(dateLocale(locale))}</td>
                       <td><Status good={key.enabled}>{key.enabled ? t('keys.active') : t('keys.disabled')}</Status></td>
+                      <td><div className="row-actions"><button className="ghost" onClick={() => setEditing({ kind: 'key', item: key })}><PencilIcon size={13} />{t('action.edit')}</button><button className="ghost" onClick={() => toggleResource('virtual-keys', key)}>{key.enabled ? t('action.disable') : t('action.enable')}</button></div></td>
                     </tr>
                   ))}
                 </tbody>
@@ -650,6 +796,26 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
         {loading && <div className="loading-layer"><span /><b>{t('loading.controlPlane')}</b></div>}
       </main>
 
+      {modal === 'codex' && (
+        <CodexAccountModal
+          t={t}
+          onClose={() => setModal(null)}
+          onConnected={async () => { setModal(null); await load(); }}
+          onError={cause => setError(uiError(cause, 'error.codexActionFailed'))}
+        />
+      )}
+      {modal === 'discovery' && (
+        <ModelDiscoveryModal
+          accounts={data.accounts}
+          providers={data.providers}
+          existingAliases={data.models.map(model => model.alias)}
+          initialAccountId={discoveryAccountId}
+          t={t}
+          onClose={() => { setModal(null); setDiscoveryAccountId(undefined); }}
+          onImported={load}
+          onError={cause => setError(uiError(cause, 'error.codexActionFailed'))}
+        />
+      )}
       {modal === 'provider' && (
         <Modal title={t('modal.provider.title')} onClose={() => setModal(null)} t={t}>
           <form onSubmit={submitProvider}>
@@ -664,7 +830,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
         <Modal title={t('modal.account.title')} onClose={() => setModal(null)} t={t}>
           <form onSubmit={submitAccount}>
             <label>{t('form.provider')}
-              <select name="provider_id" required defaultValue="">
+              <select name="provider_id" required value={accountDraft.providerId} onChange={event => setAccountDraft(accountDefaultsForProvider(data.providers, event.target.value))}>
                 <option value="" disabled>{t('form.selectProvider')}</option>
                 {data.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
               </select>
@@ -673,14 +839,12 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
               <Field label={t('form.internalName')} name="name" placeholder="openai-primary" />
               <Field label={t('form.displayName')} name="display_name" placeholder="OpenAI Primary" />
             </div>
-            <Field label={t('form.baseUrl')} name="base_url" placeholder="https://api.openai.com" type="url" />
+            <label>{t('form.baseUrl')}<input name="base_url" type="url" value={accountDraft.baseURL} readOnly required /></label>
             <Field label={t('form.apiKey')} name="api_key" placeholder="sk-…" type="password" />
-            <div className="form-row three">
+            <div className="form-row">
               <Field label={t('form.priority')} name="priority" type="number" defaultValue="1" />
-              <Field label={t('form.weight')} name="weight" type="number" defaultValue="1" />
               <Field label={t('form.concurrency')} name="max_concurrency" type="number" defaultValue="100" />
             </div>
-            <Field label={t('form.costWeight')} name="cost" type="number" defaultValue="0" step="0.001" />
             <FormActions pending={isPending} t={t} />
           </form>
         </Modal>
@@ -712,7 +876,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
           <form onSubmit={submitRouting}>
             <label>{t('form.strategy')}
               <select name="strategy" defaultValue={data.routing?.strategy ?? 'balanced'}>
-                {['balanced', 'priority', 'weighted'].map(option => <option key={option} value={option}>{option}</option>)}
+                {['balanced', 'priority'].map(option => <option key={option} value={option}>{option}</option>)}
               </select>
             </label>
             <div className="form-row">
@@ -734,6 +898,43 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
             <Field label={t('form.newApiKey')} name="api_key" type="password" placeholder="sk-…" />
             <FormActions pending={isPending} t={t} />
           </form>
+        </Modal>
+      )}
+      {editing && (
+        <Modal title={t(`modal.${editing.kind}.editTitle` as MessageKey)} onClose={() => setEditing(null)} t={t}>
+          <form onSubmit={submitEditing}>
+            {editing.kind === 'provider' && <>
+              <Field label={t('form.displayName')} name="name" defaultValue={editing.item.name} />
+              <Field label={t('form.baseUrl')} name="base_url" type="url" defaultValue={editing.item.base_url} />
+            </>}
+            {editing.kind === 'account' && <>
+              <Field label={t('form.displayName')} name="display_name" defaultValue={editing.item.display_name} />
+              <Field label={t('form.baseUrl')} name="base_url" type="url" defaultValue={editing.item.base_url} />
+              <div className="form-row">
+                <Field label={t('form.priority')} name="priority" type="number" defaultValue={String(editing.item.priority)} />
+                <Field label={t('form.concurrency')} name="max_concurrency" type="number" defaultValue={String(editing.item.max_concurrency)} />
+              </div>
+            </>}
+            {editing.kind === 'model' && <>
+              <div className="form-row"><Field label={t('form.publicAlias')} name="alias" defaultValue={editing.item.alias} /><Field label={t('form.upstreamModel')} name="upstream_model" defaultValue={editing.item.upstream_model} /></div>
+              {!editing.item.provider_id && <fieldset><legend>{t('form.eligibleAccounts')}</legend>{data.accounts.map(account => <label className="check-row" key={account.id}><input type="checkbox" name="accounts" value={account.id} defaultChecked={editing.item.accounts.includes(account.id)} /><span>{account.display_name}</span><small>{account.name}</small></label>)}</fieldset>}
+            </>}
+            {editing.kind === 'key' && <>
+              <Field label={t('form.keyName')} name="name" defaultValue={editing.item.name} />
+              <Field label={t('form.requestsPerMinute')} name="rpm" type="number" defaultValue={String(editing.item.rpm)} />
+              <fieldset><legend>{t('form.allowedModels')}</legend>{data.models.map(model => <label className="check-row" key={model.id}><input type="checkbox" name="models" value={model.alias} defaultChecked={editing.item.models?.includes(model.alias)} /><span>{model.alias}</span><small>{model.upstream_model}</small></label>)}</fieldset>
+            </>}
+            <FormActions pending={isPending} t={t} />
+          </form>
+        </Modal>
+      )}
+      {deleting && (
+        <Modal title={t(deleting.kind === 'provider' ? 'delete.providerTitle' : deleting.kind === 'model' ? 'delete.modelTitle' : 'delete.accountTitle')} onClose={() => setDeleting(null)} t={t}>
+          <p>{t(deleting.kind === 'provider' ? 'delete.providerBody' : deleting.kind === 'model' ? 'delete.modelBody' : 'delete.accountBody')}</p>
+          <footer className="form-actions">
+            <button className="secondary" type="button" onClick={() => setDeleting(null)}>{t('delete.cancel')}</button>
+            <button className="danger" type="button" onClick={deleteResource} disabled={isPending}><TrashIcon size={14} />{t('delete.confirm')}</button>
+          </footer>
         </Modal>
       )}
     </div>

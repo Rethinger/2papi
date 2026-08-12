@@ -23,6 +23,41 @@ export const ModelSchema = z.union([ProviderModelSchema, ManualModelSchema]);
 export const RoutingSchema = z.object({ strategy: z.enum(['balanced','priority','weighted']).default('balanced'), sticky_ttl: z.string().default('1h'), max_attempts: z.number().int().positive().default(2), resilience: z.object({ cooldown: z.string().default('30s'), circuit_failures: z.number().int().positive().default(3), circuit_reset: z.string().default('1m') }).default({ cooldown: '30s', circuit_failures: 3, circuit_reset: '1m' }) });
 export const VirtualKeySchema = z.object({ name: z.string().min(1), plaintext_key: z.string().min(8).optional(), enabled: z.boolean().default(true), models: z.array(z.string()).default([]), rpm: z.number().int().positive().default(60) });
 
+// Zod 4 applies defaults inside `.partial()`. PATCH schemas must therefore be
+// explicit: omitted properties have to remain omitted or a narrow update can
+// silently reset unrelated persisted state (for example Codex auth metadata).
+export const ProviderPatchSchema = z.object({
+  name: z.string().min(1).optional(),
+  adapter: z.string().min(1).optional(),
+  base_url: z.string().url().optional(),
+  enabled: z.boolean().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+export const AccountPatchSchema = z.object({
+  display_name: z.string().min(1).optional(),
+  base_url: z.string().url().optional(),
+  enabled: z.boolean().optional(),
+  priority: z.number().int().optional(),
+  weight: z.number().int().positive().optional(),
+  max_concurrency: z.number().int().positive().optional(),
+  cost: z.number().nonnegative().optional(),
+  credential: z.object({ api_key: z.string().min(1) }).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+export const ModelPatchSchema = z.object({
+  alias: z.string().min(1).optional(),
+  upstream_model: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+  accounts: z.array(z.string().uuid()).min(1).optional(),
+  routing_strategy: z.enum(['round_robin', 'quota_failover']).optional(),
+});
+export const VirtualKeyPatchSchema = z.object({
+  name: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+  models: z.array(z.string()).optional(),
+  rpm: z.number().int().positive().optional(),
+});
+
 function b64ToBuf(v: string) { return Buffer.from(v, 'base64'); }
 function bufToB64(v: Buffer) { return v.toString('base64'); }
 export function rowToEncrypted(row: any): EncryptedSecretRecord { return { key_version: row.key_version, data_key_nonce: bufToB64(row.data_key_nonce), data_key_ciphertext: bufToB64(row.data_key_ciphertext), data_key_tag: bufToB64(row.data_key_tag), secret_nonce: bufToB64(row.secret_nonce), secret_ciphertext: bufToB64(row.secret_ciphertext), secret_tag: bufToB64(row.secret_tag) }; }
@@ -50,7 +85,10 @@ export async function storeDraft(client: PoolClient) {
 }
 
 export async function publishLatest(client: PoolClient) {
-  const draft = await client.query("SELECT * FROM config_versions WHERE status='draft' ORDER BY version DESC LIMIT 1 FOR UPDATE");
+  const draft = await client.query(`SELECT * FROM config_versions
+    WHERE status='draft'
+      AND version > COALESCE((SELECT max(version) FROM config_versions WHERE status='published'), 0)
+    ORDER BY version DESC LIMIT 1 FOR UPDATE`);
   const row = draft.rows[0] ?? (await storeDraft(client));
   if (requiresSchemaV2(row.snapshot, Number(row.schema_version ?? row.snapshot?.version ?? 1))) await assertSchemaV2Publishable(client);
   const version = row.version;

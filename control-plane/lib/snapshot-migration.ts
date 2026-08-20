@@ -83,7 +83,7 @@ function containsUnexpectedCredentialMaterial(value: unknown, path: Array<string
     const normalized = key.toLowerCase();
     const permittedLegacySecret = (path.length === 0 && normalized === 'secret') || (path[0] === 'accounts' && typeof path[1] === 'number' && normalized === 'api_key');
     const plaintextVirtualKey = path[0] === 'virtual_keys' && typeof path[1] === 'number' && normalized === 'key';
-    if ((!permittedLegacySecret && ['secret', 'api_key', 'access_token', 'refresh_token', 'id_token', 'authorization'].includes(normalized)) || plaintextVirtualKey) return true;
+    if ((!permittedLegacySecret && ['secret', 'api_key', 'access_token', 'refresh_token', 'id_token', 'authorization', 'cookie', 'session', 'session_key'].includes(normalized)) || plaintextVirtualKey) return true;
     if (containsUnexpectedCredentialMaterial(child, [...path, key])) return true;
   }
   return false;

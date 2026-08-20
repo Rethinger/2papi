@@ -4,3 +4,23 @@ coverage.out
 artifacts/
 control-plane/node_modules/
 control-plane/.next/
+control-plane/.next-export/
+control-plane/tsconfig.tsbuildinfo
+control-plane/tsconfig.build.tsbuildinfo
+
+# build artifacts
+bin/
+gateway
+2papi
+dist/
+*.exe
+
+# local data / env
+.env
+.env.local
+compose.override.yaml
+
+# os junk
+Thumbs.db
+.DS_Store
+%APPDATA%/

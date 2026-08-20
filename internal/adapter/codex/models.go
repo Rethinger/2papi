@@ -8,9 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 const maxModelDiscoveryBody = 1 << 20
@@ -28,11 +29,19 @@ type ModelDiscovery struct {
 	Models []CodexModel `json:"models"`
 }
 type CodexModel struct {
-	Slug           string          `json:"slug"`
-	Visibility     string          `json:"visibility,omitempty"`
-	SupportedInAPI bool            `json:"supported_in_api"`
-	ContextWindow  int64           `json:"context_window,omitempty"`
-	Capabilities   json.RawMessage `json:"capabilities,omitempty"`
+	Slug                  string          `json:"slug"`
+	DisplayName           string          `json:"display_name,omitempty"`
+	Description           string          `json:"description,omitempty"`
+	Visibility            string          `json:"visibility,omitempty"`
+	SupportedInAPI        bool            `json:"supported_in_api"`
+	ContextWindow         int64           `json:"context_window,omitempty"`
+	WebSearchToolType     string          `json:"web_search_tool_type,omitempty"`
+	SupportsSearchTool    *bool           `json:"supports_search_tool,omitempty"`
+	InputModalities       []string        `json:"input_modalities,omitempty"`
+	ToolMode              string          `json:"tool_mode,omitempty"`
+	SupportsParallelCalls *bool           `json:"supports_parallel_tool_calls,omitempty"`
+	AvailableInPlans      []string        `json:"available_in_plans,omitempty"`
+	Capabilities          json.RawMessage `json:"capabilities,omitempty"`
 }
 
 func (m *modelClient) discover(ctx context.Context, cred config.Credential) (json.RawMessage, error) {
@@ -49,8 +58,114 @@ func (m *modelClient) discover(ctx context.Context, cred config.Credential) (jso
 	if env.Models == nil {
 		env.Models = []CodexModel{}
 	}
+	for i := range env.Models {
+		enrichModel(&env.Models[i])
+	}
+	env.Models = appendImageModels(env.Models)
 	return json.Marshal(ModelDiscovery{Models: env.Models})
 }
+
+// appendImageModels adds image generation models from the supplementary
+// catalog when the backend list does not mention them. The ChatGPT models
+// endpoint omits image models entirely, so the catalog is the only source of
+// their discovery rows. Backend entries always win and are never duplicated.
+func appendImageModels(models []CodexModel) []CodexModel {
+	known := make(map[string]bool, len(models))
+	for _, model := range models {
+		known[model.Slug] = true
+	}
+	slugs := make([]string, 0, len(imageModelCatalog))
+	for slug := range imageModelCatalog {
+		if !known[slug] {
+			slugs = append(slugs, slug)
+		}
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		entry := imageModelCatalog[slug]
+		models = append(models, CodexModel{
+			Slug:            slug,
+			DisplayName:     entry.DisplayName,
+			Description:     entry.Description,
+			Visibility:      "list",
+			SupportedInAPI:  true,
+			InputModalities: entry.InputModalities,
+			Capabilities:    mergeCapabilities(nil, entry.ReasoningLevels, true),
+		})
+	}
+	return models
+}
+
+// enrichModel fills gaps in the sparse backend payload from the bundled
+// openai/codex catalog snapshot. Backend data always wins when present.
+func enrichModel(model *CodexModel) {
+	entry, known := modelCatalog[model.Slug]
+	imageGeneration := false
+	if !known {
+		entry, known = imageModelCatalog[model.Slug]
+		imageGeneration = known
+	}
+	if !known {
+		return
+	}
+	if model.DisplayName == "" {
+		model.DisplayName = entry.DisplayName
+	}
+	if model.Description == "" {
+		model.Description = entry.Description
+	}
+	if model.ContextWindow == 0 {
+		model.ContextWindow = entry.ContextWindow
+	}
+	if model.WebSearchToolType == "" {
+		model.WebSearchToolType = entry.WebSearchToolType
+	}
+	if model.SupportsSearchTool == nil && entry.SupportsSearchTool {
+		model.SupportsSearchTool = boolPtr(true)
+	}
+	if model.InputModalities == nil && len(entry.InputModalities) > 0 {
+		model.InputModalities = entry.InputModalities
+	}
+	if model.ToolMode == "" {
+		model.ToolMode = entry.ToolMode
+	}
+	if model.SupportsParallelCalls == nil && entry.SupportsParallelCalls {
+		model.SupportsParallelCalls = boolPtr(true)
+	}
+	if model.AvailableInPlans == nil && len(entry.AvailableInPlans) > 0 {
+		model.AvailableInPlans = entry.AvailableInPlans
+	}
+	model.Capabilities = mergeCapabilities(model.Capabilities, entry.ReasoningLevels, imageGeneration)
+}
+
+func mergeCapabilities(raw json.RawMessage, reasoningLevels []string, imageGeneration bool) json.RawMessage {
+	if len(raw) > 0 && !json.Valid(raw) {
+		return raw
+	}
+	merged := map[string]any{}
+	if len(raw) > 0 {
+		var existing map[string]any
+		if err := json.Unmarshal(raw, &existing); err == nil {
+			merged = existing
+		}
+	}
+	if _, present := merged["reasoning"]; !present && len(reasoningLevels) > 0 {
+		merged["reasoning"] = true
+	}
+	if _, present := merged["image_generation"]; !present && imageGeneration {
+		merged["image_generation"] = true
+	}
+	if len(merged) == 0 {
+		return nil
+	}
+	out, err := json.Marshal(merged)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+func boolPtr(value bool) *bool { return &value }
 
 func (m *modelClient) validate(ctx context.Context, cred config.Credential) error {
 	_, err := m.getModels(ctx, cred)

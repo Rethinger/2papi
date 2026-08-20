@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	adapteropenai "github.com/1jehuang/2papi/internal/adapter/openai"
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/adapter"
+	adapteropenai "github.com/Rethinger/2papi/internal/adapter/openai"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 func TestExecuteRewritesRequestModelAndAuthorization(t *testing.T) {
@@ -74,7 +74,7 @@ func TestOperateDiscoverModelsAndCapabilityError(t *testing.T) {
 	}))
 	defer up.Close()
 	ad := adapteropenai.New(up.Client())
-	out, err := ad.Operate(context.Background(), adapter.Operation{Kind: adapter.OperationDiscoverModels, Account: account(up.URL)})
+	out, err := ad.Operate(context.Background(), adapter.Operation{Kind: adapter.OperationDiscoverModels, Account: account(up.URL + "/v1")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -152,6 +152,9 @@ test('one-shot provider dispatch works before publish and does not retain or exp
     refresh_token: 'one-shot-refresh-token',
     id_token: 'one-shot-id-token',
     chatgpt_account_id: 'acct-one-shot',
+    plan_type: 'plus',
+    auth_method: 'auth_file',
+    email: 'must-not-cross-runtime-boundary@example.com',
   });
   const account = await client.query("INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url,credential_revision) VALUES ($1,$2,'unpublished-account','Unpublished','https://chatgpt.com/backend-api/codex',3) RETURNING id", [providerID, secret]);
   client.release();
@@ -186,6 +189,9 @@ test('one-shot provider dispatch works before publish and does not retain or exp
   assert.equal(wire.account.credential.refresh_token, 'one-shot-refresh-token');
   assert.equal(wire.account.credential.id_token, 'one-shot-id-token');
   assert.equal(wire.account.credential.revision, 3);
+  assert.equal(wire.account.credential.plan_type, undefined);
+  assert.equal(wire.account.credential.auth_method, undefined);
+  assert.equal(wire.account.credential.email, undefined);
   assert.equal((await pool!.query('SELECT count(*)::int n FROM config_versions')).rows[0].n, 0);
 
   const persisted = JSON.stringify((await pool!.query('SELECT * FROM accounts WHERE id=$1', [account.rows[0].id])).rows[0]);
@@ -221,6 +227,48 @@ test('one-shot provider dispatch works before publish and does not retain or exp
   } finally {
     globalThis.fetch = originalFetch;
   }
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: { code: 'codex_quota_unsupported', message: 'safe operation error' } }), {
+    status: 409,
+    headers: { 'content-type': 'application/json' },
+  });
+  try {
+    await assert.rejects(
+      dispatchProviderOperation(pool!, account.rows[0].id, 'read_usage', {}),
+      (error: any) => error.status === 409 && error.code === 'codex_quota_unsupported' && error.message === 'safe operation error',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('API key provider dispatch infers the runtime credential kind', options, async () => {
+  const client = await pool!.connect();
+  const provider = await client.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('api-discovery','API Discovery','openai-compatible','https://api.example.test/v1') RETURNING id");
+  const secret = await insertEncrypted(client, { api_key: 'api-discovery-key' });
+  const account = await client.query("INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url,credential_revision) VALUES ($1,$2,'api-discovery','API Discovery','https://api.example.test/v1',1) RETURNING id", [provider.rows[0].id, secret]);
+  client.release();
+
+  const originalFetch = globalThis.fetch;
+  let wire: any;
+  globalThis.fetch = async (_input, init) => {
+    wire = JSON.parse(String(init?.body ?? '{}'));
+    return new Response(JSON.stringify({ data: { object: 'list', data: [] } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  try {
+    const { dispatchProviderOperation } = await import('../lib/provider-operations.ts');
+    await dispatchProviderOperation(pool!, account.rows[0].id, 'discover_models', {});
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(wire.account.adapter, 'openai-compatible');
+  assert.equal(wire.account.credential.kind, 'api_key');
+  assert.equal(wire.account.credential.api_key, 'api-discovery-key');
+  assert.equal(wire.account.credential.revision, 1);
 });
 
 test.after(async () => {

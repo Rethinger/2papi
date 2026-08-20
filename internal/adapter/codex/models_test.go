@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 func TestDiscoverModelsHeadersAndPayload(t *testing.T) {
@@ -46,6 +46,13 @@ func TestDiscoverModelsHeadersAndPayload(t *testing.T) {
 	}
 	if out.CredentialRevision != 3 {
 		t.Fatalf("revision=%d", out.CredentialRevision)
+	}
+}
+
+func TestDefaultClientVersionIsSemanticVersion(t *testing.T) {
+	options := normalizeOptions(Options{TestMode: true})
+	if options.ClientVersion != "1.0.0" {
+		t.Fatalf("client version=%q", options.ClientVersion)
 	}
 }
 

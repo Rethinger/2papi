@@ -4,6 +4,7 @@ import { ApiError } from '../api';
 import { dispatchProviderOperation } from '../provider-operations';
 import { audit, storeDraft } from '../control';
 import type { Queryable } from '../db';
+import { mergeModelMetadata, normalizeModelMetadata } from '../model-metadata';
 
 const METADATA_LIMIT = 32 * 1024;
 const CONCURRENCY = 4;
@@ -65,7 +66,13 @@ async function accountsForScope(client: Queryable, scope: DiscoveryScope): Promi
 }
 
 function parseModels(data: unknown): ParsedModel[] {
-  const raw: unknown[] = Array.isArray((data as any)?.models) ? (data as any).models : Array.isArray(data) ? data : [];
+  const raw: unknown[] = Array.isArray((data as any)?.models)
+    ? (data as any).models
+    : Array.isArray((data as any)?.data)
+      ? (data as any).data
+      : Array.isArray(data)
+        ? data
+        : [];
   return raw.map(item => {
     const parsed = DiscoveryModelSchema.parse(item);
     const upstream = parsed.slug ?? parsed.id ?? parsed.name;
@@ -141,27 +148,54 @@ async function persistAccountModels(client: PoolClient, account: AccountRow, mod
 
 export async function groupedDiscoveredModels(client: Queryable) {
   const rows = await client.query(
-    `SELECT upstream_model,
-            min(display_name) display_name,
-            bool_or(supported_in_api) supported_in_api,
-            jsonb_object_agg(account_id, jsonb_build_object('available', available, 'display_name', display_name, 'last_seen_at', last_seen_at)) accounts,
-            count(*)::int account_count,
-            count(*) FILTER (WHERE available)::int available_account_count
-     FROM discovered_models
-     GROUP BY upstream_model
-     ORDER BY upstream_model`,
+    `SELECT dm.provider_id,p.slug provider_slug,p.name provider_name,p.adapter,
+            dm.upstream_model,dm.display_name,dm.supported_in_api,dm.capabilities,
+            dm.raw_metadata,dm.account_id,dm.available,dm.last_seen_at,a.display_name account_display_name
+     FROM discovered_models dm
+     JOIN providers p ON p.id=dm.provider_id
+     JOIN accounts a ON a.id=dm.account_id
+     ORDER BY p.name,p.id,dm.upstream_model,a.priority,a.name`,
   );
-  return rows.rows;
+  const grouped = new Map<string, any>();
+  for (const row of rows.rows) {
+    const key = `${row.provider_id}:${row.upstream_model}`;
+    const group = grouped.get(key) ?? {
+      provider_id: row.provider_id, provider_slug: row.provider_slug, provider_name: row.provider_name,
+      adapter: row.adapter, upstream_model: row.upstream_model, display_name: row.display_name,
+      accounts: {}, account_count: 0, available_account_count: 0, metadata_items: [],
+    };
+    group.accounts[row.account_id] = { available: row.available, display_name: row.account_display_name, last_seen_at: row.last_seen_at };
+    group.account_count++;
+    if (row.available) {
+      group.available_account_count++;
+      group.metadata_items.push(normalizeModelMetadata({ ...record(row.raw_metadata), capabilities: row.capabilities, last_seen_at: row.last_seen_at ? new Date(row.last_seen_at).toISOString() : null }));
+    }
+    grouped.set(key, group);
+  }
+  return [...grouped.values()].map(group => {
+    const { metadata_items, ...model } = group;
+    const metadata = mergeModelMetadata(metadata_items);
+    return { ...model, metadata, supported_in_api: metadata.supported_in_api };
+  });
 }
 
-export async function importSelection(client: PoolClient, input: { alias: string; upstream_model: string; account_ids: string[]; enabled?: boolean }) {
+export async function importSelection(client: PoolClient, input: { alias: string; provider_id: string; upstream_model: string; routing_strategy: 'round_robin' | 'quota_failover' | 'p2c' | 'least_used' | 'lkgp' | 'reset_aware'; enabled?: boolean }) {
   const alias = validatePublicAlias(input.alias);
   await assertAliasAvailable(client, alias);
-  const inserted = await client.query('INSERT INTO model_aliases (alias,upstream_model,enabled) VALUES ($1,$2,$3) RETURNING *', [alias, input.upstream_model, input.enabled ?? true]);
-  for (let i = 0; i < input.account_ids.length; i++) {
-    await client.query('INSERT INTO model_account_mappings (model_alias_id,account_id,position) VALUES ($1,$2,$3)', [inserted.rows[0].id, input.account_ids[i], i]);
-  }
-  await audit(client, 'import_selection', 'model_alias', inserted.rows[0].id, { alias, upstream_model: input.upstream_model, account_count: input.account_ids.length });
+  const provider = await client.query('SELECT id FROM providers WHERE id=$1 AND enabled=true FOR UPDATE', [input.provider_id]);
+  if (!provider.rows[0]) throw new ApiError(404, 'provider_not_found', 'Enabled provider not found');
+  const eligibility = await client.query(
+    `SELECT count(DISTINCT a.id)::int count FROM accounts a
+     JOIN discovered_models dm ON dm.account_id=a.id AND dm.provider_id=a.provider_id
+     WHERE a.provider_id=$1 AND a.enabled=true AND dm.upstream_model=$2 AND dm.available=true`,
+    [input.provider_id, input.upstream_model],
+  );
+  if (Number(eligibility.rows[0]?.count ?? 0) === 0) throw new ApiError(409, 'model_unavailable', 'Model is unavailable on all enabled provider accounts');
+  const inserted = await client.query(
+    'INSERT INTO model_aliases (alias,upstream_model,provider_id,routing_strategy,enabled) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+    [alias, input.upstream_model, input.provider_id, input.routing_strategy, input.enabled ?? true],
+  );
+  await audit(client, 'import_selection', 'model_alias', inserted.rows[0].id, { alias, provider_id: input.provider_id, upstream_model: input.upstream_model, routing_strategy: input.routing_strategy });
   await storeDraft(client);
   return inserted.rows[0];
 }
@@ -204,3 +238,4 @@ function isPool(client: Queryable): client is Pool {
 
 function safeError(error: unknown) { return { code: error instanceof ApiError ? error.code : 'provider_operation_failed', message: 'Provider operation failed' }; }
 function safeMessage(message: string) { return message.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 512); }
+function record(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

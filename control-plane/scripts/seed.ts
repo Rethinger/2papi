@@ -3,8 +3,8 @@ import { pool, tx } from '../lib/db';
 import { audit, insertSecret, publishLatest, storeDraft } from '../lib/control';
 
 await tx(async c => {
-  const count = await c.query('SELECT count(*)::int n FROM providers');
-  if (count.rows[0].n > 0) {
+  const existingGeneric = await c.query("SELECT 1 FROM providers WHERE slug='generic-openai' LIMIT 1");
+  if (existingGeneric.rows[0]) {
     const latest = await c.query("SELECT 1 FROM config_versions WHERE status='published' AND NOT (snapshot::text ~* '(api_key|access_token|refresh_token|id_token)') LIMIT 1");
     if (!latest.rows[0]) {
       const invalid = await c.query("SELECT version FROM config_versions WHERE status='invalid' ORDER BY version DESC LIMIT 1");
@@ -14,7 +14,7 @@ await tx(async c => {
     }
     return;
   }
-  const provider = await c.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('generic-openai','Generic OpenAI Compatible','openai-compatible','http://fake-upstream:9001') RETURNING id");
+  const provider = await c.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('generic-openai','Generic OpenAI Compatible','openai-compatible','http://fake-upstream:9001') ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name RETURNING id");
   const s1 = await insertSecret(c, 'account_credential', { api_key: 'upstream-primary' });
   const s2 = await insertSecret(c, 'account_credential', { api_key: 'upstream-secondary' });
   const a1 = await c.query("INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url,priority,weight,cost) VALUES ($1,$2,'primary','Primary','http://fake-upstream:9001',1,2,0.15) RETURNING id", [provider.rows[0].id, s1]);

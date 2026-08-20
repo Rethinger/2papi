@@ -5,6 +5,7 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import { audit, compileSnapshot, insertSecret, publishLatest, storeDraft } from '../lib/control.ts';
 import { sanitizeHistoricalConfigVersions } from '../lib/snapshot-migration.ts';
+import { deleteAccountResource, deleteProviderResource } from '../lib/resource-deletion.ts';
 
 const url = process.env.TEST_DATABASE_URL;
 const options = { skip: url ? false : 'TEST_DATABASE_URL is not set' };
@@ -59,11 +60,14 @@ async function seedMinimal(client: any) {
   return { providerId: provider.rows[0].id, accountId: account.rows[0].id, secretId: secret };
 }
 
-test('migrations create every control-plane table', options, async () => {
-  const names = ['providers', 'secret_records', 'accounts', 'model_aliases', 'model_account_mappings', 'routing_settings', 'virtual_keys', 'system_settings', 'audit_events', 'config_versions', 'gateway_config_acks', 'gateway_instances', 'snapshot_migration_state'];
+test('migrations create every control-plane table and the managed Codex provider', options, async () => {
+  const names = ['providers', 'secret_records', 'accounts', 'model_aliases', 'model_account_mappings', 'routing_settings', 'virtual_keys', 'system_settings', 'audit_events', 'config_versions', 'gateway_config_acks', 'gateway_instances', 'snapshot_migration_state', 'discovered_models', 'account_provider_state', 'provider_operations'];
   const found = await pool!.query('SELECT table_name FROM information_schema.tables WHERE table_schema=$1', ['public']);
   const present = new Set(found.rows.map(row => row.table_name));
   for (const name of names) assert.ok(present.has(name), `missing table ${name}`);
+  const codex = await pool!.query("SELECT adapter,base_url,enabled FROM providers WHERE slug='openai-codex'");
+  assert.equal(codex.rows.length, 1);
+  assert.deepEqual(codex.rows[0], { adapter: 'openai-codex', base_url: 'https://chatgpt.com/backend-api/codex', enabled: true });
 });
 
 test('migration runner is idempotent', options, async () => {
@@ -102,6 +106,30 @@ test('audit events persist inside the mutating transaction', options, async () =
     assert.equal(events.rows.length, 1);
     assert.equal(events.rows[0].action, 'create');
     assert.equal(events.rows[0].resource_type, 'provider');
+  });
+});
+
+test('account deletion removes live routing and its credential record', options, async () => {
+  await withRollback(async client => {
+    const seeded = await seedMinimal(client);
+    await deleteAccountResource(client, seeded.accountId);
+    assert.equal(Number((await client.query('SELECT count(*) FROM accounts WHERE id=$1', [seeded.accountId])).rows[0].count), 0);
+    assert.equal(Number((await client.query('SELECT count(*) FROM model_account_mappings WHERE account_id=$1', [seeded.accountId])).rows[0].count), 0);
+    assert.equal(Number((await client.query('SELECT count(*) FROM secret_records WHERE id=$1', [seeded.secretId])).rows[0].count), 0);
+    assert.equal(Number((await client.query('SELECT count(*) FROM providers WHERE id=$1', [seeded.providerId])).rows[0].count), 1);
+  });
+});
+
+test('provider deletion cascades its accounts without deleting model aliases', options, async () => {
+  await withRollback(async client => {
+    const seeded = await seedMinimal(client);
+    await deleteProviderResource(client, seeded.providerId);
+    assert.equal(Number((await client.query('SELECT count(*) FROM providers WHERE id=$1', [seeded.providerId])).rows[0].count), 0);
+    assert.equal(Number((await client.query('SELECT count(*) FROM accounts WHERE provider_id=$1', [seeded.providerId])).rows[0].count), 0);
+    const model = await client.query("SELECT enabled FROM model_aliases WHERE alias='itest-model'");
+    assert.equal(model.rows.length, 1);
+    assert.equal(model.rows[0].enabled, false);
+    assert.equal(Number((await client.query('SELECT count(*) FROM secret_records WHERE id=$1', [seeded.secretId])).rows[0].count), 0);
   });
 });
 
@@ -146,6 +174,24 @@ test('draft, publish, and rollback move the published pointer', options, async (
 
     const latest = await client.query("SELECT version,checksum FROM config_versions WHERE status='published' ORDER BY version DESC LIMIT 1");
     assert.equal(latest.rows[0].checksum, first.checksum);
+  });
+});
+
+test('publish never selects a stale draft older than the active published version', options, async () => {
+  await withRollback(async client => {
+    await seedPublishReadyGateway(client);
+    await seedMinimal(client);
+
+    const stale = await storeDraft(client);
+    await client.query("UPDATE accounts SET weight=5 WHERE name='itest-primary'");
+    const currentDraft = await storeDraft(client);
+    const current = await publishLatest(client);
+    assert.equal(current.version, Number(currentDraft.version));
+
+    const republished = await publishLatest(client);
+    assert.ok(republished.version > current.version);
+    assert.notEqual(republished.version, Number(stale.version));
+    assert.equal(republished.checksum, current.checksum);
   });
 });
 

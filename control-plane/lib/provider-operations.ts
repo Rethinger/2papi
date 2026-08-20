@@ -19,6 +19,7 @@ type RuntimeAccount = {
   weight: number;
   max_concurrency: number;
   cost: number;
+  proxy?: string;
 };
 
 type OperationResponse = {
@@ -26,6 +27,25 @@ type OperationResponse = {
   warning_code?: string;
   credential_revision?: number;
 };
+
+const RUNTIME_CREDENTIAL_FIELDS = [
+  'kind',
+  'api_key',
+  'access_token',
+  'refresh_token',
+  'id_token',
+  'cookies',
+  'organization_id',
+  'expires_at',
+  'client_id',
+  'chatgpt_account_id',
+] as const;
+
+function runtimeCredential(credential: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(RUNTIME_CREDENTIAL_FIELDS.flatMap(field =>
+    credential[field] === undefined ? [] : [[field, credential[field]]],
+  ));
+}
 
 export async function dispatchProviderOperation(
   client: Queryable,
@@ -50,10 +70,11 @@ export async function dispatchProviderOperation(
     });
     const responseBody = await readResponseBounded(response, MAX_OPERATION_RESPONSE_BYTES);
     if (!response.ok) {
+      const operationError = safeOperationError(responseBody);
       throw new ApiError(
         response.status,
-        response.status === 409 ? 'credential_revision_conflict' : 'provider_operation_failed',
-        response.status === 409 ? 'Credential revision conflict' : 'Provider operation failed',
+        operationError?.code ?? (response.status === 409 ? 'credential_revision_conflict' : 'provider_operation_failed'),
+        operationError?.message ?? (response.status === 409 ? 'Credential revision conflict' : 'Provider operation failed'),
       );
     }
     if (responseBody.length === 0) return { data: {} };
@@ -65,6 +86,18 @@ export async function dispatchProviderOperation(
   } finally {
     body = undefined;
     runtimeAccount = undefined;
+  }
+}
+
+function safeOperationError(body: Buffer): { code: string; message: string } | null {
+  if (body.length === 0 || body.length > 16 * 1024) return null;
+  try {
+    const parsed = JSON.parse(body.toString('utf8')) as { error?: { code?: unknown; message?: unknown } };
+    const code = typeof parsed.error?.code === 'string' && /^[a-z0-9_]{1,128}$/.test(parsed.error.code) ? parsed.error.code : '';
+    const message = typeof parsed.error?.message === 'string' ? parsed.error.message.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 256) : '';
+    return code ? { code, message: message || 'Provider operation failed' } : null;
+  } catch {
+    return null;
   }
 }
 
@@ -96,12 +129,17 @@ async function loadRuntimeAccount(client: Queryable, accountID: string): Promise
       name: row.name,
       adapter: row.adapter,
       base_url: row.base_url,
-      credential: { ...credential, revision: Number(row.credential_revision) },
+      credential: {
+        ...runtimeCredential(credential),
+        kind: credential.kind ?? (row.adapter === 'openai-codex' ? 'oauth' : 'api_key'),
+        revision: Number(row.credential_revision),
+      },
       enabled: row.enabled,
       priority: row.priority,
       weight: row.weight,
       max_concurrency: row.max_concurrency,
       cost: Number(row.cost),
+      ...(typeof row.metadata?.proxy === 'string' && row.metadata.proxy.trim() ? { proxy: row.metadata.proxy } : {}),
     };
     if (pool) await connection.query('COMMIT');
     return account;

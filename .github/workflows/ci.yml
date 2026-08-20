@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  go-test:
+    name: Go test + vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
+  control-plane-test:
+    name: Control-plane tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        working-directory: control-plane
+        run: npm ci 2>/dev/null || npm install
+      - name: Unit tests (skip integration w/o DB)
+        working-directory: control-plane
+        run: node --import tsx --test --test-concurrency=1 tests/account-form.test.ts tests/canonical-json.test.ts tests/claude-oauth.test.ts tests/codex-auth.test.ts tests/codex-auth-routes.test.ts tests/codex-ui.test.ts tests/encryption.test.ts tests/i18n.test.ts tests/internal-auth.test.ts tests/migration-atomicity.test.ts tests/model-card.test.ts tests/model-metadata.test.ts tests/proxylib.test.ts tests/quota.test.ts tests/snapshot.test.ts tests/validation.test.ts tests/view-router.test.ts
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t 2papi:ci .
+
+  release:
+    name: Goreleaser
+    needs: [go-test, control-plane-test, docker]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

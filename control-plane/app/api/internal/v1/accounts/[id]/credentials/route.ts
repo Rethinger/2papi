@@ -7,11 +7,13 @@ import { env } from '../../../../../../../lib/env';
 import { credentialDigestFromDeclarative } from '../../../../../../../lib/snapshots';
 
 const CredentialSchema = z.object({
-  kind: z.enum(['api_key', 'oauth']),
+  kind: z.enum(['api_key', 'oauth', 'cookie']),
   api_key: z.string().min(1).optional(),
   access_token: z.string().min(1).optional(),
   refresh_token: z.string().min(1).optional(),
   id_token: z.string().min(1).optional(),
+  cookies: z.string().min(1).optional(),
+  organization_id: z.string().optional(),
   expires_at: z.string().datetime().optional(),
   client_id: z.string().min(1).optional(),
   chatgpt_account_id: z.string().min(1).optional(),
@@ -22,6 +24,9 @@ const CredentialSchema = z.object({
   }
   if (credential.kind === 'oauth' && !credential.access_token) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'access_token is required for OAuth credentials', path: ['access_token'] });
+  }
+  if (credential.kind === 'cookie' && !credential.cookies) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'cookies are required for cookie credentials', path: ['cookies'] });
   }
 });
 

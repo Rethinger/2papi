@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/protocol"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/protocol"
 )
 
 const (
@@ -41,12 +41,30 @@ func (a *Adapter) Execute(ctx context.Context, ex adapter.Execution) (*adapter.R
 	path := ChatCompletionsPath
 	body := ex.Body
 	switch ex.Endpoint {
-	case adapter.EndpointChatCompletions:
-		rewritten, err := protocol.RewriteModel(ex.Body, ex.Model.UpstreamModel)
-		if err != nil {
-			return nil, err
+	case adapter.EndpointChatCompletions, adapter.EndpointEmbeddings, adapter.EndpointImagesGenerations, adapter.EndpointAudioSpeech, adapter.EndpointAudioTranscriptions, adapter.EndpointModerations:
+		switch ex.Endpoint {
+		case adapter.EndpointEmbeddings:
+			path = "/v1/embeddings"
+		case adapter.EndpointImagesGenerations:
+			path = "/v1/images/generations"
+		case adapter.EndpointAudioSpeech:
+			path = "/v1/audio/speech"
+		case adapter.EndpointAudioTranscriptions:
+			path = "/v1/audio/transcriptions"
+		case adapter.EndpointModerations:
+			path = "/v1/moderations"
 		}
-		body = rewritten
+		// Audio transcriptions arrive already rewritten upstream as multipart;
+		// JSON endpoints get the model alias rewritten to the upstream model id.
+		if ex.Endpoint == adapter.EndpointAudioTranscriptions {
+			body = ex.Body
+		} else {
+			rewritten, err := protocol.RewriteModel(ex.Body, ex.Model.UpstreamModel)
+			if err != nil {
+				return nil, err
+			}
+			body = rewritten
+		}
 	case adapter.EndpointResponses:
 		path = ResponsesPath
 	default:
@@ -132,7 +150,12 @@ func joinBaseURL(base, endpoint string) (string, error) {
 	if e.IsAbs() || e.Host != "" || e.RawQuery != "" || e.ForceQuery || e.Fragment != "" {
 		return "", fmt.Errorf("endpoint path must not include scheme, host, query, or fragment")
 	}
-	return u.JoinPath(strings.TrimPrefix(e.Path, "/")).String(), nil
+	basePath := strings.TrimSuffix(u.Path, "/")
+	endpointPath := strings.TrimPrefix(e.Path, "/")
+	if strings.HasSuffix(basePath, "/v1") && strings.HasPrefix(endpointPath, "v1/") {
+		endpointPath = strings.TrimPrefix(endpointPath, "v1/")
+	}
+	return u.JoinPath(endpointPath).String(), nil
 }
 
 func copyHeaders(dst, src http.Header) {

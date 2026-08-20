@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { Pool } from 'pg';
 import { insertSecret } from '../lib/control.ts';
 import { discoverModelsForScope, gatewayDiscoverModels, groupedDiscoveredModels, importSelection, renameModelAlias, validatePublicAlias } from '../lib/codex/operations.ts';
@@ -125,6 +126,41 @@ test('grouped discovered models aggregate identical slugs for the UI', options, 
   });
 });
 
+test('grouped discovered models keep identical upstream names isolated by provider', options, async () => {
+  await withRollback(async client => {
+    const first = await seedAccounts(client);
+    const otherProvider = await client.query("INSERT INTO providers (slug,name,adapter,base_url) VALUES ('api-it','API IT','openai-compatible','https://api.example.test/v1') RETURNING id");
+    const otherSecret = await insertSecret(client, 'api_key', { api_key: 'safe-test-key' });
+    const otherAccount = await client.query("INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url,enabled) VALUES ($1,$2,'api-one','API One','https://api.example.test/v1',true) RETURNING id", [otherProvider.rows[0].id, otherSecret]);
+    await discoverModelsForScope(client, { scope: 'account_id', account_id: first.accountOne }, { gatewayOperation: async () => ({ data: { models: [{ slug: 'gpt-5.6-luna', context_window: 272000, supported_in_api: true }] } }) });
+    await discoverModelsForScope(client, { scope: 'account_id', account_id: otherAccount.rows[0].id }, { gatewayOperation: async () => ({ data: { data: [{ id: 'gpt-5.6-luna', tool_call: true, owned_by: 'api-owner' }] } }) });
+
+    const luna = (await groupedDiscoveredModels(client)).filter(model => model.upstream_model === 'gpt-5.6-luna');
+    assert.equal(luna.length, 2);
+    assert.deepEqual(luna.map(model => model.provider_id).sort(), [first.providerId, otherProvider.rows[0].id].sort());
+    assert.deepEqual(Object.keys(luna.find(model => model.provider_id === first.providerId).accounts), [first.accountOne]);
+    assert.deepEqual(Object.keys(luna.find(model => model.provider_id === otherProvider.rows[0].id).accounts), [otherAccount.rows[0].id]);
+    assert.equal(luna.find(model => model.provider_id === first.providerId).metadata.context_window, 272000);
+    assert.equal(luna.find(model => model.provider_id === otherProvider.rows[0].id).metadata.tools, true);
+  });
+});
+
+test('discovery persists models from the OpenAI-compatible data envelope', options, async () => {
+  await withRollback(async client => {
+    const seeded = await seedAccounts(client);
+    const result = await discoverModelsForScope(client, { scope: 'account_id', account_id: seeded.accountOne }, {
+      gatewayOperation: async () => ({ data: { object: 'list', data: [{ id: 'gpt-api-model', owned_by: 'provider' }] } }),
+    });
+
+    assert.equal(result.results[0].status, 'succeeded');
+    assert.equal(result.results[0].model_count, 1);
+    const stored = await client.query('SELECT upstream_model,display_name,available FROM discovered_models WHERE account_id=$1', [seeded.accountOne]);
+    assert.deepEqual(stored.rows.map((row: any) => row.upstream_model), ['gpt-api-model']);
+    assert.equal(stored.rows[0].display_name, 'gpt-api-model');
+    assert.equal(stored.rows[0].available, true);
+  });
+});
+
 test('discovery scopes provider_id and account_id, caps concurrency at four, and returns safe partial errors', options, async () => {
   await withRollback(async client => {
     const seeded = await seedAccounts(client);
@@ -201,7 +237,7 @@ test('alias validation is exact, case-insensitive, and rejects whitespace/contro
     await assert.rejects(async () => validatePublicAlias('bad alias'), { code: 'invalid_model_alias' });
     await assert.rejects(async () => validatePublicAlias('bad\n'), { code: 'invalid_model_alias' });
     await assert.rejects(async () => validatePublicAlias('luna-code/'), { code: 'invalid_model_alias' });
-    await assert.rejects(() => importSelection(client, { alias: 'Luna-Code', upstream_model: 'luna-code', account_ids: [] }), { code: 'model_alias_conflict' });
+    await assert.rejects(() => importSelection(client, { alias: 'Luna-Code', provider_id: crypto.randomUUID(), upstream_model: 'luna-code', routing_strategy: 'round_robin' }), { code: 'model_alias_conflict' });
   });
 });
 
@@ -210,8 +246,11 @@ test('import selection creates a draft alias and mappings without publishing', o
     const seeded = await seedAccounts(client);
     await client.query("INSERT INTO virtual_keys (name,key_hash,key_prefix,models,rpm) VALUES ('import-vk',$1,'sk-import',ARRAY[]::text[],60)", ['d'.repeat(64)]);
     await discoverModelsForScope(client, { scope: 'account_id', account_id: seeded.accountOne }, { gatewayOperation: async () => ({ data: { models: [{ slug: 'luna-code' }] } }) });
-    const imported = await importSelection(client, { alias: 'luna-code', upstream_model: 'luna-code', account_ids: [seeded.accountOne] });
+    const imported = await importSelection(client, { alias: 'luna-code', provider_id: seeded.providerId, upstream_model: 'luna-code', routing_strategy: 'round_robin' });
     assert.equal(imported.alias, 'luna-code');
+    assert.equal(imported.provider_id, seeded.providerId);
+    assert.equal(imported.routing_strategy, 'round_robin');
+    assert.equal((await client.query('SELECT count(*)::int n FROM model_account_mappings WHERE model_alias_id=$1', [imported.id])).rows[0].n, 0);
     const drafts = await client.query("SELECT count(*)::int n FROM config_versions WHERE status='draft'");
     const pubs = await client.query("SELECT count(*)::int n FROM config_versions WHERE status='published'");
     assert.equal(drafts.rows[0].n, 1);

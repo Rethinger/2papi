@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createCodexAccount } from '../lib/codex/create-account.ts';
-import { codexCallbackCore, codexDeviceStartCore, codexDeviceStatusCore, codexImportAuthCore, codexOAuthStartCore, codexReauthorizeCore, codexRouteDeps, type CodexRouteDeps } from '../lib/codex/routes.ts';
+import { codexCallbackCore, codexDeviceStartCore, codexDeviceStatusCore, codexImportAuthBatchCore, codexImportAuthCore, codexOAuthStartCore, codexReauthorizeCore, codexRouteDeps, type CodexRouteDeps } from '../lib/codex/routes.ts';
 
 function req(url: string, init: RequestInit & { headers?: Record<string, string> } = {}) {
   return new Request(url, init);
@@ -30,6 +30,8 @@ function clientReturningAccount(revision = 2, calls: any[] = []) {
     query: async (sql: string, params?: any[]) => {
       calls.push({ sql, params });
       if (sql.includes('FROM providers')) return { rows: [{ id: 'provider-1' }] };
+      if (sql.includes('FROM accounts WHERE id=$1')) return { rows: [{ id: params?.[0], secret_record_id: null }] };
+      if (sql.includes('FROM accounts')) return { rows: [] };
       if (sql.includes('RETURNING id, name, credential_revision')) return { rows: [{ id: 'acct-row', name: params?.[1], credential_revision: revision }] };
       return { rows: [] };
     },
@@ -185,6 +187,24 @@ test('createCodexAccount atomically increments credential revision on rotation/u
   assert.match(updateCalls.find(c => c.sql?.includes('UPDATE accounts')).sql, /credential_revision=COALESCE\(credential_revision, 0\)\+1/);
 });
 
+test('auth.json import updates the matching Codex identity and removes its replaced secret', async () => {
+  const calls: any[] = [];
+  const client = {
+    query: async (sql: string, params?: any[]) => {
+      calls.push({ sql, params });
+      if (sql.includes('FROM providers')) return { rows: [{ id: 'provider-1' }] };
+      if (sql.includes('external_account_id') && sql.includes('FOR UPDATE')) return { rows: [{ id: 'existing-account', secret_record_id: 'old-secret' }] };
+      if (sql.includes('UPDATE accounts')) return { rows: [{ id: 'existing-account', name: 'codex-existing', credential_revision: 9 }] };
+      if (sql.includes('INSERT INTO accounts')) return { rows: [{ id: 'duplicate-account', name: 'codex-user-example-com', credential_revision: 1 }] };
+      return { rows: [] };
+    },
+  } as any;
+  const result = await createCodexAccount(client, { method: 'import', credential: { kind: 'oauth', access_token: 'new', chatgpt_account_id: 'same-identity', email: 'user@example.com' } as any }, accountDeps(calls));
+  assert.deepEqual(result, { id: 'existing-account', revision: 9 });
+  assert.equal(calls.some(call => call.sql?.includes('INSERT INTO accounts')), false);
+  assert.ok(calls.some(call => call.sql === 'DELETE FROM secret_records WHERE id=$1' && call.params?.[0] === 'old-secret'));
+});
+
 test('createCodexAccount fails when provider row or required account update is missing', async () => {
   const providerMissing = { query: async () => ({ rows: [] }) } as any;
   await assert.rejects(() => createCodexAccount(providerMissing, { method: 'import', credential: { kind: 'oauth', access_token: 's', chatgpt_account_id: 'acct' } as any }, accountDeps([])), /codex_provider_missing/);
@@ -200,4 +220,32 @@ test('createCodexAccount fails when provider row or required account update is m
   } as any;
   await assert.rejects(() => createCodexAccount(accountMissing, { accountId: 'missing', method: 'browser', credential: { kind: 'oauth', access_token: 's', chatgpt_account_id: 'acct' } as any }, accountDeps(calls)), /codex_account_missing/);
   assert.equal(calls.some(c => c.helper === 'storeDraft' || c.helper === 'audit'), false);
+});
+
+test('batch import creates one account per auth.json entry and bare token', async () => {
+  const created: any[] = [];
+  const dep = deps({
+    parseCodexAuthFile: async raw => {
+      const parsed = JSON.parse(raw);
+      return { kind: 'oauth', access_token: parsed.access_token ?? 'at', chatgpt_account_id: parsed.chatgpt_account_id ?? 'acct-import', auth_method: 'import' } as any;
+    },
+    createAccount: async input => { created.push(input); return { id: `account-${created.length}`, revision: 1 }; },
+  });
+  const result = await codexImportAuthBatchCore({
+    provider_id: '00000000-0000-4000-8000-000000000000',
+    entries: [
+      { name: 'one', raw: '{"access_token":"a","chatgpt_account_id":"id-1"}' },
+      { raw: 'bare-token' },
+    ],
+    max_concurrency: 3,
+  }, dep);
+  assert.equal(result.length, 2);
+  assert.deepEqual(created[0], { name: 'one', method: 'import', credential: { kind: 'oauth', access_token: 'a', chatgpt_account_id: 'id-1', auth_method: 'import' }, enabled: true, max_concurrency: 3, providerId: '00000000-0000-4000-8000-000000000000' });
+  assert.deepEqual(created[1], { name: undefined, method: 'import', credential: { kind: 'oauth', access_token: 'bare-token', chatgpt_account_id: 'acct-import', auth_method: 'import' }, enabled: true, max_concurrency: 3, providerId: '00000000-0000-4000-8000-000000000000' });
+});
+
+test('batch import validates entries and rejects empty input', async () => {
+  await assert.rejects(() => codexImportAuthBatchCore({ entries: [] }, deps()), /entries/);
+  await assert.rejects(() => codexImportAuthBatchCore({ entries: [{ raw: '' }] }, deps()), /raw/);
+  await assert.rejects(() => codexImportAuthBatchCore({ entries: [{ raw: 'x' }], provider_id: 'not-a-uuid' }, deps()), /provider_id/);
 });

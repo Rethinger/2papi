@@ -1,23 +1,29 @@
 package proxy_test
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/protocol"
-	"github.com/1jehuang/2papi/internal/proxy"
-	"github.com/1jehuang/2papi/internal/resilience"
-	"github.com/1jehuang/2papi/internal/router"
-	"github.com/1jehuang/2papi/internal/server"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/cache"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/protocol"
+	"github.com/Rethinger/2papi/internal/proxy"
+	"github.com/Rethinger/2papi/internal/resilience"
+	"github.com/Rethinger/2papi/internal/router"
+	"github.com/Rethinger/2papi/internal/server"
+	"github.com/Rethinger/2papi/internal/telemetry"
 )
 
 type errAdapter struct{ err error }
@@ -234,6 +240,23 @@ func TestParseRetryAfterAcceptsZeroAndRejectsOverflow(t *testing.T) {
 	}
 }
 
+func TestQuotaCooldownUsesCodexResetHeaderAndIsBounded(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	h := http.Header{}
+	h.Set("X-Codex-Primary-Reset-At", fmt.Sprint(now.Add(90*time.Second).Unix()))
+	if got := proxy.ParseQuotaCooldown(h, 5*time.Second, now); got != 90*time.Second {
+		t.Fatalf("reset cooldown=%s", got)
+	}
+	h.Set("X-Codex-Primary-Reset-At", fmt.Sprint(now.Add(30*24*time.Hour).Unix()))
+	if got := proxy.ParseQuotaCooldown(h, 5*time.Second, now); got != 7*24*time.Hour {
+		t.Fatalf("unbounded cooldown=%s", got)
+	}
+	h.Set("Retry-After", "12")
+	if got := proxy.ParseQuotaCooldown(h, 5*time.Second, now); got != 12*time.Second {
+		t.Fatalf("retry-after priority=%s", got)
+	}
+}
+
 func TestCanceledContextDoesNotRetryOrWriteSynthetic502(t *testing.T) {
 	snap, err := config.Build(config.Config{Version: 1, Secret: "s", VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"m"}, RPM: 10}}, Models: []config.Model{{Alias: "m", UpstreamModel: "up", Accounts: []string{"a", "b"}}}, Accounts: []config.Account{{Name: "a", BaseURL: "http://a", APIKey: "a", Enabled: true, Priority: 1, Weight: 1, MaxConcurrency: 10}, {Name: "b", BaseURL: "http://b", APIKey: "b", Enabled: true, Priority: 2, Weight: 1, MaxConcurrency: 10}}, Routing: config.Routing{Strategy: "priority", MaxAttempts: 2}, Resilience: config.Resilience{CircuitFailures: 1}})
 	if err != nil {
@@ -432,4 +455,319 @@ func (zeroReader) Read(p []byte) (int, error) {
 		p[i] = ' '
 	}
 	return len(p), nil
+}
+
+func TestSharedTransportTuned(t *testing.T) {
+	snap := proxyTestSnapshot(t, []string{"a"})
+	st := resilience.New()
+	p := proxy.New(snap, st, router.New(snap, st))
+	pt, ok := p.Client.Transport.(*proxy.PoolTransport)
+	if !ok {
+		t.Fatalf("transport type %T, want *proxy.PoolTransport", p.Client.Transport)
+	}
+	tr := pt.Direct()
+	if tr.MaxIdleConnsPerHost != 128 {
+		t.Fatalf("MaxIdleConnsPerHost=%d want 128", tr.MaxIdleConnsPerHost)
+	}
+	if !tr.ForceAttemptHTTP2 {
+		t.Fatalf("ForceAttemptHTTP2=false want true")
+	}
+	if tr.IdleConnTimeout != 90*time.Second {
+		t.Fatalf("IdleConnTimeout=%s want 90s", tr.IdleConnTimeout)
+	}
+	if p.Client.Timeout != 0 {
+		t.Fatalf("client timeout=%s want 0", p.Client.Timeout)
+	}
+}
+
+type pipeCaptureRecorder struct {
+	mu    sync.Mutex
+	event telemetry.Event
+	got   bool
+}
+
+func (r *pipeCaptureRecorder) Record(e telemetry.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.event = e
+	r.got = true
+}
+
+func TestPipePassthroughNonStreaming(t *testing.T) {
+	upstreamBody := `{"id":"1","model":"m","usage":{"prompt_tokens":3,"completion_tokens":7,"total_tokens":10}}`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(upstreamBody)))
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	defer up.Close()
+	snap, err := config.Build(config.Config{Version: 1, Secret: "s", VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"m"}, RPM: 10}}, Models: []config.Model{{Alias: "m", UpstreamModel: "m", Accounts: []string{"a"}}}, Accounts: []config.Account{{Name: "a", BaseURL: up.URL, APIKey: "a", Enabled: true, Weight: 1, MaxConcurrency: 10}}, Resilience: config.Resilience{CircuitFailures: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := resilience.New()
+	rt := router.New(snap, st)
+	px := proxy.New(snap, st, rt)
+	rec := &pipeCaptureRecorder{}
+	px.Telemetry = rec
+	ts := httptest.NewServer(server.New(snap, px).Routes())
+	defer ts.Close()
+	reqBody := `{"model":"m"}`
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sk")
+	req.Header.Set("X-Gateway-Cache", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, got)
+	}
+	if string(got) != upstreamBody {
+		t.Fatalf("pipe body mismatch: got=%s", got)
+	}
+	key := px.Cache.KeyFor("m", []byte(reqBody))
+	var entry cache.Entry
+	hit := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		if entry, hit = px.Cache.Get(key); hit {
+			break
+		}
+	}
+	if !hit {
+		t.Fatal("cache not written on pipe path")
+	}
+	if string(entry.Body) != upstreamBody {
+		t.Fatalf("cache body=%s", entry.Body)
+	}
+	ev := waitEvent(t, rec)
+	if ev.InputTokens != 3 || ev.OutputTokens != 7 || ev.TotalTokens != 10 {
+		t.Fatalf("usage input=%d output=%d total=%d", ev.InputTokens, ev.OutputTokens, ev.TotalTokens)
+	}
+}
+
+func TestPipeTruncatedSkipsCacheAndUsage(t *testing.T) {
+	big := `{"id":"1","model":"m","padding":"` + strings.Repeat("x", 16<<20) + `"}`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(big)))
+		_, _ = io.WriteString(w, big)
+	}))
+	defer up.Close()
+	snap, err := config.Build(config.Config{Version: 1, Secret: "s", VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"m"}, RPM: 10}}, Models: []config.Model{{Alias: "m", UpstreamModel: "m", Accounts: []string{"a"}}}, Accounts: []config.Account{{Name: "a", BaseURL: up.URL, APIKey: "a", Enabled: true, Weight: 1, MaxConcurrency: 10}}, Resilience: config.Resilience{CircuitFailures: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := resilience.New()
+	rt := router.New(snap, st)
+	px := proxy.New(snap, st, rt)
+	rec := &pipeCaptureRecorder{}
+	px.Telemetry = rec
+	ts := httptest.NewServer(server.New(snap, px).Routes())
+	defer ts.Close()
+	reqBody := `{"model":"m"}`
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sk")
+	req.Header.Set("X-Gateway-Cache", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d", resp.StatusCode)
+	}
+	if string(got) != big {
+		t.Fatalf("truncated pipe must still deliver full body: got %d bytes want %d", len(got), len(big))
+	}
+	key := px.Cache.KeyFor("m", []byte(reqBody))
+	if _, hit := px.Cache.Get(key); hit {
+		t.Fatal("cache must not be written for truncated pipe")
+	}
+	ev := waitEvent(t, rec)
+	if ev.TotalTokens != 0 || ev.InputTokens != 0 || ev.OutputTokens != 0 {
+		t.Fatalf("usage must stay zero on truncation: input=%d output=%d total=%d", ev.InputTokens, ev.OutputTokens, ev.TotalTokens)
+	}
+}
+
+func waitEvent(t *testing.T, rec *pipeCaptureRecorder) telemetry.Event {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rec.mu.Lock()
+		got := rec.got
+		ev := rec.event
+		rec.mu.Unlock()
+		if got {
+			return ev
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("telemetry event not recorded")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestLatencyHeaders(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: hi\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	defer up.Close()
+	ts := oneUpstreamApp(t, up.URL)
+	defer ts.Close()
+	resp, body := post(ts, "sk", `{"model":"m","stream":true}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	overhead, err := strconv.ParseInt(resp.Header.Get("X-Gateway-Overhead-MS"), 10, 64)
+	if err != nil {
+		t.Fatalf("X-Gateway-Overhead-MS missing/invalid: %v", err)
+	}
+	upstream, err := strconv.ParseInt(resp.Header.Get("X-Gateway-Upstream-MS"), 10, 64)
+	if err != nil {
+		t.Fatalf("X-Gateway-Upstream-MS missing/invalid: %v", err)
+	}
+	if overhead < 0 || upstream < 0 {
+		t.Fatalf("negative latency headers overhead=%d upstream=%d", overhead, upstream)
+	}
+}
+
+func gzipProxyApp(t *testing.T, gzipEnabled bool) (*httptest.Server, *proxy.Proxy, string) {
+	padding := strings.Repeat("x", 2048)
+	upstreamBody := `{"id":"1","model":"up","padding":"` + padding + `"}`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(upstreamBody)))
+		_, _ = io.WriteString(w, upstreamBody)
+	}))
+	t.Cleanup(up.Close)
+	snap, err := config.Build(config.Config{Version: 1, Secret: "s", Server: config.Server{Gzip: gzipEnabled}, VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"m"}, RPM: 10}}, Models: []config.Model{{Alias: "m", UpstreamModel: "up", Accounts: []string{"a"}}}, Accounts: []config.Account{{Name: "a", BaseURL: up.URL, APIKey: "a", Enabled: true, Weight: 1, MaxConcurrency: 10}}, Resilience: config.Resilience{CircuitFailures: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := resilience.New()
+	rt := router.New(snap, st)
+	px := proxy.New(snap, st, rt)
+	ts := httptest.NewServer(server.New(snap, px).Routes())
+	t.Cleanup(ts.Close)
+	return ts, px, strings.Replace(upstreamBody, `"model":"up"`, `"model":"m"`, 1)
+}
+
+func gunzipAll(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gr.Close()
+	b, err := io.ReadAll(gr)
+	if err != nil {
+		t.Fatalf("gunzip read: %v", err)
+	}
+	return b
+}
+
+func TestGzipResponse(t *testing.T) {
+	ts, _, want := gzipProxyApp(t, true)
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+	req.Header.Set("Authorization", "Bearer sk")
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Content-Encoding=%q want gzip", resp.Header.Get("Content-Encoding"))
+	}
+	if resp.Header.Get("Content-Length") != "" {
+		t.Fatalf("Content-Length=%q must be removed", resp.Header.Get("Content-Length"))
+	}
+	if resp.Header.Get("Vary") != "Accept-Encoding" {
+		t.Fatalf("Vary=%q want Accept-Encoding", resp.Header.Get("Vary"))
+	}
+	got := gunzipAll(t, resp)
+	resp.Body.Close()
+	if string(got) != want {
+		t.Fatalf("gunzipped body mismatch:\n got=%s\nwant=%s", got, want)
+	}
+	// Without Accept-Encoding the same path stays plain.
+	req2, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+	req2.Header.Set("Authorization", "Bearer sk")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if resp2.Header.Get("Content-Encoding") != "" {
+		t.Fatalf("Content-Encoding=%q want empty without Accept-Encoding", resp2.Header.Get("Content-Encoding"))
+	}
+	if string(plain) != want {
+		t.Fatalf("plain body mismatch: %s", plain)
+	}
+}
+
+func TestGzipCacheHit(t *testing.T) {
+	ts, _, want := gzipProxyApp(t, true)
+	body := `{"model":"m"}`
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer sk")
+	req.Header.Set("X-Gateway-Cache", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.Header.Get("X-Gateway-Cache") != "MISS" {
+		t.Fatalf("first request cache=%q want MISS", resp.Header.Get("X-Gateway-Cache"))
+	}
+	req2, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(body))
+	req2.Header.Set("Authorization", "Bearer sk")
+	req2.Header.Set("X-Gateway-Cache", "true")
+	req2.Header.Set("Accept-Encoding", "gzip")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp2.Header.Get("X-Gateway-Cache") != "HIT" {
+		t.Fatalf("second request cache=%q want HIT", resp2.Header.Get("X-Gateway-Cache"))
+	}
+	if resp2.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("cache-hit Content-Encoding=%q want gzip", resp2.Header.Get("Content-Encoding"))
+	}
+	if got := resp2.Header.Get("Content-Length"); got == strconv.Itoa(len(want)) {
+		t.Fatalf("cache-hit Content-Length=%q must not be the stale uncompressed length", got)
+	}
+	got := gunzipAll(t, resp2)
+	resp2.Body.Close()
+	if string(got) != want {
+		t.Fatalf("cache-hit gunzipped body mismatch: %s", got)
+	}
+}
+
+func TestGzipDisabled(t *testing.T) {
+	ts, _, want := gzipProxyApp(t, false)
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(`{"model":"m"}`))
+	req.Header.Set("Authorization", "Bearer sk")
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.Header.Get("Content-Encoding") != "" {
+		t.Fatalf("Content-Encoding=%q want empty when gzip disabled", resp.Header.Get("Content-Encoding"))
+	}
+	if string(plain) != want {
+		t.Fatalf("body mismatch: %s", plain)
+	}
 }

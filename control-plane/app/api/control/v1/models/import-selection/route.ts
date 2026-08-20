@@ -7,8 +7,9 @@ export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   alias: z.string(),
+  provider_id: z.string().uuid(),
   upstream_model: z.string().min(1),
-  account_ids: z.array(z.string().uuid()).min(1),
+  routing_strategy: z.enum(['round_robin', 'quota_failover']).default('round_robin'),
   enabled: z.boolean().optional(),
 });
 

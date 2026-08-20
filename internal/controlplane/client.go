@@ -14,7 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/telemetry"
 )
 
 type Client struct {
@@ -269,6 +270,36 @@ func (c *Client) Heartbeat(ctx context.Context, schemas []int, envelopeVersion i
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("heartbeat status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Client) Publish(ctx context.Context, events []telemetry.Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+	body := struct {
+		GatewayID string            `json:"gateway_id"`
+		Events    []telemetry.Event `json:"events"`
+	}{GatewayID: c.GatewayID, Events: events}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/internal/v1/request-events", bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	c.authorize(req)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("request events status %d", resp.StatusCode)
 	}
 	return nil
 }

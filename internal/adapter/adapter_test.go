@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/adapter"
 )
 
 type fakeAdapter struct{}

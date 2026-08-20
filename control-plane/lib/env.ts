@@ -8,6 +8,7 @@ const EnvSchema = z.object({
   CONTROL_PLANE_MASTER_KEY: z.string().default(Buffer.alloc(32, 7).toString('base64')),
   INTERNAL_SERVICE_TOKEN: z.string().min(16).default('dev-internal-service-token'),
   GATEWAY_SHARED_SECRET: z.string().min(1).default('dev-secret-change-me'),
+  ALLOW_INSECURE_DEV_DEFAULTS: boolish,
   CONTROL_PLANE_BIND_HOST: z.string().default('127.0.0.1'),
   CODEX_TEST_MODE: boolish,
   CODEX_AUTH_ORIGIN: z.string().url().optional(),
@@ -16,9 +17,21 @@ const EnvSchema = z.object({
   GATEWAY_CAPABILITY_TTL_SECONDS: z.coerce.number().int().positive().optional(),
   MIN_ACTIVE_GATEWAYS: z.coerce.number().int().nonnegative().default(1),
   GATEWAY_INTERNAL_URL: z.string().url().default('http://127.0.0.1:8081'),
+  ALLOW_PRIVATE_UPSTREAMS: boolish,
 });
 
-export const env = EnvSchema.parse(process.env);
+const parsedEnv = EnvSchema.parse(process.env);
+const productionRuntime = process.env.NODE_ENV === 'production'
+  && process.env.NEXT_PHASE !== 'phase-production-build';
+if (productionRuntime && !parsedEnv.ALLOW_INSECURE_DEV_DEFAULTS) {
+  const insecure = parsedEnv.CONTROL_PLANE_MASTER_KEY === Buffer.alloc(32, 7).toString('base64')
+    || parsedEnv.INTERNAL_SERVICE_TOKEN === 'dev-internal-service-token'
+    || parsedEnv.GATEWAY_SHARED_SECRET === 'dev-secret-change-me';
+  if (insecure) {
+    throw new Error('Production runtime refuses known development secrets');
+  }
+}
+export const env = parsedEnv;
 
 export function masterKeyBytes(): Buffer {
   const raw = env.CONTROL_PLANE_MASTER_KEY;

@@ -30,15 +30,18 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/papi_control
       TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/papi_control_test
       REDIS_URL: redis://redis:6379
-      CONTROL_PLANE_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+      CONTROL_PLANE_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
       INTERNAL_SERVICE_TOKEN: dev-internal-service-token
       GATEWAY_SHARED_SECRET: dev-secret-change-me
+      ALLOW_INSECURE_DEV_DEFAULTS: "true"
+      ALLOW_PRIVATE_UPSTREAMS: "true"
       CONTROL_PLANE_BIND_HOST: 0.0.0.0
       DASHBOARD_PUBLIC_URL: http://localhost:13000
       GATEWAY_INTERNAL_URL: http://gateway:8081
     ports:
       - "127.0.0.1:13000:3000"
       - "127.0.0.1:1455:3000"
+      - "127.0.0.1:54545:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,7 +73,7 @@ services:
     volumes: [".:/src"]
     command: go run ./test/fakeupstream
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9001/v1/chat/completions > /dev/null && curl -fsS http://127.0.0.1:9002/v1/chat/completions > /dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9001/healthz > /dev/null && curl -fsS http://127.0.0.1:9002/healthz > /dev/null && curl -fsS http://127.0.0.1:9003/healthz > /dev/null && curl -fsS http://127.0.0.1:9010/healthz > /dev/null"]
       interval: 2s
       timeout: 2s
       retries: 30

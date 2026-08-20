@@ -1,13 +1,66 @@
 # 2papi Multi-account AI Gateway
 
-A Go MVP for an OpenAI-compatible gateway with virtual-key auth, rate limits, sticky multi-account routing, cooldowns, circuits, and pre-stream failover.
+A Go MVP for an OpenAI-compatible gateway with virtual-key auth, rate limits, sticky multi-account routing, cooldowns, circuits, and pre-stream failover. **Lightweight 9Router/OmniRoute alternative — faster than LiteLLM (TTF <5ms overhead), single binary, 1 command install.**
+
+OpenAI Codex account setup, model discovery, quota/reset safety, and validation are documented in [docs/codex-provider.md](docs/codex-provider.md).
+
+## Quick Install (30s)
+
+**No Docker, no Go required — single binary with embedded dashboard:**
+
+```sh
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/1jehuang/2papi/main/install.sh | sh
+2papi --config ~/.2papi/config.yaml
+# Dashboard: http://localhost:8080/dashboard/   Gateway: http://localhost:8080/v1/chat/completions
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/1jehuang/2papi/main/install.ps1 | iex
+
+# Interactive controls (like 9router):
+2papi tui      # menu: Start / Providers / Quota / Plugins / 2papi.local
+2papi init     # enable http://2papi.local via hosts (Y/n)
+
+# Or via package managers (after first release)
+brew tap 1jehuang/tap && brew install 2papi
+scoop bucket add 2papi https://github.com/1jehuang/scoop-bucket && scoop install 2papi
+
+# Docker (full stack)
+docker compose up --build
+# or single binary container
+docker build -t 2papi . && docker run -p 8080:8080 2papi
+```
+
+**Interactive controls (like 9router):**
+
+```sh
+2papi tui      # keyboard menu: Start / Providers / Quota / Plugins / 2papi.local
+2papi init     # interactive: enable 2papi.local via mDNS (LAN-wide) or hosts (this machine)
+2papi advert   # keep 2papi.local advertising over mDNS/Bonjour (useful on a LAN)
+2papi --mdns --hostname 2papi.local   # gateway starts + advertises mDNS at once
+```
+
+`2papi.local` resolves two ways:
+- **mDNS/Bonjour** (`2papi init` choice 1, or `--mdns`): pure-Go, no admin rights, works LAN-wide on macOS/Linux; Windows needs a multicast-capable NIC.
+- **hosts entry** (`2papi init` choice 2): `127.0.0.1 2papi.local` in `/etc/hosts`, this machine only, requires sudo/admin.
+
+**Zero-config free provider (no API key needed):** uncomment in `config/example.yaml`:
+`adapter: opencode` + `credential: { kind: free }` — model alias `opencode-free` serves without any key.
+
+**Quota:** `2papi --config ...` + providers report `X-Provider-Quota-*` → `GET /api/quota`
+(combined % bar + per-provider breakdown for the dashboard).
+
+Design system and widget console are in [`open-design/`](open-design/) — hand-drawn pencil style, iOS-like widgets. See `open-design/README.md`.
 
 ## Features
 
 - `/healthz`, `/readyz`, `/v1/models`, `/v1/chat/completions`.
 - Generic OpenAI-compatible upstream proxy with public model alias rewriting.
+- Claude accounts: Anthropic API key, claude.ai OAuth token, or browser cookies (`sessionKey` from claude.ai) — dedicated "Add Claude account" entry in the dashboard.
+- Token-saver optimizations like 9Router, toggled from the dashboard **or per-model/per-key**: RTK compression of large tool results (saves 20-40% input tokens), Caveman mode (terse replies, saves up to 65% output tokens), and **Headroom** (auto-prune old tool history when context nears limit). All also opt-in per request via `X-Gateway-Compress` / `X-Gateway-Caveman` / `X-Gateway-Headroom` (`X-Gateway-Headroom-Reserve` to tune).
 - SSE and JSON response streaming without full response buffering.
 - Multiple accounts per public model alias.
+- Upstream proxies for every account and a global pool — all protocols (http/https/socks4/4a/5/5h) in any format (`http://user:pass@host:8080`, `socks5://host:1080`, `host:3128`, `host:3128:user:pass`, `[::1]:9090`, lists per line/comma/JSON). Round-robin rotation per request with failover; `X-Gateway-Proxy` response header shows the masked proxy used. The pool is managed in the dashboard (Settings → Proxy pool).
 - Routing strategies: `priority`, `balanced`, `fastest`, `cheapest`, `quota-drain`, `fallback-chain`.
 - Virtual API keys with constant-time keyed-HMAC comparison, model allowlists, and RPM token buckets.
 - Sticky affinity from `X-Gateway-Session`, `metadata.gateway_session`, or stable user/model fallback.
@@ -75,7 +128,8 @@ Start from `config/example.yaml`. It defines a versioned immutable snapshot:
 
 - `virtual_keys`: client keys, allowed models, and RPM limits.
 - `models`: public aliases mapped to upstream model IDs and account lists.
-- `accounts`: OpenAI-compatible base URLs and API keys.
+- `accounts`: OpenAI-compatible base URLs, API keys, and optional per-account `proxy` (any format, list allowed).
+- `proxies` (optional): global upstream proxy pool for accounts without their own proxy.
 - `routing`: strategy, sticky TTL, and max pre-commit attempts.
 - `resilience`: cooldown and circuit-breaker thresholds.
 

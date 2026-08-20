@@ -43,3 +43,25 @@ func TestBuildV1NormalizesAPIKeyCredential(t *testing.T) {
 		t.Fatalf("api key=%q", got)
 	}
 }
+
+func TestBuildNormalizesAndValidatesPerModelRoutingStrategy(t *testing.T) {
+	cfg := validConfig()
+	cfg.Routing.Strategy = "priority"
+	snap, err := Build(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.ModelsByAlias["m"].RoutingStrategy; got != "priority" {
+		t.Fatalf("inherited strategy=%q", got)
+	}
+	for _, strategy := range []string{"round_robin", "quota_failover"} {
+		cfg.Models[0].RoutingStrategy = strategy
+		if _, err := Build(cfg); err != nil {
+			t.Fatalf("strategy %s rejected: %v", strategy, err)
+		}
+	}
+	cfg.Models[0].RoutingStrategy = "random"
+	if _, err := Build(cfg); err == nil {
+		t.Fatal("invalid model strategy accepted")
+	}
+}

@@ -9,14 +9,21 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 type Endpoint string
 
 const (
-	EndpointChatCompletions Endpoint = "chat_completions"
-	EndpointResponses       Endpoint = "responses"
+	EndpointChatCompletions     Endpoint = "chat_completions"
+	EndpointResponses           Endpoint = "responses"
+	EndpointMessages            Endpoint = "messages"
+	EndpointCountTokens         Endpoint = "count_tokens"
+	EndpointEmbeddings          Endpoint = "embeddings"
+	EndpointImagesGenerations   Endpoint = "images_generations"
+	EndpointAudioSpeech         Endpoint = "audio_speech"
+	EndpointAudioTranscriptions Endpoint = "audio_transcriptions"
+	EndpointModerations         Endpoint = "moderations"
 )
 
 type OperationKind string

@@ -10,26 +10,24 @@ OpenAI Codex account setup, model discovery, quota/reset safety, and validation 
 
 ```sh
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/1jehuang/2papi/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Rethinger/2papi/master/install.sh | sh
 2papi --config ~/.2papi/config.yaml
 # Dashboard: http://localhost:8080/dashboard/   Gateway: http://localhost:8080/v1/chat/completions
 
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/1jehuang/2papi/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Rethinger/2papi/master/install.ps1 | iex
 
 # Interactive controls (like 9router):
 2papi tui      # menu: Start / Providers / Quota / Plugins / 2papi.local
 2papi init     # enable http://2papi.local via hosts (Y/n)
-
-# Or via package managers (after first release)
-brew tap 1jehuang/tap && brew install 2papi
-scoop bucket add 2papi https://github.com/1jehuang/scoop-bucket && scoop install 2papi
 
 # Docker (full stack)
 docker compose up --build
 # or single binary container
 docker build -t 2papi . && docker run -p 8080:8080 2papi
 ```
+
+*Brew/scoop taps publish once the companion `Rethinger/homebrew-tap` and `Rethinger/scoop-bucket` repos exist (see RELEASE.md).*
 
 **Interactive controls (like 9router):**
 

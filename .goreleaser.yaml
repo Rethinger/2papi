@@ -48,3 +48,20 @@ changelog:
 release:
   draft: false
   prerelease: auto
+# Brew/scoop publish to companion repos — create Rethinger/homebrew-tap and
+# Rethinger/scoop-bucket with a formula/manifest to enable.
+# brews:
+#   - repository:
+#       owner: Rethinger
+#       name: homebrew-tap
+#     folder: Formula
+#     homepage: https://github.com/Rethinger/2papi
+#     description: "Lightweight AI Gateway — faster than LiteLLM, 9Router token savers"
+#     license: MIT
+# scoop:
+#   repository:
+#     owner: Rethinger
+#     name: scoop-bucket
+#   homepage: https://github.com/Rethinger/2papi
+#   description: "Lightweight AI Gateway — faster than LiteLLM, 9Router token savers"
+#   license: MIT

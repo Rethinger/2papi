@@ -43,5 +43,6 @@ If GitHub Actions is not yet enabled, build manually:
 ```sh
 goreleaser release --clean        # needs GITHUB_TOKEN
 # or
-make cross  # (add a Makefile target if desired)
+make cross          # dist/2papi_{linux,darwin,windows}_{amd64,arm64}[.exe]
+make build          # bin/2papi (host)
 ```

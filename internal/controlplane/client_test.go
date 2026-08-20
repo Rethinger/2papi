@@ -12,7 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/telemetry"
 )
 
 func validConfig() config.Config {
@@ -234,5 +235,33 @@ func TestUpdateCredentialsMapsConflictAndBoundsResponseWithoutLeakingBody(t *tes
 		if err != nil && strings.Contains(err.Error(), credential.AccessToken) {
 			t.Fatalf("%s leaked credential in error: %v", tc.name, err)
 		}
+	}
+}
+
+func TestPublishTelemetryUsesAuthenticatedBoundedBatch(t *testing.T) {
+	events := []telemetry.Event{{RequestID: "req-1", PublicModel: "model-a", FinalStatus: http.StatusOK}}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/internal/v1/request-events" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("X-Gateway-ID") != "gw" {
+			t.Fatalf("missing authenticated gateway headers: %v", r.Header)
+		}
+		var body struct {
+			GatewayID string            `json:"gateway_id"`
+			Events    []telemetry.Event `json:"events"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.GatewayID != "gw" || len(body.Events) != 1 || body.Events[0].RequestID != "req-1" {
+			t.Fatalf("body=%+v", body)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	if err := New(ts.URL, "token", "gw").Publish(context.Background(), events); err != nil {
+		t.Fatal(err)
 	}
 }

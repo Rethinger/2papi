@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 func TestResponsesNonStreamRewritesAndHeaders(t *testing.T) {

@@ -38,7 +38,7 @@ export type DiscoveredModel = {
   account_count: number;
   available_account_count: number;
   accounts: Record<string, { available: boolean; display_name: string; last_seen_at: string }>;
-  metadata: { context_window: number | null; tools: boolean | null; function_calling: boolean | null; reasoning: boolean | null; supported_in_api: boolean | null; tier: string | null; owner: string | null; description: string | null };
+  metadata: { context_window: number | null; tools: boolean | null; function_calling: boolean | null; reasoning: boolean | null; image_generation: boolean | null; supported_in_api: boolean | null; tier: string | null; owner: string | null; description: string | null; tool_names: string[] | null; input_modalities: string[] | null; parallel_tool_calls: boolean | null; last_seen_at: string | null };
 };
 
 export type CodexQuotaWindow = {
@@ -69,6 +69,7 @@ export type CodexQuotaState = {
   capability_status: 'unknown' | 'available' | 'unsupported' | 'contract_changed' | 'error';
   fetched_at?: string | null;
   last_error_code?: string | null;
+  local_usage?: { tokens: number; requests: number; since: string } | null;
   reset_operation?: CodexResetOperation | null;
 };
 
@@ -148,7 +149,9 @@ export function getDiscoveredModels() {
   return codexRequest<DiscoveredModel[]>('discovered-models');
 }
 
-export function importDiscoveredModel(input: { alias: string; provider_id: string; upstream_model: string; routing_strategy: 'round_robin' | 'quota_failover' }) {
+export type DiscoveredModelStrategy = 'round_robin' | 'quota_failover' | 'p2c' | 'least_used' | 'lkgp' | 'reset_aware';
+
+export function importDiscoveredModel(input: { alias: string; provider_id: string; upstream_model: string; routing_strategy: DiscoveredModelStrategy }) {
   return codexRequest<Record<string, unknown>>('models/import-selection', {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify(input),
   });
@@ -199,6 +202,11 @@ export function codexPlanLabel(plan: unknown, fallback: string) {
 export function clampQuotaPercent(value: unknown) {
   const number = typeof value === 'number' && Number.isFinite(value) ? value : 0;
   return Math.min(100, Math.max(0, number));
+}
+
+export function splitRemaining(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return { hours: Math.floor(total / 3600), minutes: Math.floor((total % 3600) / 60), seconds: total % 60 };
 }
 
 export function openCodexAuthWindow(url: string) {

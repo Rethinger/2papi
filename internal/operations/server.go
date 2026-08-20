@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/proxy"
+	"github.com/Rethinger/2papi/internal/proxylib"
 )
 
 const maxOperationBody = 2 << 20
@@ -36,6 +38,7 @@ type OperationAccount struct {
 	Weight         int               `json:"weight"`
 	MaxConcurrency int               `json:"max_concurrency"`
 	Cost           float64           `json:"cost"`
+	Proxy          string            `json:"proxy"`
 }
 
 type Request struct {
@@ -120,9 +123,19 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "unknown_adapter")
 		return
 	}
-	acct := config.Account{ID: req.Account.ID, Name: req.Account.Name, Adapter: req.Account.Adapter, BaseURL: req.Account.BaseURL, Credential: req.Account.Credential, Enabled: req.Account.Enabled, Priority: req.Account.Priority, Weight: req.Account.Weight, MaxConcurrency: req.Account.MaxConcurrency, Cost: req.Account.Cost}
+	acct := config.Account{ID: req.Account.ID, Name: req.Account.Name, Adapter: req.Account.Adapter, BaseURL: req.Account.BaseURL, Credential: req.Account.Credential, Enabled: req.Account.Enabled, Priority: req.Account.Priority, Weight: req.Account.Weight, MaxConcurrency: req.Account.MaxConcurrency, Cost: req.Account.Cost, Proxy: req.Account.Proxy}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+	// Route the operation through the account's proxy (or the global pool).
+	if req.Account.Proxy != "" {
+		if entries, perr := proxylib.Parse(req.Account.Proxy); perr == nil {
+			group := proxy.BuildGroup(entries)
+			defer group.CloseIdleConnections()
+			ctx = proxy.InjectGroup(ctx, group)
+		} else {
+			log.Printf("provider operation ignored invalid account proxy: account=%s error=%v", req.Account.Name, perr)
+		}
+	}
 	res, err := ad.Operate(ctx, adapter.Operation{Kind: req.Operation, Account: acct, Input: req.Input, IdempotencyKey: req.IdempotencyKey})
 	rev := acct.Credential.Revision
 	req = Request{}

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { compileSnapshot } from '../lib/control.ts';
 import { encryptSecretJson } from '../lib/crypto.ts';
 import { sha256Canonical } from '../lib/canonical-json.ts';
-import { materializeRuntimeSnapshot, materializeLegacyRuntimeSnapshot, runtimeSnapshotFromPublishedRow, legacyRuntimeSnapshotFromPublishedRow } from '../lib/snapshots.ts';
+import { compileDeclarativeSnapshot, materializeRuntimeSnapshot, materializeLegacyRuntimeSnapshot, runtimeSnapshotFromPublishedRow, legacyRuntimeSnapshotFromPublishedRow } from '../lib/snapshots.ts';
 
 const enc = encryptSecretJson({ api_key: 'upstream-primary' });
 const buf = (v: string) => Buffer.from(v, 'base64');
@@ -23,17 +23,22 @@ function secretRows() {
   return [{ id: accountId, credential_revision: 1, key_version: enc.key_version, data_key_nonce: buf(enc.data_key_nonce), data_key_ciphertext: buf(enc.data_key_ciphertext), data_key_tag: buf(enc.data_key_tag), secret_nonce: buf(enc.secret_nonce), secret_ciphertext: buf(enc.secret_ciphertext), secret_tag: buf(enc.secret_tag) }];
 }
 
-function mockClient(extra?: { noSecret?: boolean; published?: any }) {
+function mockClient(extra?: { noSecret?: boolean; published?: unknown; optimization?: unknown }) {
   const queries: Array<{ sql: string; params?: unknown[] }> = [];
   const query = async (sql: string, params?: unknown[]) => {
     queries.push({ sql, params });
     if (sql.startsWith('SELECT a.*, p.adapter FROM accounts')) return { rows: declarative.accounts };
     if (sql.startsWith('SELECT a.id account_id, a.credential_revision, sr.* FROM accounts')) return { rows: extra?.noSecret ? [] : secretRows().map(row => ({ ...row, account_id: accountId })) };
-    if (sql.startsWith('SELECT * FROM model_aliases')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', provider_id: null, routing_strategy: 'manual' }] };
+    if (sql.startsWith('SELECT * FROM model_aliases')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', provider_id: null, routing_strategy: 'manual', fallbacks: [] }] };
+    if (sql.startsWith('SELECT ma.*, mp.input_per_mtok')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', provider_id: null, routing_strategy: 'manual', fallbacks: [], input_per_mtok: null, output_per_mtok: null }] };
     if (sql.startsWith('SELECT mam')) return { rows: [{ alias: 'gpt-dev', account_name: 'primary' }] };
     if (sql.includes('FROM model_aliases ma') && sql.includes('JOIN discovered_models dm')) return { rows: [] };
     if (sql.startsWith('SELECT * FROM routing_settings')) return { rows: [{ strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: declarative.resilience }] };
+    if (sql.includes("system_settings WHERE key IN ('optimization','webhook','proxy_pool')")) return { rows: extra?.optimization ? [{ key: 'optimization', value: extra.optimization }] : [] };
+    if (sql.includes("system_settings WHERE key='optimization'")) return { rows: extra?.optimization ? [{ value: extra.optimization }] : [] };
     if (sql.startsWith('SELECT * FROM virtual_keys')) return { rows: declarative.virtual_keys };
+    if (sql.startsWith('SELECT vk.*, t.id team_id')) return { rows: declarative.virtual_keys };
+    if (sql.startsWith('SELECT team_id, count(*)::int key_count')) return { rows: [] };
     if (sql.startsWith('SELECT version,snapshot FROM config_versions')) return { rows: extra?.published ? [extra.published] : [] };
     throw new Error(sql);
   };
@@ -100,4 +105,12 @@ test('legacy internal snapshot helper remains explicit transitional v1', async (
   assert.equal(envelope?.snapshot.accounts[0].api_key, 'upstream-primary');
   assert.equal('credential' in envelope?.snapshot.accounts[0], false);
   assert.equal(envelope?.checksum, sha256Canonical(envelope?.snapshot));
+});
+
+test('declarative snapshot carries optimization flags from system settings', async () => {
+  const disabled = await compileDeclarativeSnapshot(mockClient().client);
+  assert.deepEqual(disabled.snapshot.optimization, { rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8 });
+
+  const enabled = await compileDeclarativeSnapshot(mockClient({ optimization: { rtk_compression: true, caveman: true, headroom: true, headroom_reserve: 80000, headroom_keep: 4 } }).client);
+  assert.deepEqual(enabled.snapshot.optimization, { rtk_compression: true, caveman: true, headroom: true, headroom_reserve: 80000, headroom_keep: 4 });
 });

@@ -26,6 +26,17 @@ export function requireInternal(req: Request, token: string) {
   if (!crypto.timingSafeEqual(digest(got), digest(token))) throw new ApiError(401, 'unauthorized', 'Invalid internal service token');
 }
 
+export function requireGatewayIdentity(req: Request, claimedGatewayId: string): string {
+  const gatewayId = req.headers.get('x-gateway-id') ?? '';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(gatewayId)) {
+    throw new ApiError(400, 'gateway_identity_missing', 'Valid gateway identity header required');
+  }
+  if (gatewayId !== claimedGatewayId) {
+    throw new ApiError(403, 'gateway_identity_mismatch', 'Gateway identity does not match request body');
+  }
+  return gatewayId;
+}
+
 function digest(value: string): Buffer { return crypto.createHash('sha256').update(value).digest(); }
 
 export async function readJsonBounded<T>(req: Request, maxBytes: number): Promise<T> {

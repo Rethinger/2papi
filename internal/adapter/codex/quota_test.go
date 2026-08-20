@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/adapter"
 )
 
 func TestConsumeResetCreditSendsStoredRedeemRequestIDOnce(t *testing.T) {

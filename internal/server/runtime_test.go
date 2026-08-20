@@ -12,11 +12,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/proxy"
-	"github.com/1jehuang/2papi/internal/resilience"
-	"github.com/1jehuang/2papi/internal/router"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/proxy"
+	"github.com/Rethinger/2papi/internal/resilience"
+	"github.com/Rethinger/2papi/internal/router"
 )
 
 func testSnapshot(alias string) *config.Snapshot {

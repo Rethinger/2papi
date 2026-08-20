@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 const responsesPath = "/backend-api/codex/responses"
@@ -92,8 +92,17 @@ func (a *Adapter) doResponsesRequest(ctx context.Context, ex adapter.Execution, 
 	req.Header.Set("Accept", acceptHeader(ex.Request.Header.Get("Accept"), upstreamStream))
 	req.Header.Set("ChatGPT-Account-ID", cred.ChatGPTAccountID)
 	req.Header.Set("OpenAI-Beta", "responses=experimental")
-	req.Header.Set("User-Agent", a.options.ClientVersion)
-	req.Header.Set("X-Codex-Client", a.options.ClientVersion)
+	// Subscription spoof: official Codex CLI headers → lower quota burn
+	cliVersion := a.options.ClientVersion
+	if cliVersion == "" {
+		cliVersion = "1.0.0"
+	}
+	req.Header.Set("User-Agent", "codex/"+cliVersion+" (official CLI; linux x64)")
+	req.Header.Set("X-Codex-Client", cliVersion)
+	req.Header.Set("X-OpenAI-Client", "codex")
+	req.Header.Set("X-Stainless-Client", "codex")
+	req.Header.Set("OpenAI-Organization", cred.ChatGPTAccountID)
+	req.Header.Set("X-Stainless-Retry-Count", "0")
 	return a.client.Do(req)
 }
 

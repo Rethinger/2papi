@@ -40,6 +40,7 @@ async function migrate() {
   await pool!.query(await sql('003_codex_provider.sql'));
   await pool!.query(await sql('004_gateway_ack_idempotency.sql'));
   await pool!.query(await sql('006_provider_model_pools.sql'));
+  await pool!.query(await sql('010_teams.sql'));
 }
 
 async function seed(c: any, adapter = 'openai-compatible') {

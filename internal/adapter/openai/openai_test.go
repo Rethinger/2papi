@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	adapteropenai "github.com/1jehuang/2papi/internal/adapter/openai"
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/adapter"
+	adapteropenai "github.com/Rethinger/2papi/internal/adapter/openai"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 func TestExecuteRewritesRequestModelAndAuthorization(t *testing.T) {

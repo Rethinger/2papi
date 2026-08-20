@@ -41,6 +41,7 @@ test('snapshot security migrations reconstruct history and keep snapshots creden
     await c.query(await sql('002_snapshot_security.sql'));
     await c.query(await sql('003_codex_provider.sql'));
     await c.query(await sql('006_provider_model_pools.sql'));
+    await c.query(await sql('010_teams.sql'));
     await sanitizeHistoricalConfigVersions(c);
 
     const rows = await c.query('SELECT version,status,snapshot,checksum,config_checksum,errors,source_version,published_at FROM config_versions ORDER BY version');

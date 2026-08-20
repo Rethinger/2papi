@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2papi Roadmap</title>
+<style>
+:root{--bg:#0b1020;--panel:#11182b;--border:#273250;--text:#e7ecf7;--muted:#9aa7bd;--sub:#6b7a95;
+--good:#67e8a5;--warn:#efca7d;--bad:#ffaaaa;--accent:#93c5fd;--chip:#1b2440;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+h1{font-size:26px;margin:0 0 4px}
+.updated{color:var(--sub);font-size:12px}
+.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:18px 0 26px}
+.summary .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.summary b{display:block;font-size:26px}
+.summary span{color:var(--muted);font-size:12px}
+.bar{height:8px;border-radius:99px;background:var(--chip);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--good),#4ade80)}
+.phase{margin:18px 0;border:1px solid var(--border);border-radius:14px;background:var(--panel);overflow:hidden}
+.phase-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--border)}
+.phase-head h2{margin:0;font-size:16px;flex:1}
+.phase-head .meta{color:var(--sub);font-size:12px}
+.phase-body{padding:6px 18px 14px}
+.item{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid rgba(39,50,80,.4)}
+.item:last-child{border-bottom:none}
+.status{flex:0 0 auto;width:86px;text-align:center;font-size:11px;font-weight:700;padding:3px 0;border-radius:99px;height:fit-content;margin-top:2px}
+.status.done{background:rgba(103,232,165,.12);color:var(--good)}
+.status.active{background:rgba(239,202,125,.12);color:var(--warn)}
+.status.pending{background:rgba(155,167,189,.08);color:var(--muted)}
+.status.deferred{background:rgba(255,170,170,.1);color:var(--bad)}
+.item .body{flex:1}
+.item .body b{font-weight:600}
+.item .body p{margin:3px 0 0;color:var(--muted);font-size:12.5px}
+.item .evidence{color:var(--sub);font-size:11.5px;margin-top:3px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.legend{display:flex;gap:16px;color:var(--muted);font-size:12px;margin:14px 0 0;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+footer{margin-top:26px;color:var(--sub);font-size:11.5px;line-height:1.7}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>2papi Roadmap</h1><div class="updated" id="updated"></div></div>
+    <div class="legend">
+      <span><i style="background:var(--good)"></i>done</span>
+      <span><i style="background:var(--warn)"></i>in progress</span>
+      <span><i style="background:var(--muted)"></i>pending</span>
+      <span><i style="background:var(--bad)"></i>deferred</span>
+    </div>
+  </header>
+  <div class="summary" id="summary"></div>
+  <div id="phases"></div>
+  <footer id="notes"></footer>
+</main>
+
+<script>
+// ============================================================
+// ROADMAP DATA — the canonical plan state. Update this block
+// after each finished task: set item.status, fill item.evidence,
+// bump DATA.updated. The page renders itself from this object.
+// ============================================================
+const DATA = {
+  updated: '2026-08-14 (день)',
+  phases: [
+    {
+      id: 'panel',
+      name: 'Panel · Единое веб-приложение панели',
+      scope: 'URL-роутинг, командная палитра, единая шапка, deep-links',
+      items: [
+        { name: 'URL-роутинг вкладок (deep-links, back/forward)', status: 'done',
+          evidence: 'view-router (History API); catch-all app/[[...slug]]/page.tsx; /models, /keys… открываются напрямую; title per-view' },
+        { name: 'Командная палитра Ctrl+K', status: 'done',
+          evidence: 'поиск по моделям/аккаунтам/ключам/командам; Enter/клик → переход; кнопка в topbar' },
+        { name: 'Единая шапка: статус + время обновления', status: 'done',
+          evidence: 'statusbar «Updated HH:MM:SS» + auto-refresh 60s; live-проверка в браузере' },
+      ],
+    },
+    {
+      id: 'p0',
+      name: 'P0 · Базовые лимиты и леджер',
+      scope: 'Spend-леджер, бюджеты ключей, TPM/concurrency, fallback-цепочки моделей',
+      items: [
+        { name: 'Spend-леджер + прайсинг + дневные бюджеты ключей', status: 'done',
+          evidence: 'migration 009; key_spend_daily rollup; 429 budget_exceeded; X-Gateway-Budget-Remaining; UI Spend today' },
+        { name: 'TPM и max_concurrency на ключ', status: 'done',
+          evidence: 'policy.Begin/Finalize, скользящее окно 60с, заголовки X-Gateway-TPM/Concurrency-Remaining' },
+        { name: 'Combo: fallback через цепочки моделей', status: 'done',
+          evidence: 'model_aliases.fallbacks, modelChain в Proxy.Endpoint, валидация циклов, UI Fallback chain' },
+        { name: 'Динамическая квота Codex (авто-поллинг, countdown)', status: 'done',
+          evidence: 'полл 60с + stale-upgrade 5мин + live countdown (предыдущая сессия)' },
+      ],
+    },
+    {
+      id: 'p1',
+      name: 'P1 · Провайдеры и резилентность',
+      scope: 'Адаптеры Claude/Gemini, стратегии роутинга, локдауны, фоновая валидация',
+      items: [
+        { name: 'Адаптер Anthropic (Claude) с SSE-трансляцией', status: 'done',
+          evidence: 'internal/adapter/anthropic; /v1/messages; tool_use; SSE content_block_delta → OpenAI chunks' },
+        { name: 'Claude-аккаунты: API-ключ / OAuth / Cookies (claude.ai)', status: 'done',
+          evidence: 'kind: api_key|oauth|cookie; OAuth = Bearer + oauth-2025-04-20; cookie = sessionKey + /api/organizations/{org}/chat_conversations, транскрипт Human/Assistant; UI-методы в модалке аккаунта' },
+        { name: 'Адаптер Google Gemini (REST + SSE)', status: 'done',
+          evidence: 'internal/adapter/gemini; generateContent/streamGenerateContent; кандидаты → chunks' },
+        { name: 'Стратегии роутинга p2c / least-used / lkgp / reset-aware', status: 'done',
+          evidence: 'router.Plan switch; LKGP коммит в proxy; валидация в config+control; UI dropdown' },
+        { name: 'Модель-локдаун аккаунтов', status: 'done',
+          evidence: 'resilience.Lockout + триггер по LockoutFailures; сброс при успехе; UI routing fields' },
+        { name: 'Фоновая валидация учётных данных', status: 'done',
+          evidence: 'credential-prober scheduler (6ч) → account_provider_state + audit' },
+        { name: 'Image-модели от Codex: vision-вход + генерация изображений', status: 'done',
+          evidence: 'chat → responses: image_url → input_image (vision); /v1/images/generations → backend-api/generate, SSE asset pointer → download → b64_json; юнит-тесты адаптера' },
+      ],
+    },
+    {
+      id: 'p2',
+      name: 'P2 · Производительность и наблюдаемость',
+      scope: 'Prometheus /metrics, TTL-кэш, RTK-компрессия, ширина эндпоинтов',
+      items: [
+        { name: 'Prometheus /metrics', status: 'done',
+          evidence: 'counters по model/status/outcome, токены, latency summary, gauges активных/кулдаун/локдаун' },
+        { name: 'TTL-кэш ответов (opt-in)', status: 'done',
+          evidence: 'X-Gateway-Cache: HIT/MISS, X-Gateway-Cache-TTL; sha256 ключ' },
+        { name: 'RTK-компрессия tool-результатов', status: 'done',
+          evidence: 'X-Gateway-Compress: true; X-Gateway-Saved-Bytes: 3311 (live)' },
+        { name: 'Панельные тумблеры оптимизации RTK + Caveman (как в 9Router)', status: 'done',
+          evidence: 'system_settings optimization {rtk_compression, caveman} → снапшот → gateway: RTK жмёт tool-результаты (X-Gateway-Saved-Bytes), Caveman инъектит системную директиву краткости (X-Gateway-Caveman); Settings → Optimization + чекбоксы в routing-модалке' },
+        { name: 'Anthropic-native /v1/messages + count_tokens', status: 'done',
+          evidence: 'internal/protocol/messages.go (Anthropic↔OpenAI, JSON+SSE); /v1/messages через любой адаптер; count_tokens для anthropic-аккаунтов, 501 иначе' },
+        { name: 'SSRF-guard на base_url провайдеров/аккаунтов', status: 'done',
+          evidence: 'zod-валидация: private/loopback/link-local IP-литералы и localhost заблокированы; ALLOW_PRIVATE_UPSTREAMS=true для dev' },
+        { name: 'Webhook-алерты: локдаун и budget_exceeded', status: 'done',
+          evidence: 'system_settings webhook → снапшот; X-Gateway-Event + HMAC-SHA256 X-Gateway-Signature; панель Settings → Webhook' },
+        { name: 'Экспорт/импорт полного снапшота (с секретами)', status: 'done',
+          evidence: 'lib/snapshot-transfer.ts; транзакционная замена состояния; roundtrip-проверка на живом стеке; Settings → Backup' },
+        { name: 'Тренды запросов (14 дней)', status: 'done',
+          evidence: 'GET request-trends (SQL group by day); бары токенов в Overview' },
+        { name: 'Batch import: ключи, cookies claude, auth.json codex, модели', status: 'done',
+          evidence: 'POST accounts/batch (name:key строки), models/batch (alias=upstream acct1,acct2), multi-file codex import, batch-таб в модалках; кнопка Bulk import в табе выбранного провайдера (Accounts), codex-вариант: auth.json/токены → codex/import-auth-batch (dedupe по chatgpt_account_id)' },
+        { name: 'Вкладки провайдеров в Accounts', status: 'done',
+          evidence: 'provider-tabs bar; фильтр по провайдеру (codex/anthropic карточки, остальные таблица)' },
+        { name: 'Ошибки аккаунтов в UI', status: 'done',
+          evidence: 'account_provider_state.last_error_message в карточках и таблице' },
+        { name: 'Ширина: /v1/embeddings, /v1/images, /v1/audio/speech, /v1/audio/transcriptions', status: 'done',
+          evidence: 'multipart rewrite модели; бинарный passthrough; allowlist в /v1/models' },
+        { name: 'Passthrough /v1/moderations', status: 'done',
+          evidence: 'роут + rewrite модели; passthrough ответа; unit-тест' },
+      ],
+    },
+    {
+      id: 'p3',
+      name: 'P3 · Мульти-тенантность и расширение',
+      scope: 'Команды с бюджетами, fair-share пулы, MCP/A2A, платежи (отложено)',
+      items: [
+        { name: 'Teams: общие дневные бюджеты на группу ключей', status: 'done',
+          evidence: 'migration 010; X-Gateway-Team-Budget-Remaining; 429 budget_exceeded; UI Teams' },
+        { name: 'Fair-share ключевые пулы (per-key доля внутри команды)', status: 'done',
+          evidence: 'team.share_usd = budget/keys в снапшоте; enforcement в policy; колонка Fair share в UI; unit+integration тесты' },
+        { name: 'MCP/A2A гейтвей (LiteLLM-паттерн)', status: 'pending',
+          evidence: 'требует MCP-клиент + relay tool_use; большой объём' },
+        { name: 'Встроенные платежи', status: 'deferred',
+          evidence: 'ToS-риск upstream подписок; только под публичный запуск по явному решению' },
+      ],
+    },
+  ],
+  notes: 'Каждый пункт обновляется сразу после завершения: status + evidence. Страница локальная — не в Docker. Открывается двойным кликом в любом браузере.',
+};
+
+// ================= RENDERER =================
+const STATUS_LABEL = { done: 'done', active: 'in progress', pending: 'pending', deferred: 'deferred' };
+function esc(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function render() {
+  document.getElementById('updated').textContent = 'Last updated: ' + DATA.updated;
+  const summary = document.getElementById('summary');
+  const phases = document.getElementById('phases');
+  summary.innerHTML = ''; phases.innerHTML = '';
+  let totalDone = 0, totalItems = 0;
+  for (const phase of DATA.phases) {
+    const done = phase.items.filter(i => i.status === 'done').length;
+    const active = phase.items.filter(i => i.status === 'active').length;
+    totalDone += done; totalItems += phase.items.length;
+    const pct = Math.round(done / phase.items.length * 100);
+    summary.insertAdjacentHTML('beforeend',
+      `<div class="card"><b>${pct}%</b><span>${esc(phase.name)}</span><div class="bar"><i style="width:${pct}%"></i></div></div>`);
+    const rows = phase.items.map(item => `
+      <div class="item">
+        <span class="status ${item.status}">${STATUS_LABEL[item.status]}</span>
+        <div class="body"><b>${esc(item.name)}</b>${item.evidence ? `<p>${esc(item.evidence)}</p>` : ''}</div>
+      </div>`).join('');
+    phases.insertAdjacentHTML('beforeend', `
+      <section class="phase">
+        <div class="phase-head"><h2>${esc(phase.name)}</h2><span class="meta">${done}/${phase.items.length} · ${active ? active + ' in progress' : ''} · ${esc(phase.scope)}</span></div>
+        <div class="phase-body">${rows}</div>
+      </section>`);
+  }
+  const overall = Math.round(totalDone / totalItems * 100);
+  summary.insertAdjacentHTML('beforeend', `<div class="card"><b>${overall}%</b><span>Overall (${totalDone}/${totalItems})</span><div class="bar"><i style="width:${overall}%"></i></div></div>`);
+  document.getElementById('notes').textContent = DATA.notes;
+}
+render();
+</script>
+</body>
+</html>

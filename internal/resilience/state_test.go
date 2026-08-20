@@ -67,3 +67,30 @@ func TestConcurrencyAndLatencyEWMA(t *testing.T) {
 		t.Fatal("open circuit should remain open until reset window")
 	}
 }
+
+func TestLockoutAndCounters(t *testing.T) {
+	s := New()
+	if s.LockedOut("a") {
+		t.Fatal("new account should not be locked out")
+	}
+	s.Lockout("a", 15*time.Millisecond)
+	if !s.LockedOut("a") {
+		t.Fatal("lockout should be active")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if s.LockedOut("a") {
+		t.Fatal("lockout should have expired")
+	}
+
+	s.Lockout("a", time.Hour)
+	s.ResetLockout("a")
+	if s.LockedOut("a") {
+		t.Fatal("lockout should be cleared on reset")
+	}
+
+	s.Success("a", 50*time.Millisecond)
+	s.Failure("a", 3)
+	if s.Successes("a") != 1 || s.Fails("a") != 1 || s.TotalRequests("a") != 2 {
+		t.Fatalf("counters mismatch: succ=%d fails=%d total=%d", s.Successes("a"), s.Fails("a"), s.TotalRequests("a"))
+	}
+}

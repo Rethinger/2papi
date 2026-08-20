@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 func TestChatExecuteUsesResponsesAndReturnsChatCompletion(t *testing.T) {
@@ -164,17 +164,55 @@ func TestConvertChatRequestRejectsUnrepresentableFields(t *testing.T) {
 		name string
 		body string
 	}{
-		{"image input", `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]}]}`},
 		{"structured output", `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}}`},
 		{"legacy functions", `{"model":"m","messages":[{"role":"user","content":"hi"}],"functions":[{"name":"old"}]}`},
+		{"image part without url", `{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":" "}}]}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := convertChatRequest([]byte(tt.body), "upstream")
-			if err == nil || !strings.Contains(err.Error(), "codex_feature_unsupported") {
+			if err == nil || !strings.Contains(err.Error(), "codex_feature_unsupported") && !strings.Contains(err.Error(), "invalid chat request") {
 				t.Fatalf("error=%v", err)
 			}
 		})
+	}
+}
+
+func TestConvertChatRequestAcceptsImageInput(t *testing.T) {
+	in := []byte(`{
+		"model":"public-model",
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"what is in this photo?"},{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]},
+			{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}
+		]
+	}`)
+	got, err := convertChatRequest(in, "upstream-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Input []struct {
+			Role    string `json:"role"`
+			Content []struct {
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				ImageURL string `json:"image_url"`
+			} `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(got, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Input) != 2 || payload.Input[0].Role != "user" || payload.Input[1].Role != "user" {
+		t.Fatalf("unexpected converted input: %s", got)
+	}
+	first := payload.Input[0].Content
+	if len(first) != 2 || first[0].Type != "input_text" || first[0].Text != "what is in this photo?" || first[1].Type != "input_image" || first[1].ImageURL != "https://example.test/a.png" {
+		t.Fatalf("unexpected converted content: %s", got)
+	}
+	second := payload.Input[1].Content
+	if len(second) != 1 || second[0].Type != "input_image" || second[0].ImageURL != "data:image/png;base64,AAAA" {
+		t.Fatalf("unexpected converted content: %s", got)
 	}
 }
 

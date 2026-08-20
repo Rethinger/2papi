@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/adapter"
-	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/controlplane"
+	"github.com/Rethinger/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/controlplane"
 )
 
 const Name = "openai-codex"
@@ -106,6 +106,8 @@ func (a *Adapter) Execute(ctx context.Context, ex adapter.Execution) (*adapter.R
 		return a.executeChat(ctx, ex)
 	case adapter.EndpointResponses:
 		return a.executeResponses(ctx, ex)
+	case adapter.EndpointImagesGenerations:
+		return a.executeImages(ctx, ex)
 	default:
 		return nil, &adapter.CapabilityError{Kind: adapter.OperationKind(ex.Endpoint)}
 	}

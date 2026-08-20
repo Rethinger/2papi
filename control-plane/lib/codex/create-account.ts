@@ -10,6 +10,8 @@ export type CreateCodexAccountInput = {
   credential: NormalizedCodexCredential;
   enabled?: boolean;
   max_concurrency?: number;
+  /** Target provider id; falls back to the provider with slug 'openai-codex'. */
+  providerId?: string;
 };
 
 export type CreateCodexAccountDeps = {
@@ -45,7 +47,9 @@ function accountName(input: CreateCodexAccountInput) {
 
 export async function createCodexAccount(client: PoolClient, input: CreateCodexAccountInput, deps: CreateCodexAccountDeps = defaults) {
   const credential = input.credential;
-  const provider = (await client.query(`SELECT id FROM providers WHERE slug='openai-codex' LIMIT 1`)).rows[0];
+  const provider = input.providerId
+    ? (await client.query('SELECT id FROM providers WHERE id=$1', [input.providerId])).rows[0]
+    : (await client.query(`SELECT id FROM providers WHERE slug='openai-codex' LIMIT 1`)).rows[0];
   if (!provider?.id) throw new Error('codex_provider_missing');
 
   const name = accountName(input);

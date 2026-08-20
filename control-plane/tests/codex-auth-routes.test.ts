@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createCodexAccount } from '../lib/codex/create-account.ts';
-import { codexCallbackCore, codexDeviceStartCore, codexDeviceStatusCore, codexImportAuthCore, codexOAuthStartCore, codexReauthorizeCore, codexRouteDeps, type CodexRouteDeps } from '../lib/codex/routes.ts';
+import { codexCallbackCore, codexDeviceStartCore, codexDeviceStatusCore, codexImportAuthBatchCore, codexImportAuthCore, codexOAuthStartCore, codexReauthorizeCore, codexRouteDeps, type CodexRouteDeps } from '../lib/codex/routes.ts';
 
 function req(url: string, init: RequestInit & { headers?: Record<string, string> } = {}) {
   return new Request(url, init);
@@ -220,4 +220,32 @@ test('createCodexAccount fails when provider row or required account update is m
   } as any;
   await assert.rejects(() => createCodexAccount(accountMissing, { accountId: 'missing', method: 'browser', credential: { kind: 'oauth', access_token: 's', chatgpt_account_id: 'acct' } as any }, accountDeps(calls)), /codex_account_missing/);
   assert.equal(calls.some(c => c.helper === 'storeDraft' || c.helper === 'audit'), false);
+});
+
+test('batch import creates one account per auth.json entry and bare token', async () => {
+  const created: any[] = [];
+  const dep = deps({
+    parseCodexAuthFile: async raw => {
+      const parsed = JSON.parse(raw);
+      return { kind: 'oauth', access_token: parsed.access_token ?? 'at', chatgpt_account_id: parsed.chatgpt_account_id ?? 'acct-import', auth_method: 'import' } as any;
+    },
+    createAccount: async input => { created.push(input); return { id: `account-${created.length}`, revision: 1 }; },
+  });
+  const result = await codexImportAuthBatchCore({
+    provider_id: '00000000-0000-4000-8000-000000000000',
+    entries: [
+      { name: 'one', raw: '{"access_token":"a","chatgpt_account_id":"id-1"}' },
+      { raw: 'bare-token' },
+    ],
+    max_concurrency: 3,
+  }, dep);
+  assert.equal(result.length, 2);
+  assert.deepEqual(created[0], { name: 'one', method: 'import', credential: { kind: 'oauth', access_token: 'a', chatgpt_account_id: 'id-1', auth_method: 'import' }, enabled: true, max_concurrency: 3, providerId: '00000000-0000-4000-8000-000000000000' });
+  assert.deepEqual(created[1], { name: undefined, method: 'import', credential: { kind: 'oauth', access_token: 'bare-token', chatgpt_account_id: 'acct-import', auth_method: 'import' }, enabled: true, max_concurrency: 3, providerId: '00000000-0000-4000-8000-000000000000' });
+});
+
+test('batch import validates entries and rejects empty input', async () => {
+  await assert.rejects(() => codexImportAuthBatchCore({ entries: [] }, deps()), /entries/);
+  await assert.rejects(() => codexImportAuthBatchCore({ entries: [{ raw: '' }] }, deps()), /raw/);
+  await assert.rejects(() => codexImportAuthBatchCore({ entries: [{ raw: 'x' }], provider_id: 'not-a-uuid' }, deps()), /provider_id/);
 });

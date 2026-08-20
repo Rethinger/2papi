@@ -1,8 +1,7 @@
 'use client';
-
-import { AlertFillIcon, CheckCircleFillIcon, DownloadIcon, SyncIcon } from '@primer/octicons-react';
 import { useEffect, useMemo, useState } from 'react';
-import { discoverCodexModels, getDiscoveredModels, importDiscoveredModel, isValidPublicAlias, type DiscoveredModel, type DiscoveryResult, type DiscoveryScope } from '../codex-client';
+import { AlertFillIcon, CheckCircleFillIcon, DownloadIcon, SyncIcon } from '@primer/octicons-react';
+import { discoverCodexModels, getDiscoveredModels, importDiscoveredModel, isValidPublicAlias, type DiscoveredModel, type DiscoveredModelStrategy, type DiscoveryResult, type DiscoveryScope } from '../codex-client';
 import type { Translator } from '../i18n';
 
 export function ModelDiscoveryModal({ accounts, providers, existingAliases, initialAccountId, t, onClose, onImported, onError }: {
@@ -29,7 +28,7 @@ export function ModelDiscoveryModal({ accounts, providers, existingAliases, init
   const [results, setResults] = useState<DiscoveryResult[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [aliases, setAliases] = useState<Record<string, string>>({});
-  const [strategies, setStrategies] = useState<Record<string, 'round_robin' | 'quota_failover'>>({});
+  const [strategies, setStrategies] = useState<Record<string, DiscoveredModelStrategy>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -100,8 +99,8 @@ export function ModelDiscoveryModal({ accounts, providers, existingAliases, init
             const availableIds = Object.entries(model.accounts).filter(([, state]) => state.available).map(([id]) => id);
             return <label className={`discovered-model ${model.available_account_count ? '' : 'unavailable'}`} key={key}>
               <input type="checkbox" checked={Boolean(selected[key])} disabled={!availableIds.length} onChange={event => setSelected(value => ({ ...value, [key]: event.target.checked }))} />
-              <div><b>{model.display_name}</b><code>{model.upstream_model}</code><small>{model.provider_name} · {t('codex.discovery.availableAccounts', { count: model.available_account_count })}{model.metadata.context_window ? ` · ${model.metadata.context_window}` : ''}</small></div>
-              <div className="discovery-inputs"><input aria-label={t('form.publicAlias')} value={aliases[key] ?? model.upstream_model} onChange={event => setAliases(value => ({ ...value, [key]: event.target.value }))} disabled={!selected[key]} /><select aria-label={t('models.strategy')} value={strategies[key] ?? 'round_robin'} onChange={event => setStrategies(value => ({ ...value, [key]: event.target.value as any }))} disabled={!selected[key]}><option value="round_robin">{t('models.strategyRoundRobin')}</option><option value="quota_failover">{t('models.strategyQuotaFailover')}</option></select></div>
+              <div><b>{model.display_name}</b><code>{model.upstream_model}</code><small>{model.provider_name} · {t('codex.discovery.availableAccounts', { count: model.available_account_count })}{model.metadata.image_generation ? ` · ${t('models.imageGeneration')}` : ''}{model.metadata.context_window ? ` · ${model.metadata.context_window}` : ''}</small></div>
+              <div className="discovery-inputs"><input aria-label={t('form.publicAlias')} value={aliases[key] ?? model.upstream_model} onChange={event => setAliases(value => ({ ...value, [key]: event.target.value }))} disabled={!selected[key]} /><select aria-label={t('models.strategy')} value={strategies[key] ?? 'round_robin'} onChange={event => setStrategies(value => ({ ...value, [key]: event.target.value as DiscoveredModelStrategy }))} disabled={!selected[key]}><option value="round_robin">{t('models.strategyRoundRobin')}</option><option value="quota_failover">{t('models.strategyQuotaFailover')}</option><option value="p2c">{t('models.strategyP2C')}</option><option value="least_used">{t('models.strategyLeastUsed')}</option><option value="lkgp">{t('models.strategyLKGP')}</option><option value="reset_aware">{t('models.strategyResetAware')}</option></select></div>
             </label>;
           })}
           {!models.length && <div className="empty-inline">{t('codex.discovery.empty')}</div>}

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/controlplane"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/controlplane"
 )
 
 type tokenManager struct {

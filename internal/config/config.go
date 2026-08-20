@@ -8,37 +8,104 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/Rethinger/2papi/internal/proxylib"
 )
 
 type Config struct {
-	Version     int          `yaml:"version" json:"version"`
-	Server      Server       `yaml:"server" json:"server"`
-	Secret      string       `yaml:"secret" json:"secret"`
-	VirtualKeys []VirtualKey `yaml:"virtual_keys" json:"virtual_keys"`
-	Models      []Model      `yaml:"models" json:"models"`
-	Accounts    []Account    `yaml:"accounts" json:"accounts"`
-	Routing     Routing      `yaml:"routing" json:"routing"`
-	Resilience  Resilience   `yaml:"resilience" json:"resilience"`
+	Version      int          `yaml:"version" json:"version"`
+	Server       Server       `yaml:"server" json:"server"`
+	Secret       string       `yaml:"secret" json:"secret"`
+	VirtualKeys  []VirtualKey `yaml:"virtual_keys" json:"virtual_keys"`
+	Models       []Model      `yaml:"models" json:"models"`
+	Accounts     []Account    `yaml:"accounts" json:"accounts"`
+	Routing      Routing      `yaml:"routing" json:"routing"`
+	Resilience   Resilience   `yaml:"resilience" json:"resilience"`
+	Optimization Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
+	Webhook      Webhook      `yaml:"webhook,omitempty" json:"webhook,omitempty"`
+	// Proxies is the global upstream proxy pool (any format: one entry per
+	// line, commas/semicolons, JSON array; http/https/socks4/4a/5/5h).
+	// Accounts without their own proxy use this pool; accounts with one use
+	// their own. Empty = direct connections (HTTP_PROXY env still applies).
+	Proxies []string `yaml:"proxies,omitempty" json:"proxies,omitempty"`
+	// Plugins lists sidecar/config plugins (like dsh plugins but HTTP sidecars).
+	// Each becomes a plugin.Registry entry wired on runtime start.
+	Plugins []PluginConfig `yaml:"plugins,omitempty" json:"plugins,omitempty"`
+}
+
+// PluginConfig declares a gateway plugin: HTTP sidecar endpoint or in-process
+// enabled flag.
+type PluginConfig struct {
+	Name     string `yaml:"name" json:"name"`
+	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+	Enabled  bool   `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+}
+
+// Webhook delivers gateway alerts (account lockout, budget exceeded) to an
+// external endpoint. Requests are signed with HMAC-SHA256 of the body using
+// Secret when set.
+type Webhook struct {
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	URL     string `yaml:"url,omitempty" json:"url,omitempty"`
+	Secret  string `yaml:"secret,omitempty" json:"secret,omitempty"`
+}
+
+// Optimization carries global request-optimization flags applied by the
+// gateway to every request, mirroring 9Router's token savers. Individual
+// requests can still opt in with X-Gateway-* headers even when disabled.
+type Optimization struct {
+	// RTKCompression compresses large tool_result content (saves 20-40% input tokens).
+	RTKCompression bool `yaml:"rtk_compression" json:"rtk_compression"`
+	// Caveman injects a terse "caveman" system directive so the model replies
+	// with fewer output tokens (up to ~65%), while keeping technical substance.
+	Caveman bool `yaml:"caveman" json:"caveman"`
+	// Headroom reserves output space by pruning old tool history when the
+	// estimated input tokens exceed the headroom window (like 9Router).
+	Headroom bool `yaml:"headroom" json:"headroom"`
+	// HeadroomReserve is the max estimated input tokens before pruning. 0 = 120k default.
+	HeadroomReserve int `yaml:"headroom_reserve,omitempty" json:"headroom_reserve,omitempty"`
+	// HeadroomKeep is how many recent turns to keep when pruning. 0 = 8 default.
+	HeadroomKeep int `yaml:"headroom_keep,omitempty" json:"headroom_keep,omitempty"`
 }
 type Server struct {
 	Addr         string `yaml:"addr" json:"addr"`
 	ReadTimeout  string `yaml:"read_timeout" json:"read_timeout"`
 	WriteTimeout string `yaml:"write_timeout" json:"write_timeout"`
+	// Gzip compresses buffered non-streaming JSON responses >= 1 KiB when
+	// the client advertises Accept-Encoding: gzip (LiteLLM parity).
+	Gzip bool `yaml:"gzip,omitempty" json:"gzip,omitempty"`
 }
 type VirtualKey struct {
-	Name    string   `yaml:"name" json:"name"`
-	Key     string   `yaml:"key,omitempty" json:"key,omitempty"`
-	KeyHash string   `yaml:"key_hash,omitempty" json:"key_hash,omitempty"`
-	Models  []string `yaml:"models" json:"models"`
-	RPM     int      `yaml:"rpm" json:"rpm"`
-	hash    []byte
+	Name           string       `yaml:"name" json:"name"`
+	ID             string       `yaml:"id,omitempty" json:"id,omitempty"`
+	Key            string       `yaml:"key,omitempty" json:"key,omitempty"`
+	KeyHash        string       `yaml:"key_hash,omitempty" json:"key_hash,omitempty"`
+	Models         []string     `yaml:"models" json:"models"`
+	RPM            int          `yaml:"rpm" json:"rpm"`
+	TPM            int          `yaml:"tpm,omitempty" json:"tpm,omitempty"`
+	MaxConcurrency int          `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	BudgetUSD      float64      `yaml:"budget_usd,omitempty" json:"budget_usd,omitempty"` // daily, 0 = unlimited
+	Team           *Team        `yaml:"team,omitempty" json:"team,omitempty"`
+	Optimization   *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
+	hash           []byte
+}
+
+type Team struct {
+	ID        string  `yaml:"id" json:"id"`
+	BudgetUSD float64 `yaml:"budget_usd" json:"budget_usd"`                   // shared daily team budget, 0 = unlimited
+	ShareUSD  float64 `yaml:"share_usd,omitempty" json:"share_usd,omitempty"` // per-key fair share = budget / key count
 }
 type Model struct {
-	Alias           string   `yaml:"alias" json:"alias"`
-	UpstreamModel   string   `yaml:"upstream_model" json:"upstream_model"`
-	Accounts        []string `yaml:"accounts" json:"accounts"`
-	RoutingStrategy string   `yaml:"routing_strategy,omitempty" json:"routing_strategy,omitempty"`
+	Alias             string       `yaml:"alias" json:"alias"`
+	UpstreamModel     string       `yaml:"upstream_model" json:"upstream_model"`
+	Accounts          []string     `yaml:"accounts" json:"accounts"`
+	RoutingStrategy   string       `yaml:"routing_strategy,omitempty" json:"routing_strategy,omitempty"`
+	Fallbacks         []string     `yaml:"fallbacks,omitempty" json:"fallbacks,omitempty"`
+	InputCostPerMtok  float64      `yaml:"input_cost_per_mtok,omitempty" json:"input_cost_per_mtok,omitempty"`
+	OutputCostPerMtok float64      `yaml:"output_cost_per_mtok,omitempty" json:"output_cost_per_mtok,omitempty"`
+	Optimization      *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
 }
 type Account struct {
 	ID             string     `yaml:"id,omitempty" json:"id,omitempty"`
@@ -52,6 +119,9 @@ type Account struct {
 	Weight         int        `yaml:"weight" json:"weight"`
 	MaxConcurrency int        `yaml:"max_concurrency" json:"max_concurrency"`
 	Cost           float64    `yaml:"cost" json:"cost"`
+	// Proxy is an upstream proxy for THIS account (any format, list allowed).
+	// Empty = fall back to the global pool, then direct/HTTP_PROXY.
+	Proxy string `yaml:"proxy,omitempty" json:"proxy,omitempty"`
 }
 
 type Credential struct {
@@ -60,6 +130,8 @@ type Credential struct {
 	AccessToken      string `yaml:"access_token,omitempty" json:"access_token,omitempty"`
 	RefreshToken     string `yaml:"refresh_token,omitempty" json:"refresh_token,omitempty"`
 	IDToken          string `yaml:"id_token,omitempty" json:"id_token,omitempty"`
+	Cookies          string `yaml:"cookies,omitempty" json:"cookies,omitempty"`
+	OrganizationID   string `yaml:"organization_id,omitempty" json:"organization_id,omitempty"`
 	ExpiresAt        string `yaml:"expires_at,omitempty" json:"expires_at,omitempty"`
 	ClientID         string `yaml:"client_id,omitempty" json:"client_id,omitempty"`
 	ChatGPTAccountID string `yaml:"chatgpt_account_id,omitempty" json:"chatgpt_account_id,omitempty"`
@@ -74,14 +146,20 @@ type Resilience struct {
 	Cooldown        string `yaml:"cooldown" json:"cooldown"`
 	CircuitFailures int    `yaml:"circuit_failures" json:"circuit_failures"`
 	CircuitReset    string `yaml:"circuit_reset" json:"circuit_reset"`
+	LockoutFailures int    `yaml:"lockout_failures,omitempty" json:"lockout_failures,omitempty"`
+	LockoutDuration string `yaml:"lockout_duration,omitempty" json:"lockout_duration,omitempty"`
 }
 
 type Snapshot struct {
 	Config
 	KeyHashes                         map[string][]byte
 	ModelsByAlias                     map[string]Model
+	VirtualKeysByName                 map[string]VirtualKey
 	AccountsByName                    map[string]Account
+	GlobalProxies                     []proxylib.Entry            // parsed from Config.Proxies
+	AccountProxies                    map[string][]proxylib.Entry // parsed per account (nil = unset)
 	StickyTTL, Cooldown, CircuitReset time.Duration
+	Lockout                           time.Duration
 	ReadTimeout, WriteTimeout         time.Duration
 }
 
@@ -115,7 +193,15 @@ func Build(c Config) (*Snapshot, error) {
 	if c.Resilience.CircuitFailures <= 0 {
 		c.Resilience.CircuitFailures = 3
 	}
-	s := &Snapshot{Config: c, KeyHashes: map[string][]byte{}, ModelsByAlias: map[string]Model{}, AccountsByName: map[string]Account{}}
+	s := &Snapshot{Config: c, KeyHashes: map[string][]byte{}, ModelsByAlias: map[string]Model{}, VirtualKeysByName: map[string]VirtualKey{}, AccountsByName: map[string]Account{}, AccountProxies: map[string][]proxylib.Entry{}}
+	// Global proxy pool (strict: any invalid entry fails the snapshot).
+	if len(c.Proxies) > 0 {
+		global, err := proxylib.Parse(strings.Join(c.Proxies, "\n"))
+		if err != nil {
+			return nil, fmt.Errorf("global proxy pool: %w", err)
+		}
+		s.GlobalProxies = global
+	}
 	var e error
 	s.StickyTTL, e = parseDur(c.Routing.StickyTTL, time.Hour)
 	if e != nil {
@@ -128,6 +214,13 @@ func Build(c Config) (*Snapshot, error) {
 	s.CircuitReset, e = parseDur(c.Resilience.CircuitReset, time.Minute)
 	if e != nil {
 		return nil, e
+	}
+	s.Lockout, e = parseDur(c.Resilience.LockoutDuration, 15*time.Minute)
+	if e != nil {
+		return nil, e
+	}
+	if c.Resilience.LockoutFailures < 0 {
+		return nil, errors.New("lockout_failures must be non-negative")
 	}
 	s.ReadTimeout, e = parseDur(c.Server.ReadTimeout, 10*time.Second)
 	if e != nil {
@@ -153,9 +246,42 @@ func Build(c Config) (*Snapshot, error) {
 				return nil, errors.New("version 2 account id/adapter/credential kind/positive revision required")
 			}
 			switch a.Adapter {
-			case "openai-compatible":
-				if a.Credential.APIKey == "" {
-					return nil, errors.New("openai-compatible credential api_key required")
+			case "openai-compatible", "gemini", "deepseek":
+				// Free providers (opencode/felo/qoder) may have no secret.
+				if a.Credential.Kind == "free" {
+					// no secret required
+				} else if a.Credential.Kind == "api_key" && a.Credential.APIKey == "" {
+					return nil, fmt.Errorf("%s credential api_key required", a.Adapter)
+				}
+			case "opencode", "free", "felo", "qoder":
+				if a.Credential.Kind != "free" && a.Credential.Kind != "api_key" {
+					return nil, fmt.Errorf("%s credential free or api_key required", a.Adapter)
+				}
+			case "cursor", "copilot", "kimi":
+				// OAuth-based providers (added from OmniRoute-style adapter set).
+				if a.Credential.Kind == "free" {
+					// no secret
+				} else if a.Credential.Kind == "oauth" && a.Credential.AccessToken == "" {
+					return nil, fmt.Errorf("%s oauth credential requires access_token", a.Adapter)
+				} else if a.Credential.Kind == "api_key" && a.Credential.APIKey == "" {
+					return nil, fmt.Errorf("%s api_key credential requires api_key", a.Adapter)
+				}
+			case "anthropic":
+				switch a.Credential.Kind {
+				case "api_key":
+					if a.Credential.APIKey == "" {
+						return nil, errors.New("anthropic api_key credential requires api_key")
+					}
+				case "oauth":
+					if a.Credential.AccessToken == "" {
+						return nil, errors.New("anthropic oauth credential requires access_token")
+					}
+				case "cookie":
+					if a.Credential.Cookies == "" {
+						return nil, errors.New("anthropic cookie credential requires cookies")
+					}
+				default:
+					return nil, fmt.Errorf("unsupported anthropic credential kind %q", a.Credential.Kind)
 				}
 			case "openai-codex":
 				if a.Credential.AccessToken == "" || a.Credential.ChatGPTAccountID == "" {
@@ -174,6 +300,13 @@ func Build(c Config) (*Snapshot, error) {
 		if _, exists := s.AccountsByName[a.Name]; exists {
 			return nil, fmt.Errorf("duplicate account %s", a.Name)
 		}
+		if a.Proxy != "" {
+			entries, perr := proxylib.Parse(a.Proxy)
+			if perr != nil {
+				return nil, fmt.Errorf("account %s proxy: %w", a.Name, perr)
+			}
+			s.AccountProxies[a.Name] = entries
+		}
 		c.Accounts[i] = a
 		s.Config.Accounts[i] = a
 		s.AccountsByName[a.Name] = a
@@ -190,6 +323,9 @@ func Build(c Config) (*Snapshot, error) {
 		}
 		if !validModelRoutingStrategy(m.RoutingStrategy) {
 			return nil, fmt.Errorf("unsupported model routing strategy %s", m.RoutingStrategy)
+		}
+		if m.InputCostPerMtok < 0 || m.OutputCostPerMtok < 0 {
+			return nil, fmt.Errorf("model %s has negative pricing", m.Alias)
 		}
 		eligible := false
 		for _, an := range m.Accounts {
@@ -208,9 +344,26 @@ func Build(c Config) (*Snapshot, error) {
 		s.Config.Models[i] = m
 		s.ModelsByAlias[m.Alias] = m
 	}
+	for _, m := range c.Models {
+		for _, fb := range m.Fallbacks {
+			target, ok := s.ModelsByAlias[fb]
+			if !ok {
+				return nil, fmt.Errorf("model %s fallback references unknown model %s", m.Alias, fb)
+			}
+			if target.UpstreamModel == m.UpstreamModel && len(target.Accounts) == len(m.Accounts) {
+				return nil, fmt.Errorf("model %s fallback %s is redundant", m.Alias, fb)
+			}
+		}
+		if cycleErr := modelFallbackCycle(c.Models, m.Alias, map[string]bool{}); cycleErr != "" {
+			return nil, fmt.Errorf("model fallback cycle involving %s", cycleErr)
+		}
+	}
 	for _, k := range c.VirtualKeys {
 		if k.Name == "" || (k.Key == "" && k.KeyHash == "") {
 			return nil, errors.New("virtual key name and key or key_hash required")
+		}
+		if k.RPM < 0 || k.TPM < 0 || k.MaxConcurrency < 0 || k.BudgetUSD < 0 {
+			return nil, fmt.Errorf("virtual key %s has negative limit", k.Name)
 		}
 		if k.KeyHash != "" {
 			hash, err := hex.DecodeString(k.KeyHash)
@@ -223,15 +376,37 @@ func Build(c Config) (*Snapshot, error) {
 			mac.Write([]byte(k.Key))
 			s.KeyHashes[k.Name] = mac.Sum(nil)
 		}
+		s.VirtualKeysByName[k.Name] = k
 	}
 	if len(s.VirtualKeys) == 0 {
 		return nil, errors.New("at least one virtual key required")
 	}
 	return s, nil
 }
+
+func modelFallbackCycle(models []Model, start string, path map[string]bool) string {
+	if path[start] {
+		return start
+	}
+	path[start] = true
+	defer delete(path, start)
+	var next Model
+	for _, m := range models {
+		if m.Alias == start {
+			next = m
+			break
+		}
+	}
+	for _, fb := range next.Fallbacks {
+		if cycle := modelFallbackCycle(models, fb, path); cycle != "" {
+			return cycle
+		}
+	}
+	return ""
+}
 func validModelRoutingStrategy(strategy string) bool {
 	switch strategy {
-	case "balanced", "priority", "weighted", "fallback-chain", "fastest", "cheapest", "quota-drain", "round_robin", "quota_failover":
+	case "balanced", "priority", "weighted", "fallback-chain", "fastest", "cheapest", "quota-drain", "round_robin", "quota_failover", "p2c", "least-used", "lkgp", "reset-aware", "adaptive":
 		return true
 	default:
 		return false

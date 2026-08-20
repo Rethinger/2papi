@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/controlplane"
-	"github.com/1jehuang/2papi/internal/resilience"
-	"github.com/1jehuang/2papi/internal/server"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/controlplane"
+	"github.com/Rethinger/2papi/internal/resilience"
+	"github.com/Rethinger/2papi/internal/server"
 )
 
 func TestAdoptOnceSkipsUnchangedSnapshotAckButSendsHeartbeat(t *testing.T) {

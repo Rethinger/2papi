@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { ApiError } from '../api';
 import { audit } from '../control';
 import type { Queryable } from '../db';
+import { accountUsageSince } from '../request-events';
 import { dispatchProviderOperation, type OperationKind } from '../provider-operations';
 
 type Dispatch = (
@@ -39,7 +40,7 @@ type ResetDeps = RefreshDeps & {
 };
 
 export async function getCodexQuota(client: Queryable, accountID: string) {
-  const account = await client.query('SELECT id FROM accounts WHERE id=$1', [accountID]);
+  const account = await client.query('SELECT id, name FROM accounts WHERE id=$1', [accountID]);
   if (!account.rows[0]) throw new ApiError(404, 'account_not_found', 'Account not found');
   await expirePendingReset(client, accountID);
   const state = await client.query(`SELECT account_id,quota,reset_credits,capability_status,fetched_at,last_operation,last_error_code,last_error_message,updated_at
@@ -57,7 +58,14 @@ export async function getCodexQuota(client: Queryable, accountID: string) {
     last_error_message: null,
     updated_at: null,
   };
-  return { ...quota, reset_operation: operation.rows[0] ?? null };
+  const fetchedAt = quota.fetched_at ? new Date(quota.fetched_at) : null;
+  if (fetchedAt && Number.isFinite(fetchedAt.getTime())) {
+    const usage = await accountUsageSince(client, account.rows[0].name, fetchedAt);
+    if (usage.requests > 0 || usage.tokens > 0) {
+      return { ...quota, reset_operation: operation.rows[0] ?? null, local_usage: { ...usage, since: fetchedAt.toISOString() } };
+    }
+  }
+  return { ...quota, reset_operation: operation.rows[0] ?? null, local_usage: null };
 }
 
 export async function refreshCodexQuota(client: Queryable, accountID: string, deps: RefreshDeps = {}) {

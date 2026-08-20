@@ -109,6 +109,29 @@ export function CodexAccountModal({ t, onClose, onConnected, onError }: {
     finally { setBusy(false); }
   }
 
+  async function importFiles(files: File[]) {
+    if (!files.length) return;
+    setBusy(true); setLocalError(''); setFileName('');
+    let lastId = '';
+    try {
+      for (const file of files) {
+        if (file.size > MAX_AUTH_FILE_BYTES) {
+          setLocalError(t('codex.error.fileTooLarge'));
+          continue;
+        }
+        const result = await importCodexAuth(await file.text());
+        lastId = result.account_id;
+      }
+      setFileContents('');
+      if (lastId) await finish(lastId);
+    } catch (error) {
+      setLocalError(t('codex.error.import'));
+      onError(error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importFile() {
     if (!fileContents) return;
     setBusy(true); setLocalError('');
@@ -161,7 +184,7 @@ export function CodexAccountModal({ t, onClose, onConnected, onError }: {
           </>}
           {tab === 'import' && <>
             <p>{t('codex.import.description')}</p>
-            <label className="file-drop"><FileIcon size={20} /><b>{fileName || t('codex.import.choose')}</b><span>{t('codex.import.limit')}</span><input type="file" accept="application/json,.json" onChange={event => void selectFile(event.target.files?.[0])} /></label>
+            <label className="file-drop"><FileIcon size={20} /><b>{fileName || t('codex.import.choose')}</b><span>{t('codex.import.multi')}</span><input type="file" accept="application/json,.json" multiple onChange={event => void importFiles(Array.from(event.target.files ?? []))} /></label>
             <button className="primary wide" onClick={() => void importFile()} disabled={busy || !fileContents}>{t('codex.import.action')}</button>
           </>}
         </div>

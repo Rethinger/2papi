@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/config"
-	"github.com/1jehuang/2papi/internal/resilience"
+	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/resilience"
 )
 
 func routerSnapshot(t *testing.T, strategy string, attempts int) *config.Snapshot {
@@ -135,5 +135,76 @@ func TestProviderModelStrategies(t *testing.T) {
 	plan, _ := r.Plan("model", "same")
 	if len(plan) == 0 || plan[0].Name != "secondary" {
 		t.Fatalf("cooling primary not skipped: %+v", plan)
+	}
+}
+
+func TestLeastUsedStrategy(t *testing.T) {
+	snap := routerSnapshot(t, "least-used", 2)
+	state := resilience.New()
+	state.Success("primary", 10*time.Millisecond)
+	state.Success("primary", 10*time.Millisecond)
+	state.Success("secondary", 10*time.Millisecond)
+
+	r := New(snap, state)
+	plan, _ := r.Plan("model", "")
+	if len(plan) != 2 || plan[0].Name != "secondary" {
+		t.Fatalf("least-used expected secondary (1 req) first, got: %+v", plan)
+	}
+}
+
+func TestP2CStrategy(t *testing.T) {
+	snap := routerSnapshot(t, "p2c", 2)
+	state := resilience.New()
+	state.Success("primary", 100*time.Millisecond)
+	state.Success("secondary", 10*time.Millisecond)
+
+	r := New(snap, state)
+	plan, _ := r.Plan("model", "")
+	if len(plan) != 2 {
+		t.Fatalf("p2c should return all candidate accounts: %+v", plan)
+	}
+}
+
+func TestLKGPStrategy(t *testing.T) {
+	snap := routerSnapshot(t, "lkgp", 2)
+	r := New(snap, resilience.New())
+	r.CommitLKGP("model", "secondary")
+	plan, _ := r.Plan("model", "")
+	if len(plan) != 2 || plan[0].Name != "secondary" {
+		t.Fatalf("lkgp should prioritize last known good account: %+v", plan)
+	}
+}
+
+func TestResetAwareStrategy(t *testing.T) {
+	snap, err := config.Build(config.Config{
+		Version: 2,
+		Secret:  "s",
+		VirtualKeys: []config.VirtualKey{{Name: "vk", Key: "sk", Models: []string{"*"}, RPM: 60}},
+		Models: []config.Model{{Alias: "model", UpstreamModel: "up", Accounts: []string{"near-reset", "far-reset"}}},
+		Accounts: []config.Account{
+			{ID: "1", Name: "far-reset", Adapter: "openai-compatible", BaseURL: "http://far", Credential: config.Credential{Kind: "api_key", APIKey: "k", ExpiresAt: time.Now().Add(48 * time.Hour).Format(time.RFC3339), Revision: 1}, Enabled: true, Priority: 1},
+			{ID: "2", Name: "near-reset", Adapter: "openai-compatible", BaseURL: "http://near", Credential: config.Credential{Kind: "api_key", APIKey: "k", ExpiresAt: time.Now().Add(2 * time.Hour).Format(time.RFC3339), Revision: 1}, Enabled: true, Priority: 1},
+		},
+		Routing: config.Routing{Strategy: "reset-aware", MaxAttempts: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(snap, resilience.New())
+	plan, _ := r.Plan("model", "")
+	if len(plan) != 2 || plan[0].Name != "near-reset" {
+		t.Fatalf("reset-aware should prioritize account resetting soonest (near-reset), got: %+v", plan)
+	}
+}
+
+func TestLockoutFiltering(t *testing.T) {
+	snap := routerSnapshot(t, "priority", 2)
+	state := resilience.New()
+	state.Lockout("primary", 10*time.Minute)
+
+	r := New(snap, state)
+	plan, _ := r.Plan("model", "")
+	if len(plan) != 1 || plan[0].Name != "secondary" {
+		t.Fatalf("locked out account primary was not filtered: %+v", plan)
 	}
 }

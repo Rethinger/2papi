@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/1jehuang/2papi/internal/adapter"
+	"github.com/Rethinger/2papi/internal/adapter"
 )
 
 const maxChatResponseBytes = 16 << 20
@@ -85,8 +85,9 @@ type responsesInput struct {
 }
 
 type responsesContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 type responsesTool struct {
@@ -97,8 +98,11 @@ type responsesTool struct {
 }
 
 type chatContentPart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL *struct {
+		URL string `json:"url"`
+	} `json:"image_url,omitempty"`
 }
 
 func (a *Adapter) executeChat(ctx context.Context, ex adapter.Execution) (*adapter.Result, error) {
@@ -161,22 +165,43 @@ func convertChatRequest(raw []byte, upstreamModel string) ([]byte, error) {
 	out := responsesRequest{Model: upstreamModel, Input: []responsesInput{}, Stream: in.Stream, Store: false, Stop: in.Stop}
 	var instructions []string
 	for _, message := range in.Messages {
-		text, err := chatMessageText(message.Content)
-		if err != nil {
-			return nil, err
-		}
 		switch message.Role {
 		case "system", "developer":
+			text, err := chatMessageText(message.Content)
+			if err != nil {
+				return nil, err
+			}
 			if text != "" {
 				instructions = append(instructions, text)
 			}
-		case "user", "assistant":
-			contentType := "input_text"
-			if message.Role == "assistant" {
-				contentType = "output_text"
+		case "user":
+			text, images, err := chatMessageParts(message.Content)
+			if err != nil {
+				return nil, err
+			}
+			content := []responsesContent{}
+			if text != "" {
+				content = append(content, responsesContent{Type: "input_text", Text: text})
+			}
+			for _, url := range images {
+				content = append(content, responsesContent{Type: "input_image", ImageURL: url})
+			}
+			if len(content) > 0 {
+				out.Input = append(out.Input, responsesInput{Type: "message", Role: "user", Content: content})
+			}
+			for _, call := range message.ToolCalls {
+				if call.Type != "function" || call.ID == "" || call.Function.Name == "" {
+					return nil, fmt.Errorf("invalid chat request: malformed tool call")
+				}
+				out.Input = append(out.Input, responsesInput{Type: "function_call", ID: call.ID, CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments})
+			}
+		case "assistant":
+			text, err := chatMessageText(message.Content)
+			if err != nil {
+				return nil, err
 			}
 			if text != "" {
-				out.Input = append(out.Input, responsesInput{Type: "message", Role: message.Role, Content: []responsesContent{{Type: contentType, Text: text}}})
+				out.Input = append(out.Input, responsesInput{Type: "message", Role: message.Role, Content: []responsesContent{{Type: "output_text", Text: text}}})
 			}
 			for _, call := range message.ToolCalls {
 				if call.Type != "function" || call.ID == "" || call.Function.Name == "" {
@@ -185,6 +210,10 @@ func convertChatRequest(raw []byte, upstreamModel string) ([]byte, error) {
 				out.Input = append(out.Input, responsesInput{Type: "function_call", ID: call.ID, CallID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments})
 			}
 		case "tool":
+			text, err := chatMessageText(message.Content)
+			if err != nil {
+				return nil, err
+			}
 			if message.ToolCallID == "" {
 				return nil, fmt.Errorf("invalid chat request: tool_call_id required")
 			}
@@ -232,26 +261,43 @@ func unsupportedChatFeature(field string) error {
 }
 
 func chatMessageText(raw json.RawMessage) (string, error) {
+	text, _, err := chatMessageParts(raw)
+	return text, err
+}
+
+// chatMessageParts extracts the plain text and the image URLs from an OpenAI
+// message content value, which may be a plain string or an array of content
+// parts. Image parts are only meaningful on user messages; every other role
+// keeps rejecting them via chatMessageText.
+func chatMessageParts(raw json.RawMessage) (string, []string, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return "", nil
+		return "", nil, nil
 	}
 	var text string
 	if json.Unmarshal(trimmed, &text) == nil {
-		return text, nil
+		return text, nil, nil
 	}
 	var parts []chatContentPart
 	if err := json.Unmarshal(trimmed, &parts); err != nil {
-		return "", fmt.Errorf("invalid chat request: message content")
+		return "", nil, fmt.Errorf("invalid chat request: message content")
 	}
 	var b strings.Builder
+	var images []string
 	for _, part := range parts {
-		if part.Type != "text" {
-			return "", unsupportedChatFeature("message content " + part.Type)
+		switch part.Type {
+		case "text":
+			b.WriteString(part.Text)
+		case "image_url":
+			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
+				return "", nil, fmt.Errorf("invalid chat request: image_url part requires url")
+			}
+			images = append(images, part.ImageURL.URL)
+		default:
+			return "", nil, unsupportedChatFeature("message content " + part.Type)
 		}
-		b.WriteString(part.Text)
 	}
-	return b.String(), nil
+	return b.String(), images, nil
 }
 
 func convertToolChoice(raw json.RawMessage) (json.RawMessage, error) {

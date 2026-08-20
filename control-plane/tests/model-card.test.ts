@@ -13,4 +13,12 @@ test('formats model card context and explicit capability states', () => {
 test('labels provider strategies exactly in both locales', () => {
   assert.equal(strategyLabel('round_robin', 'ru'), 'По очереди');
   assert.equal(strategyLabel('quota_failover', 'en'), 'Until quota is exhausted');
+  assert.equal(strategyLabel('p2c', 'en'), 'Power of two choices (P2C)');
+  assert.equal(strategyLabel('p2c', 'ru'), 'Выбор из двух (P2C)');
+  assert.equal(strategyLabel('least_used', 'en'), 'Least used');
+  assert.equal(strategyLabel('least-used', 'ru'), 'Наименее загруженный');
+  assert.equal(strategyLabel('lkgp', 'en'), 'Last known good (LKGP)');
+  assert.equal(strategyLabel('lkgp', 'ru'), 'Последний успешный (LKGP)');
+  assert.equal(strategyLabel('reset_aware', 'en'), 'Reset aware');
+  assert.equal(strategyLabel('reset-aware', 'ru'), 'С учётом сброса квоты');
 });

@@ -3,11 +3,12 @@
 import { CheckCircleFillIcon, KeyIcon, PencilIcon, SyncIcon, TrashIcon } from '@primer/octicons-react';
 import { useState } from 'react';
 import { codexPlanLabel, openCodexAuthWindow, reauthorizeCodexAccount } from '../codex-client';
-import type { Translator } from '../i18n';
+import type { Locale, Translator } from '../i18n';
 import { CodexQuotaPanel } from './codex-quota-panel';
 
-export function CodexAccountCard({ account, t, onChanged, onDiscover, onToggle, onEdit, onDelete, onError }: {
+export function CodexAccountCard({ account, locale, t, onChanged, onDiscover, onToggle, onEdit, onDelete, onError }: {
   account: any;
+  locale: Locale;
   t: Translator;
   onChanged: () => void | Promise<void>;
   onDiscover: () => void;
@@ -40,7 +41,7 @@ export function CodexAccountCard({ account, t, onChanged, onDiscover, onToggle, 
         <div><span>{t('codex.account.auth')}</span><b>{t(`codex.auth.${authMethod}` as Parameters<Translator>[0])}</b></div>
         <div><span>{t('codex.account.revision')}</span><b>v{account.credential_revision ?? 1}</b></div>
       </div>
-      <CodexQuotaPanel account={account} t={t} />
+      <CodexQuotaPanel account={account} locale={locale} t={t} />
       <footer>
         <button className="ghost" onClick={onDiscover}><SyncIcon size={14} />{t('codex.account.fetchModels')}</button>
         <button className="ghost" onClick={() => void reauthorize()} disabled={busy}>{t('codex.account.reauthorize')}</button>

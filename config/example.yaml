@@ -4,15 +4,94 @@ server:
   addr: ":8080"
   read_timeout: 10s
   write_timeout: 0s
+  # gzip не-стриминговых JSON-ответов >= 1KB при Accept-Encoding: gzip
+  gzip: false
 virtual_keys:
   - name: dev
     key: sk-gateway-dev
     models: [gpt-dev]
     rpm: 60
+    tpm: 20000
+    max_concurrency: 4
+    budget_usd: 5.0
+    # optimization: # per-key override (опционально)
+    #   rtk_compression: true
+    #   caveman: false
 models:
   - alias: gpt-dev
     upstream_model: gpt-4o-mini
     accounts: [primary, secondary]
+    input_cost_per_mtok: 0.15
+    output_cost_per_mtok: 0.60
+    fallbacks: [gpt-fast]
+    # Family-aware routing: gpt-dev → balanced + headroom
+    # routing_strategy: balanced
+  - alias: gpt-fast
+    upstream_model: gpt-4o-mini-fast
+    accounts: [secondary]
+    input_cost_per_mtok: 0.10
+    output_cost_per_mtok: 0.40
+    # Пример per-model переопределения (опционально):
+    # optimization:
+    #   rtk_compression: true
+    #   caveman: true
+    #   headroom: true
+    #   headroom_reserve: 80000
+
+  # ── Family presets for Arena Top-40 (uncomment as needed) ──
+  # Claude family (opus-5-max, opus-5-high, fable-5, sonnet-5-high) — sticky + LKGP, caveman off
+  # - alias: claude-opus-5-max
+  #   upstream_model: claude-opus-5-max-20251101
+  #   accounts: [claude-primary]
+  #   routing_strategy: adaptive
+  #   optimization: { caveman: false, rtk_compression: true, headroom: true }
+
+  # DeepSeek V4 family (v4-pro-high, v4-flash-high) — fastest, thinking compress
+  # adapter: deepseek (auto-registered), acct credential kind: api_key or free
+  # - alias: deepseek-v4-pro
+  #   upstream_model: deepseek-v4-pro-0813
+  #   accounts: [deepseek-primary]
+  #   routing_strategy: fastest
+  #   optimization: { rtk_compression: true, headroom: true, headroom_reserve: 8000 }
+
+  # OpenAI Codex family (gpt-5.6-sol/terra/luna) — quota-aware + reasoning_effort
+  # - alias: gpt-5.6-sol
+  #   upstream_model: gpt-5.6-sol
+  #   accounts: [codex-primary]
+  #   routing_strategy: quota-drain
+  #   optimization: { rtk_compression: true, caveman: false }
+
+  # Gemini family (3.7-flash, 3.6-flash) — fastest, Vertex vs AI Studio
+  # - alias: gemini-3.7-flash
+  #   upstream_model: gemini-3.7-flash
+  #   accounts: [gemini-primary]
+  #   routing_strategy: fastest
+
+  # Kimi K3 / GLM / Qwen — cheapest + p2c
+  # - alias: kimi-k3-max
+  #   upstream_model: kimi-k3-max
+  #   accounts: [kimi-primary]
+  #   routing_strategy: cheapest
+  #   optimization: { rtk_compression: true }
+
+  # ── Free providers (no API key, like OmniRoute free tier) ──
+  # No auth needed — credential: { kind: free }
+  # - alias: opencode-free
+  #   upstream_model: auto
+  #   accounts: [opencode-free]
+  #   routing_strategy: cheapest
+  # - alias: felo-free
+  #   upstream_model: auto
+  #   accounts: [felo-free]
+
+  # ── OAuth/Cookie providers (subscription, like 9Router maximize) ──
+  # - alias: cursor-fast
+  #   upstream_model: claude-sonnet-4-6
+  #   accounts: [cursor-1]
+  #   routing_strategy: adaptive
+  # - alias: copilot-gpt
+  #   upstream_model: gpt-5.6
+  #   accounts: [copilot-1]
 accounts:
   - name: primary
     base_url: http://fake-upstream:9001
@@ -22,6 +101,14 @@ accounts:
     weight: 2
     max_concurrency: 100
     cost: 0.15
+    # Per-account upstream proxy (optional). Any format, list allowed —
+    # http/https/socks4/4a/5/5h, one per line (or comma/JSON array):
+    #   http://user:pass@host:8080    socks5://host:1080
+    #   socks5h://user:pass@host      socks4a://host:1080
+    #   host:3128                     host:3128:user:pass
+    #   [::1]:9090
+    # Empty = global pool (below), then direct/HTTP_PROXY env.
+    # proxy: "socks5://user:pass@proxy.example:1080"
   - name: secondary
     base_url: http://fake-upstream:9002
     api_key: upstream-secondary
@@ -30,6 +117,41 @@ accounts:
     weight: 1
     max_concurrency: 100
     cost: 0.20
+    # ── Example free provider account (no auth) ──
+    # - name: opencode-free
+    #   base_url: https://opencode.ai/v1   # override free endpoint
+    #   adapter: opencode
+    #   credential: { kind: free, revision: 1 }
+    #   enabled: true
+    #   priority: 5
+    #   weight: 1
+    #   max_concurrency: 20
+    #   cost: 0
+    # ── Example OAuth subscription account (Cursor) ──
+    # - name: cursor-1
+    #   base_url: https://api2.cursor.sh
+    #   adapter: cursor
+    #   credential:
+    #     kind: oauth
+    #     access_token: YOUR_CURSOR_OAUTH_TOKEN
+    #     refresh_token: YOUR_CURSOR_REFRESH_TOKEN
+    #     client_id: cursor
+    #     revision: 1
+    #   enabled: true
+    #   priority: 1
+    #   weight: 10
+    #   max_concurrency: 8
+    #   cost: 0
+    # ── Example DeepSeek account (adapter auto-registered, API key) ──
+    # - name: deepseek-primary
+    #   base_url: https://api.deepseek.com
+    #   adapter: deepseek
+    #   credential: { kind: api_key, api_key: YOUR_DEEPSEEK_API_KEY, revision: 1 }
+    #   enabled: true
+    #   priority: 2
+    #   weight: 5
+    #   max_concurrency: 100
+    #   cost: 0.22
 routing:
   strategy: balanced
   sticky_ttl: 1h
@@ -38,3 +160,21 @@ resilience:
   cooldown: 30s
   circuit_failures: 3
   circuit_reset: 1m
+  lockout_failures: 10
+  lockout_duration: 15m
+# Global upstream proxy pool: used by accounts without their own `proxy`.
+# Same flexible format as the per-account field. Rotation is round-robin per
+# request with failover to the next entry on connection errors.
+# NOTE: keep this list empty for local development (or your requests will be
+# routed through these proxies).
+# proxies:
+#   - "http://user:pass@host-a:8080"
+#   - "socks5://host-b:1080"
+#   - "host-c:3128:user:pass"
+optimization:
+  # Глобальные тогглы (как в 9Router). Переопределяются per-model/per-key и хедерами X-Gateway-*.
+  rtk_compression: false  # RTK: сжимает большие tool_result (20-40% input economy)
+  caveman: false          # Caveman: краткие ответы (до 65% output economy)
+  headroom: false         # Headroom: прунит старые tool_result когда контекст > reserve
+  headroom_reserve: 120000
+  headroom_keep: 8

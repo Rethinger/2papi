@@ -19,6 +19,7 @@ type RuntimeAccount = {
   weight: number;
   max_concurrency: number;
   cost: number;
+  proxy?: string;
 };
 
 type OperationResponse = {
@@ -33,6 +34,8 @@ const RUNTIME_CREDENTIAL_FIELDS = [
   'access_token',
   'refresh_token',
   'id_token',
+  'cookies',
+  'organization_id',
   'expires_at',
   'client_id',
   'chatgpt_account_id',
@@ -136,6 +139,7 @@ async function loadRuntimeAccount(client: Queryable, accountID: string): Promise
       weight: row.weight,
       max_concurrency: row.max_concurrency,
       cost: Number(row.cost),
+      ...(typeof row.metadata?.proxy === 'string' && row.metadata.proxy.trim() ? { proxy: row.metadata.proxy } : {}),
     };
     if (pool) await connection.query('COMMIT');
     return account;

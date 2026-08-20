@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { tx } from '../db';
 import { parseCodexAuthFile } from './auth-file';
 import { startDeviceFlow, pollDeviceFlow, type DeviceFlowState } from './device';
@@ -128,6 +129,40 @@ export async function codexImportAuthCore(request: Request, deps: CodexRouteDeps
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'invalid_auth_file' }, 400);
   }
+}
+
+const CodexImportBatchSchema = z.object({
+  provider_id: z.string().uuid().optional(),
+  entries: z.array(z.object({
+    name: z.string().min(1).max(120).optional(),
+    raw: z.string().min(1).max(64 * 1024),
+  })).min(1).max(500),
+  max_concurrency: z.number().int().positive().max(1000).default(1),
+});
+
+export type CodexImportBatchDeps = Pick<CodexRouteDeps, 'parseCodexAuthFile' | 'createAccount'>;
+
+// codexImportAuthBatchCore imports many Codex credentials at once. Every
+// entry is either a full auth.json document (JSON) or a bare access token;
+// both go through parseCodexAuthFile so identities are verified and deduped
+// by chatgpt_account_id. All accounts are created inside one transaction.
+export async function codexImportAuthBatchCore(body: unknown, deps: CodexImportBatchDeps) {
+  const parsed = CodexImportBatchSchema.parse(body);
+  const created: Array<{ id: string; revision: number }> = [];
+  for (const entry of parsed.entries) {
+    const raw = entry.raw.trim();
+    const credential = await deps.parseCodexAuthFile(raw.startsWith('{') ? raw : JSON.stringify({ access_token: raw }));
+    const account = await deps.createAccount({
+      name: entry.name?.trim() || undefined,
+      method: 'import',
+      credential,
+      enabled: true,
+      max_concurrency: parsed.max_concurrency,
+      providerId: parsed.provider_id,
+    });
+    created.push(account);
+  }
+  return created;
 }
 
 export async function codexDeviceStartCore(_request: Request, deps: CodexRouteDeps) {

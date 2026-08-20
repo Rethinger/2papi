@@ -38,10 +38,10 @@ test('model validation separates manual and provider-backed routes', () => {
   assert.deepEqual(ModelSchema.parse({
     alias: 'luna', upstream_model: 'gpt-5.6-luna', provider_id: providerId, routing_strategy: 'round_robin',
   }), {
-    alias: 'luna', upstream_model: 'gpt-5.6-luna', provider_id: providerId, routing_strategy: 'round_robin', enabled: true,
+    alias: 'luna', upstream_model: 'gpt-5.6-luna', provider_id: providerId, routing_strategy: 'round_robin', enabled: true, fallbacks: [], input_per_mtok: 0, output_per_mtok: 0,
   });
   assert.deepEqual(ModelSchema.parse({ alias: 'manual', upstream_model: 'manual-upstream', accounts: [providerId] }), {
-    alias: 'manual', upstream_model: 'manual-upstream', accounts: [providerId], routing_strategy: 'manual', enabled: true,
+    alias: 'manual', upstream_model: 'manual-upstream', accounts: [providerId], routing_strategy: 'manual', enabled: true, fallbacks: [], input_per_mtok: 0, output_per_mtok: 0,
   });
   assert.throws(() => ModelSchema.parse({ alias: 'bad', upstream_model: 'bad', provider_id: providerId, routing_strategy: 'manual' }));
   assert.throws(() => ModelSchema.parse({ alias: 'bad', upstream_model: 'bad', routing_strategy: 'round_robin' }));

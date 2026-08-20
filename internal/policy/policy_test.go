@@ -4,7 +4,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/1jehuang/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/config"
 )
 
 func testSnapshot(t *testing.T) *config.Snapshot {
@@ -58,13 +58,116 @@ func TestAuthenticateAndModelPermissions(t *testing.T) {
 func TestRateLimitBucket(t *testing.T) {
 	auth := New(testSnapshot(t))
 	vk := config.VirtualKey{Name: "limited", RPM: 1}
-	if !auth.AllowRate(vk) {
+	if !auth.Begin(vk).Allowed {
 		t.Fatal("first request should consume initial token")
 	}
-	if auth.AllowRate(vk) {
-		t.Fatal("second immediate request should be rate limited")
+	if result := auth.Begin(vk); result.Allowed || result.Reason != "rate_limited" {
+		t.Fatalf("second immediate request should be rate limited: %+v", result)
 	}
-	if !auth.AllowRate(config.VirtualKey{Name: "unlimited", RPM: 0}) {
+	if result := auth.Begin(config.VirtualKey{Name: "unlimited", RPM: 0}); !result.Allowed {
 		t.Fatal("non-positive RPM should be unlimited")
+	}
+}
+
+func TestBudgetBlocksWhenDailySpendReached(t *testing.T) {
+	auth := New(testSnapshot(t))
+	vk := config.VirtualKey{Name: "budgeted", RPM: 0, BudgetUSD: 1.0}
+	if result := auth.Begin(vk); !result.Allowed || result.BudgetRemainingUSD != 1.0 {
+		t.Fatalf("fresh budget should allow with full remaining: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0.6, true)
+	if result := auth.Begin(vk); !result.Allowed {
+		t.Fatalf("partial spend should still allow: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0.5, true)
+	result := auth.Begin(vk)
+	if result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("spend above budget should block: %+v", result)
+	}
+	if result.BudgetRemainingUSD >= 0 {
+		t.Fatalf("overspend should be visible as negative remaining: %+v", result)
+	}
+}
+
+func TestConcurrencySlotsGateAndRelease(t *testing.T) {
+	auth := New(testSnapshot(t))
+	vk := config.VirtualKey{Name: "conc", RPM: 0, MaxConcurrency: 1}
+	if result := auth.Begin(vk); !result.Allowed || result.ConcurrencyRemaining != 0 {
+		t.Fatalf("slot acquired, remaining should be zero: %+v", result)
+	}
+	if result := auth.Begin(vk); result.Allowed || result.Reason != "concurrency_limited" {
+		t.Fatalf("second concurrent request should be limited: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0, false)
+	if result := auth.Begin(vk); !result.Allowed || result.ConcurrencyRemaining != 0 {
+		t.Fatalf("slot should free after finalize: %+v", result)
+	}
+}
+
+func TestTeamBudgetSharedAcrossKeys(t *testing.T) {
+	auth := New(testSnapshot(t))
+	team := &config.Team{ID: "team-1", BudgetUSD: 1.0}
+	vk1 := config.VirtualKey{Name: "k1", RPM: 0, BudgetUSD: 0, Team: team}
+	vk2 := config.VirtualKey{Name: "k2", RPM: 0, BudgetUSD: 0, Team: team}
+
+	if result := auth.Begin(vk1); !result.Allowed || result.TeamBudgetRemainingUSD != 1.0 {
+		t.Fatalf("fresh team budget should be full: %+v", result)
+	}
+	auth.Finalize(vk1, 0, 0.7, true)
+
+	// Second key shares the same team budget
+	if result := auth.Begin(vk2); !result.Allowed {
+		t.Fatalf("partial team spend should still allow: %+v", result)
+	}
+	auth.Finalize(vk2, 0, 0.5, true)
+
+	result := auth.Begin(vk1)
+	if result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("team overspend should block: %+v", result)
+	}
+	if result.TeamBudgetRemainingUSD >= 0 {
+		t.Fatalf("overspend should be visible as negative remaining: %+v", result)
+	}
+}
+
+func TestFairShareCapsPerKeyWithinTeam(t *testing.T) {
+	auth := New(testSnapshot(t))
+	team := &config.Team{ID: "team-fair", BudgetUSD: 1.0, ShareUSD: 0.5}
+	vk1 := config.VirtualKey{Name: "fair-1", RPM: 0, Team: team}
+	vk2 := config.VirtualKey{Name: "fair-2", RPM: 0, Team: team}
+
+	if result := auth.Begin(vk1); !result.Allowed {
+		t.Fatalf("first fair-share request should pass: %+v", result)
+	}
+	auth.Finalize(vk1, 0, 0.5, true)
+
+	// vk1 exhausted its 0.5 share -> blocked even though the team still has budget
+	if result := auth.Begin(vk1); result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("vk1 should be capped by its fair share: %+v", result)
+	}
+	// vk2 still has its own full share
+	if result := auth.Begin(vk2); !result.Allowed {
+		t.Fatalf("vk2 should have its own share available: %+v", result)
+	}
+	auth.Finalize(vk2, 0, 0.5, true)
+	// Team aggregate now exhausted
+	if result := auth.Begin(vk2); result.Allowed {
+		t.Fatalf("team aggregate should block after full spend: %+v", result)
+	}
+}
+
+func TestTPMWindowRefillsAndDeferredCommit(t *testing.T) {
+	auth := New(testSnapshot(t))
+	vk := config.VirtualKey{Name: "tpm", RPM: 0, TPM: 100}
+	if result := auth.Begin(vk); !result.Allowed || result.TPMRemaining != 100 {
+		t.Fatalf("fresh token window should be full: %+v", result)
+	}
+	auth.Finalize(vk, 90, 0, true)
+	if result := auth.Begin(vk); !result.Allowed {
+		t.Fatalf("90 of 100 tokens leaves pre-check headroom: %+v", result)
+	}
+	auth.Finalize(vk, 60, 0, true)
+	if result := auth.Begin(vk); result.Allowed || result.Reason != "rate_limited" {
+		t.Fatalf("150 committed tokens should exhaust the 100 TPM window: %+v", result)
 	}
 }

@@ -13,8 +13,12 @@ export async function deleteModelRoute(client: PoolClient, modelId: string) {
   return { id: modelId, alias, deleted: true as const };
 }
 
-export async function updateProviderModelStrategy(client: PoolClient, modelId: string, strategy: 'round_robin' | 'quota_failover') {
-  if (strategy !== 'round_robin' && strategy !== 'quota_failover') throw new ApiError(400, 'invalid_model_strategy', 'Provider model strategy is invalid');
+export type ProviderModelStrategy = 'round_robin' | 'quota_failover' | 'p2c' | 'least_used' | 'lkgp' | 'reset_aware';
+
+const VALID_STRATEGIES = new Set<string>(['round_robin', 'quota_failover', 'p2c', 'least_used', 'lkgp', 'reset_aware']);
+
+export async function updateProviderModelStrategy(client: PoolClient, modelId: string, strategy: ProviderModelStrategy) {
+  if (!VALID_STRATEGIES.has(strategy)) throw new ApiError(400, 'invalid_model_strategy', 'Provider model strategy is invalid');
   const updated = await client.query(
     'UPDATE model_aliases SET routing_strategy=$2,updated_at=now() WHERE id=$1 AND provider_id IS NOT NULL RETURNING *',
     [modelId, strategy],

@@ -168,7 +168,7 @@ export async function groupedDiscoveredModels(client: Queryable) {
     group.account_count++;
     if (row.available) {
       group.available_account_count++;
-      group.metadata_items.push(normalizeModelMetadata({ ...record(row.raw_metadata), capabilities: row.capabilities }));
+      group.metadata_items.push(normalizeModelMetadata({ ...record(row.raw_metadata), capabilities: row.capabilities, last_seen_at: row.last_seen_at ? new Date(row.last_seen_at).toISOString() : null }));
     }
     grouped.set(key, group);
   }
@@ -179,7 +179,7 @@ export async function groupedDiscoveredModels(client: Queryable) {
   });
 }
 
-export async function importSelection(client: PoolClient, input: { alias: string; provider_id: string; upstream_model: string; routing_strategy: 'round_robin' | 'quota_failover'; enabled?: boolean }) {
+export async function importSelection(client: PoolClient, input: { alias: string; provider_id: string; upstream_model: string; routing_strategy: 'round_robin' | 'quota_failover' | 'p2c' | 'least_used' | 'lkgp' | 'reset_aware'; enabled?: boolean }) {
   const alias = validatePublicAlias(input.alias);
   await assertAliasAvailable(client, alias);
   const provider = await client.query('SELECT id FROM providers WHERE id=$1 AND enabled=true FOR UPDATE', [input.provider_id]);

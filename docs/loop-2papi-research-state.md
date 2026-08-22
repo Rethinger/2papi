@@ -574,12 +574,19 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - node:test: типа test.Test нет в @types — структурный { after(fn) }.
 
 ### ОСТАЛОСЬ (следующая сессия, по порядку)
-1) витрина E1: README под LiteLLM-войну + GitHub Actions CI, SECURITY.md,
-   CONTRIBUTING.md (бэклог K);
-2) reconcile-джоба баланса (ночной) + декремент balance_usd по
-   request_events.cost_usd в control-plane («Платежи» спеки);
-3) control-plane CRUD для mcp_servers (сейчас конфиг из файла — OSS-путь);
+1) control-plane CRUD для mcp_servers (сейчас конфиг из файла — OSS-путь);
+2) Paddle/Dodo вебхук → credit_transactions topup + Billing-страница
+   («Платежи» спеки, после MoR-одобрения владельцем);
+3) витрина: benchmark-сюита по методологии Ferro (репро <5ms TTF);
 4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.
+
+### Платёжный контур + E1 — СДЕЛАНО ✅ (2026-08-23)
+- lib/balance.ts: ночной reconcile из леджера, дрейф = алерт;
+  декремент баланса в транзакции ingest'а (success-only, balance>0).
+- instrumentation: startBalanceReconciler (BALANCE_RECONCILE_INTERVAL_MS).
+- CI: полный сюит контроль-плейна с Postgres-сервисом; README против
+  LiteLLM; SECURITY.md; CONTRIBUTING.md.
+- Тесты: auth-flow +4 (декремент/reconcile/failed-free). Сюит 190/190.
 
 ### Шаг 7 MCP gateway — СДЕЛАН ✅
 - internal/mcp: POST /v1/mcp/<server> JSON-RPC passthrough за виртуальными

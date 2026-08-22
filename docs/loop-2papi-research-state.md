@@ -502,10 +502,43 @@ Cloud не отменяется, но перестаёт быть главным
 4. 2papi-cloud-research.md — весь ресёрч волн 1–5 + коррекции.
 
 Незакрытые хвосты:
-- владелец: подтвердить Apache-2.0 явно; подать MoR-заявки (Paddle/Dodo/Polar);
-- Build: шаг 1 license-key → коммит; миграции применить на живом PG;
-  перенести дизайн-спеки в репо;
+- владелец: ✅ ПОДТВЕРЖДЕНО Apache-2.0 (2026-08-22); подать MoR-заявки
+  (Paddle/Dodo/Polar) — остаётся за владельцем;
+- Build: шаг 1 license-key → коммит ✅ (32078bb); миграции применить на
+  живом PG; перенести дизайн-спеки в репо;
 - sync findings.py add по циклам A–L в research.db.
 
 Продолжение: свежая сессия /loop или сразу Build-агент (очередь —
 стратегия v3 «Очередь Build», спеки — build-spine-specs.md).
+
+## SESSION 2 (2026-08-22, Build в docs/)
+
+### Коммиты хребта ✅
+f8dbf95 LICENSE Apache-2.0 · 8eff0f7 миграции 011–014 ·
+32078bb feat(edition): гейт + Ed25519 license-key сервис (internal/license,
+тесты: подмена/просрочка/nbf/чужой ключ/no-key → OSS) ·
+c2d4254 docs(plan): журнал циклов A–L. Ветка autoresearch/session-20260821.
+Тесты: go test -race edition+license → ok.
+
+### Шаг 2а /metrics — УЖЕ РЕАЛИЗОВАН ✅ (проверено, кода не нужно)
+server.go:146 монтирует metricsHandler; exposition: requests по
+model/status/outcome, tokens in/out, summary latency/upstream TTFB/
+overhead, gauges active_connections/cooldown/locked_out per account.
+TestMetricsEndpointExposition зелёный (docker, -race).
+
+### Осталось по шагу 2
+2b) audit export в control-plane (Node): GET /api/admin/audit/export?
+from&to → NDJSON; гейт фичей audit_export. Следующая сессия со свежим
+контекстом — контроль-плейн тесты требуют compose+TEST_DATABASE_URL.
+
+### SESSION 2 финал ✅
+- Спеки перенесены в репо: docs/strategy-v3.md, docs/build-spine-specs.md,
+  open-design/CLOUD-SPECS.md (коммиты 089dfdd, b5816c9).
+- Apache-2.0 подтверждён владельцем.
+- ОСТАЛОСЬ (следующая сессия, по порядку):
+  1) шаг 2b audit export (control-plane, compose+TEST_DATABASE_URL);
+  2) шаг 3 Organizations; 4 SSO/OIDC; 5 адаптеры провайдеров;
+     6 signup/кредиты Cloud;
+  3) перенос спек из CLOUD-SPECS.md в рабочие файлы open-design/
+     (widgets-spec.md/landing) при их ревизии;
+  4) владелец: MoR-заявки.

@@ -574,11 +574,22 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - node:test: типа test.Test нет в @types — структурный { after(fn) }.
 
 ### ОСТАЛОСЬ (следующая сессия, по порядку)
-1) шаг 6: signup/login API + кредиты (грант $1–3 после верификации email)
-   + effective budget = min(team budget, balance) в policy.go;
-2) MCP gateway — поднят в очередь после шага 5 (решение цикла L);
-3) витрина шага 5: README/доки про sources[] (мульти-провайдер на алиасе);
+1) MCP gateway — следующий шаг хребта (решение цикла L);
+2) витрина: README/доки про sources[] + SSO + self-serve (E1-гигиена:
+   GitHub Actions CI, SECURITY.md, CONTRIBUTING.md — бэклог K);
+3) reconcile-джоба баланса (ночной) + декремент balance_usd по
+   request_events.cost_usd в control-plane (шаг 6, «Платежи» спеки);
 4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.
+
+### Шаг 6 signup/кредиты — СДЕЛАН ✅
+- lib/passwords.ts (scrypt), lib/cloud-auth.ts (signup/verify/login/
+  logout/me cores), роуты /api/auth/*; миграция 017 токены верификации.
+- Верификация = одна транзакция: verified + личная team + owner +
+  первый ключ + грант SIGNUP_BONUS_USD ($2) через credit_transactions
+  (идемпотентно). policy.go: min(budget, balance) поверх org-капа,
+  снапшот эмитит team.balance_usd. Гейт requireHosted() — OSS не тронут.
+- Тесты auth-flow.integration.test.ts + TestBalanceCapsTeamBudget;
+  сюит 189/189, Go ./... без FAIL. ХРЕБЕТ 1–6 ЗАКРЫТ ПОЛНОСТЬЮ.
 
 ### Шаг 5 sources[] — СДЕЛАН ✅
 - config.Model += Sources []ModelSource; ResolvedFor/UpstreamFor/WeightFor:

@@ -574,12 +574,21 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - node:test: типа test.Test нет в @types — структурный { after(fn) }.
 
 ### ОСТАЛОСЬ (следующая сессия, по порядку)
-1) MCP gateway — следующий шаг хребта (решение цикла L);
-2) витрина: README/доки про sources[] + SSO + self-serve (E1-гигиена:
-   GitHub Actions CI, SECURITY.md, CONTRIBUTING.md — бэклог K);
-3) reconcile-джоба баланса (ночной) + декремент balance_usd по
-   request_events.cost_usd в control-plane (шаг 6, «Платежи» спеки);
+1) витрина E1: README под LiteLLM-войну + GitHub Actions CI, SECURITY.md,
+   CONTRIBUTING.md (бэклог K);
+2) reconcile-джоба баланса (ночной) + декремент balance_usd по
+   request_events.cost_usd в control-plane («Платежи» спеки);
+3) control-plane CRUD для mcp_servers (сейчас конфиг из файла — OSS-путь);
 4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.
+
+### Шаг 7 MCP gateway — СДЕЛАН ✅
+- internal/mcp: POST /v1/mcp/<server> JSON-RPC passthrough за виртуальными
+  ключами (Begin/Finalize — бюджеты/RPM/конкарренси на tool-calls);
+  ответ апстрима дословно (SSE проходит); event в request_events.
+- Конфиг из файла mcp_servers[] (DX энтузиаста, ноль контроль-плейна);
+  валидация: уникальные имена, http(s) URL; unknown/disabled → 404.
+- Тесты mcp_test.go (форвардинг/заголовки/телеметрия/бюджет 429);
+  go test ./... без FAIL.
 
 ### Шаг 6 signup/кредиты — СДЕЛАН ✅
 - lib/passwords.ts (scrypt), lib/cloud-auth.ts (signup/verify/login/

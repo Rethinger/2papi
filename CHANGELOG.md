@@ -2,6 +2,18 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-08-23 — Payment loop + E1 showcase
+
+### Платёжный контур (шаг 6, «Платежи»)
+- Декремент `teams.balance_usd` в той же транзакции ingest'а request_events (только команды с балансом > 0; неуспешные запросы бесплатны).
+- Ночной reconcile (`lib/balance.ts`, `BALANCE_RECONCILE_INTERVAL_MS`, 0 = выкл): баланс пересчитывается из леджера − успешный спенд; расхождение с живым значением — алерт в лог. Планировщик подключён через instrumentation.
+- Тест: спенд 0.5 → баланс 1.5; порча → reconcile восстанавливает; failed-запросы не списывают.
+
+### E1-витрина
+- CI: контроль-плейн теперь гоняет ПОЛНЫЙ сюит (190) с Postgres-сервисом и ALLOW_PRIVATE_UPSTREAMS=false — раньше только юнит-подмножество без БД.
+- README: позиционирование против LiteLLM (<5ms vs ~8ms p95), три издания одной таблицей, семантический кэш/MCP/sources[]/SSO в фичах.
+- SECURITY.md (репортинг, scope, hardening-чеклист) + CONTRIBUTING.md (правила: шаг=коммит, гейты, миграции append-only).
+
 ## 2026-08-22 — Cloud edition foundation
 
 ### MCP gateway (хребет, после шага 6)

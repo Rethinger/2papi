@@ -108,6 +108,21 @@ export async function storeRequestEvents(database: Database, gatewayId: string, 
           tokens_out = key_spend_daily.tokens_out + EXCLUDED.tokens_out,
           requests = key_spend_daily.requests + EXCLUDED.requests`,
       [insertedIds]);
+      // Шаг 6 «Платежи»: decrement prepaid team balances by the spend just
+      // recorded. Only teams that track a balance (> 0) are touched; the
+      // gateway enforces the cap from its snapshot, this keeps the ledger
+      // side honest between reconciles.
+      await client.query(`
+        UPDATE teams t SET balance_usd = t.balance_usd - agg.cost
+        FROM (
+          SELECT vk.team_id, SUM(re.cost_usd) AS cost
+          FROM request_events re
+          JOIN virtual_keys vk ON vk.id = re.virtual_key_id
+          WHERE re.id = ANY($1::bigint[]) AND re.success AND vk.team_id IS NOT NULL
+          GROUP BY vk.team_id
+        ) agg
+        WHERE t.id = agg.team_id AND t.balance_usd > 0`,
+      [insertedIds]);
     }
     await client.query('COMMIT');
     return { inserted };

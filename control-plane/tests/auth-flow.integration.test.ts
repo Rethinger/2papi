@@ -123,8 +123,7 @@ test('signup → verify provisions team, key and the credit grant', options, asy
   }
 });
 
-test('me/logout close the loop over sessions', options, async () => {
-  process.env[EDITION_ENV] = 'cloud';
+test('me/logout close the loop over sessions', options, async () => {  process.env[EDITION_ENV] = 'cloud';
   try {
     const me = await meCore(new Request('http://x/api/auth/session'));
     assert.equal(me.status, 401);
@@ -140,6 +139,76 @@ test('me/logout close the loop over sessions', options, async () => {
     const out = await logoutCore(post('/api/auth/session', undefined, cookie));
     assert.equal(out.status, 200);
     assert.equal((await jsonOf(await meCore(sessionReq))).status, 401, 'session revoked server-side');
+  } finally {
+    delete process.env[EDITION_ENV];
+  }
+});
+
+
+test('prepaid balance decrements on spend and reconciles from the ledger', options, async () => {
+  process.env[EDITION_ENV] = 'cloud';
+  try {
+    const { storeRequestEvents } = await import('../lib/request-events.ts');
+    const { reconcileTeamBalances } = await import('../lib/balance.ts');
+
+    const teamId = (await pool!.query(
+      `SELECT t.id FROM teams t JOIN team_members tm ON tm.team_id=t.id
+       JOIN users u ON u.id=tm.user_id WHERE lower(u.email)='dev@example.com'`,
+    )).rows[0].id;
+    const keyRow = (await pool!.query(`SELECT id, name FROM virtual_keys WHERE team_id=$1 LIMIT 1`, [teamId])).rows[0];
+
+    // Spend 0.5 through the normal ingest path → balance 2 − 0.5.
+    await storeRequestEvents(pool!, 'gw-bal', [{
+      request_id: 'b'.repeat(32) + '1',
+      occurred_at: new Date().toISOString(),
+      endpoint: '/v1/chat/completions',
+      public_model: 'model-a',
+      upstream_model: 'up-a',
+      virtual_key: keyRow.name,
+      virtual_key_id: keyRow.id,
+      streaming: false,
+      config_version: 1,
+      final_status: 200,
+      success: true,
+      total_latency_ms: 40,
+      input_tokens: 10,
+      output_tokens: 5,
+      total_tokens: 15,
+      cost_usd: 0.5,
+      attempts: [],
+    }]);
+    let balance = Number((await pool!.query(`SELECT balance_usd FROM teams WHERE id=$1`, [teamId])).rows[0].balance_usd);
+    assert.equal(balance, 1.5, 'ingest decrements the prepaid balance in-transaction');
+
+    // Corrupt the live value; reconcile restores it from ledger − spend.
+    await pool!.query(`UPDATE teams SET balance_usd=99 WHERE id=$1`, [teamId]);
+    const report = await reconcileTeamBalances(pool!);
+    assert.ok(report.updated >= 1);
+    balance = Number((await pool!.query(`SELECT balance_usd FROM teams WHERE id=$1`, [teamId])).rows[0].balance_usd);
+    assert.equal(balance, 1.5, 'reconcile computes grants − successful spend');
+
+    // Unsuccessful requests never cost anything.
+    await storeRequestEvents(pool!, 'gw-bal', [{
+      request_id: 'b'.repeat(31) + 'c2',
+      occurred_at: new Date().toISOString(),
+      endpoint: '/v1/chat/completions',
+      public_model: 'model-a',
+      upstream_model: 'up-a',
+      virtual_key: keyRow.name,
+      virtual_key_id: keyRow.id,
+      streaming: false,
+      config_version: 1,
+      final_status: 500,
+      success: false,
+      total_latency_ms: 12,
+      input_tokens: 100,
+      output_tokens: 0,
+      total_tokens: 100,
+      cost_usd: 9.99,
+      attempts: [],
+    }]);
+    balance = Number((await pool!.query(`SELECT balance_usd FROM teams WHERE id=$1`, [teamId])).rows[0].balance_usd);
+    assert.equal(balance, 1.5, 'failed requests do not drain the balance');
   } finally {
     delete process.env[EDITION_ENV];
   }

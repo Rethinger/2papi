@@ -545,3 +545,38 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
   2) Organizations API-ветки + бюджет орги в policy.go;
   3) шаг 4 SSO/OIDC; 5 адаптеры провайдеров; 6 signup/кредиты Cloud;
   4) владелец: MoR-заявки.
+
+## SESSION 3 (2026-08-22, Build: очередь 1–2 закрыты)
+
+### Сделано ✅
+- Шаг 1 очереди: контроль-плейн npm test в контейнере — 171/171 зелёных
+  (изолированный pg + compose run; ALLOW_PRIVATE_UPSTREAMS=false обязателен,
+  иначе SSRF-тест падает). Попутно найдены и починены предсуществующие
+  баги: compose CONTROL_PLANE_MASTER_KEY обрезан до 26 байт; квота-фикстуры
+  с протухшей датой; snapshot-envelope/security на неполных схемах.
+- Шаг 2 очереди: lib/edition.ts (гейт изданий Node: env → license-файл →
+  oss, requireFeature), Organizations API в catch-all (CRUD+409 дубликат,
+  teams.org_id в POST/PATCH teams), миграция 016 organizations.budget_usd,
+  снапшот эмитит team.org, internal/policy effectiveTeamBudget (кап орги
+  ограничивает даже безлимитную команду). Тесты: edition.test.ts (юнит),
+  organizations.integration.test.ts (3 интеграционных через живые роуты),
+  TestOrg* в Go. Все миграции 016 применены и на живой compose-базе.
+- Коммиты: d11a946 (i18n тайпо-фикс, ломал сборку образа), 2ff7071
+  (миграция 016), be7195b (feat(orgs)), bd758f3 (тест-фиксы сюита),
+  27af02c (регистрация тестов).
+
+### Грабли (в канон)
+- docker compose run --no-deps -e ... — быстрый прогон тестов без пересборки;
+  для итераций быстрее: docker run с монтированием app/lib/tests/migrations
+  поверх образа (node_modules остаётся линуксовый).
+- storeDraft падает «at least one virtual key required» — любой CRUD-тест
+  контроль-плейна должен сеять включённый ключ до мутаций конфига.
+- node:test: типа test.Test нет в @types — структурный { after(fn) }.
+
+### ОСТАЛОСЬ (следующая сессия, по порядку)
+1) шаг 4 хребта: SSO/OIDC для дашборда (users/user_sessions из 011 готовы);
+2) шаг 5: адаптеры топ-провайдеров через sources[] (спека strategy-v3 +
+   цикл E);
+3) шаг 6: signup/login API + кредиты (грант $1–3 после верификации email)
+   + effective budget = min(team budget, balance) в policy.go;
+4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.

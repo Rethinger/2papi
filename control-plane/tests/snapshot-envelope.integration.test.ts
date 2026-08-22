@@ -35,12 +35,12 @@ async function tx<T>(fn: (c: any) => Promise<T>) {
 
 async function migrate() {
   await pool!.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; CREATE SCHEMA ${schema};`);
-  await pool!.query((await sql('001_schema.sql')).replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
-  await pool!.query(await sql('002_snapshot_security.sql'));
-  await pool!.query(await sql('003_codex_provider.sql'));
-  await pool!.query(await sql('004_gateway_ack_idempotency.sql'));
-  await pool!.query(await sql('006_provider_model_pools.sql'));
-  await pool!.query(await sql('010_teams.sql'));
+  // Full forward migration set inside an isolated schema: storeDraft compiles
+  // a full snapshot and requires every table the current compiler joins.
+  const dir = path.join(process.cwd(), 'migrations');
+  for (const name of (await fs.readdir(dir)).filter(name => name.endsWith('.sql')).sort()) {
+    await pool!.query((await sql(name)).replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
+  }
 }
 
 async function seed(c: any, adapter = 'openai-compatible') {

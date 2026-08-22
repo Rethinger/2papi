@@ -39,7 +39,7 @@ test('quota refresh persists normalized usage and reset-credit state', options, 
     dispatch: async (_client, _accountID, kind) => {
       kinds.push(kind);
       if (kind === 'read_usage') return { data: { plan_type: 'plus', rate_limit: { primary_window: { used_percent: 42, reset_at: 1787122967 } }, fetched_at: '2026-08-12T12:00:00Z' } };
-      return { data: { available_count: 1, total_earned_count: 3, next_expires_at: '2026-08-20T00:00:00Z', fetched_at: '2026-08-12T12:00:00Z' } };
+      return { data: { available_count: 1, total_earned_count: 3, next_expires_at: new Date(Date.now() + 30 * 864e5).toISOString(), fetched_at: '2026-08-12T12:00:00Z' } };
     },
   });
 
@@ -68,7 +68,7 @@ test('failed refresh preserves last successful quota and records capability erro
 });
 
 const preflightUsage = { plan_type: 'plus', rate_limit: { primary_window: { used_percent: 100, reset_at: 1787122967 } }, fetched_at: '2026-08-12T12:00:00Z' };
-const preflightCredits = { available_count: 1, total_earned_count: 3, next_expires_at: '2026-08-20T00:00:00Z', fetched_at: '2026-08-12T12:00:00Z' };
+const preflightCredits = { available_count: 1, total_earned_count: 3, next_expires_at: new Date(Date.now() + 30 * 864e5).toISOString(), fetched_at: '2026-08-12T12:00:00Z' };
 
 test('quota reset stores pending before one dispatch and reuses idempotency result', options, async () => {
   const accountID = await seedAccount();

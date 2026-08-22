@@ -4,6 +4,13 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-22 — Cloud edition foundation
 
+### Sources[] — multi-provider aliases (шаг 5 хребта)
+- `config.Model` += `sources[] {account, upstream_model, weight, input/output_cost_per_mtok}`: один публичный алиас обслуживают разные провайдеры со своими именами апстрим-моделей, весами и ценами; пусто = прежнее поведение 1:1 (бэкомпат).
+- Gateway: `ResolvedFor/UpstreamFor/WeightFor` — оверрайд подставляется в копию модели на каждую попытку, поэтому адаптеры и переписывание ответов не меняются; телеметрия пишет фактический `upstream_model`; веса источников переопределяют account.Weight при упорядочении стратегий.
+- Снапшот эмитит `sources[]` только когда маппинг реально переопределяет что-то (колонки из миграции 013).
+- Валидация: неизвестный/дублирующий аккаунт источника, отрицательные веса/цены → конфиг отвергается.
+- Тесты: sources_test.go (хелперы + Build), sources-snapshot.test.ts (эмиссия/бэкомпат).
+
 ### SSO/OIDC (шаг 4 хребта, Enterprise)
 - Вход в дашборд через OIDC Authorization Code: `/api/auth/oidc/start` → IdP → `/api/auth/oidc/callback`; сессии в `user_sessions` (011), cookie `papi_session` HttpOnly/SameSite=Lax/Secure(prod), TTL 7 дней (`SESSION_TTL_DAYS`).
 - Проверка id_token: RS256/384/512 по JWKS (+HS256 через client_secret); подпись, iss, aud, exp (60с skew), nonce. CSRF-state = HMAC от master key, TTL 10 мин, сверка cookie↔query до любых обращений к IdP.

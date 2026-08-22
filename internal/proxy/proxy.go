@@ -362,13 +362,13 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 				p.State.ResetLockout(acct.Name)
 				p.Router.CommitAffinity(aff, acct.Name)
 				p.Router.CommitLKGP(meta.Model, acct.Name)
-				event.UpstreamModel = model.UpstreamModel
+				event.UpstreamModel = model.UpstreamFor(acct.Name)
 				event.UpstreamTTFBMS = upstreamMS
 				event.FinalStatus = status
 				event.Success = status >= 200 && status < 300
 				usage = attemptUsage
 				committed = attemptCommitted
-				succeededModel = model
+				succeededModel = model.ResolvedFor(acct.Name)
 
 				// Store in cache on success
 				if wantCache && p.Cache != nil && cacheKey != "" && len(respBytes) > 0 {
@@ -490,6 +490,9 @@ func attemptOutcome(status int, committed bool, requestErr error) string {
 }
 
 func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.Endpoint, acct config.Account, model config.Model, body []byte, attempt int, stream bool, overheadStart, attemptStart time.Time) (status int, committed bool, cool time.Duration, usage tokenUsage, respBytes []byte, upstreamMS int64) {
+	// Per-source override (шаг 5): this attempt's upstream model and pricing
+	// come from the source bound to the account, when present.
+	model = model.ResolvedFor(acct.Name)
 	ad, ok := p.Registry.Get(acct.Adapter)
 	if !ok {
 		return 0, false, p.Snap.Cooldown, tokenUsage{}, nil, 0

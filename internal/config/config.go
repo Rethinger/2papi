@@ -115,6 +115,66 @@ type Model struct {
 	InputCostPerMtok  float64      `yaml:"input_cost_per_mtok,omitempty" json:"input_cost_per_mtok,omitempty"`
 	OutputCostPerMtok float64      `yaml:"output_cost_per_mtok,omitempty" json:"output_cost_per_mtok,omitempty"`
 	Optimization      *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
+	// Sources (шаг 5 хребта): per-account overrides for multi-provider
+	// aliases — one public name served by different providers with their own
+	// upstream model names, weights and prices. Empty = legacy 1:1 behavior.
+	Sources []ModelSource `yaml:"sources,omitempty" json:"sources,omitempty"`
+}
+
+type ModelSource struct {
+	Account           string  `yaml:"account" json:"account"`
+	UpstreamModel     string  `yaml:"upstream_model,omitempty" json:"upstream_model,omitempty"`
+	Weight            int     `yaml:"weight,omitempty" json:"weight,omitempty"` // ordering within THIS alias; overrides account.Weight
+	InputCostPerMtok  float64 `yaml:"input_cost_per_mtok,omitempty" json:"input_cost_per_mtok,omitempty"`
+	OutputCostPerMtok float64 `yaml:"output_cost_per_mtok,omitempty" json:"output_cost_per_mtok,omitempty"`
+}
+
+func (m Model) sourceFor(account string) *ModelSource {
+	for i := range m.Sources {
+		if m.Sources[i].Account == account {
+			return &m.Sources[i]
+		}
+	}
+	return nil
+}
+
+// WeightFor reports the per-source ordering weight for an account within
+// this alias, when the source defines one.
+func (m Model) WeightFor(account string) (int, bool) {
+	s := m.sourceFor(account)
+	if s != nil && s.Weight > 0 {
+		return s.Weight, true
+	}
+	return 0, false
+}
+
+// UpstreamFor resolves the upstream model for an attempt against account:
+// the source override wins over the alias default.
+func (m Model) UpstreamFor(account string) string {
+	if s := m.sourceFor(account); s != nil && s.UpstreamModel != "" {
+		return s.UpstreamModel
+	}
+	return m.UpstreamModel
+}
+
+// ResolvedFor returns an attempt-scoped copy of the model with the source's
+// upstream name and costs applied — adapters and response rewriting need no
+// changes to honor per-provider overrides.
+func (m Model) ResolvedFor(account string) Model {
+	s := m.sourceFor(account)
+	if s == nil {
+		return m
+	}
+	if s.UpstreamModel != "" {
+		m.UpstreamModel = s.UpstreamModel
+	}
+	if s.InputCostPerMtok > 0 {
+		m.InputCostPerMtok = s.InputCostPerMtok
+	}
+	if s.OutputCostPerMtok > 0 {
+		m.OutputCostPerMtok = s.OutputCostPerMtok
+	}
+	return m
 }
 type Account struct {
 	ID             string     `yaml:"id,omitempty" json:"id,omitempty"`
@@ -335,6 +395,23 @@ func Build(c Config) (*Snapshot, error) {
 		}
 		if m.InputCostPerMtok < 0 || m.OutputCostPerMtok < 0 {
 			return nil, fmt.Errorf("model %s has negative pricing", m.Alias)
+		}
+		knownAccounts := map[string]bool{}
+		for _, an := range m.Accounts {
+			knownAccounts[an] = true
+		}
+		seenSource := map[string]bool{}
+		for _, src := range m.Sources {
+			if !knownAccounts[src.Account] {
+				return nil, fmt.Errorf("model %s source references unknown account %s", m.Alias, src.Account)
+			}
+			if seenSource[src.Account] {
+				return nil, fmt.Errorf("model %s has duplicate sources for account %s", m.Alias, src.Account)
+			}
+			seenSource[src.Account] = true
+			if src.Weight < 0 || src.InputCostPerMtok < 0 || src.OutputCostPerMtok < 0 {
+				return nil, fmt.Errorf("model %s source %s has negative weight or pricing", m.Alias, src.Account)
+			}
 		}
 		eligible := false
 		for _, an := range m.Accounts {

@@ -68,6 +68,23 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   }));
   const byAlias = new Map<string, string[]>();
   for (const m of mapsR.rows) byAlias.set(m.alias, [...(byAlias.get(m.alias) ?? []), m.account_name]);
+  // sources[] (шаг 5): per-account overrides ride on the model entry only
+  // when at least one mapping actually overrides something — empty stays
+  // legacy 1:1.
+  const sourcesByAlias = new Map<string, any[]>();
+  for (const m of mapsR.rows) {
+    const hasOverride = Boolean(m.upstream_model_override) || Number(m.weight) > 0 || Number(m.input_cost_per_mtok) > 0 || Number(m.output_cost_per_mtok) > 0;
+    if (!hasOverride) continue;
+    const list = sourcesByAlias.get(m.alias) ?? [];
+    list.push({
+      account: m.account_name,
+      ...(m.upstream_model_override ? { upstream_model: m.upstream_model_override } : {}),
+      ...(Number(m.weight) > 0 ? { weight: Number(m.weight) } : {}),
+      ...(Number(m.input_cost_per_mtok) > 0 ? { input_cost_per_mtok: Number(m.input_cost_per_mtok) } : {}),
+      ...(Number(m.output_cost_per_mtok) > 0 ? { output_cost_per_mtok: Number(m.output_cost_per_mtok) } : {}),
+    });
+    sourcesByAlias.set(m.alias, list);
+  }
   const providerByAlias = new Map<string, string[]>();
   for (const m of providerPoolsR.rows) providerByAlias.set(m.alias, [...(providerByAlias.get(m.alias) ?? []), m.account_name]);
   const models = modelsR.rows.map((m: any) => {
@@ -81,6 +98,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
       ...(Array.isArray(m.fallbacks) && m.fallbacks.length > 0 ? { fallbacks: m.fallbacks } : {}),
       ...(Number(m.input_per_mtok) > 0 ? { input_cost_per_mtok: Number(m.input_per_mtok) } : {}),
       ...(Number(m.output_per_mtok) > 0 ? { output_cost_per_mtok: Number(m.output_per_mtok) } : {}),
+      ...(sourcesByAlias.get(m.alias)?.length ? { sources: sourcesByAlias.get(m.alias) } : {}),
     };
   });
   validateFallbackChains(models);

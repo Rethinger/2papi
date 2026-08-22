@@ -1,8 +1,27 @@
 # 2papi Multi-account AI Gateway
 
-A Go MVP for an OpenAI-compatible gateway with virtual-key auth, rate limits, sticky multi-account routing, cooldowns, circuits, and pre-stream failover. **Lightweight 9Router/OmniRoute alternative — faster than LiteLLM (TTF <5ms overhead), single binary, 1 command install.**
+**A Go AI gateway for teams that outgrew LiteLLM.** Same virtual-key/budget
+model, but: **TTF overhead <5ms** (LiteLLM's Rust rewrite targets ~8ms p95),
+one static binary with an embedded dashboard (no Python ops tax), and three
+things no other Go gateway has:
+
+- **Token savers built in** — RTK tool-result compression (−20–40% input), Caveman terse mode (up to −65% output), Headroom context pruning. Cheaper *per task*, not just per token.
+- **Multi-account subscription pooling** — claude.ai cookies / Codex auth / OAuth tokens pooled behind public aliases with sticky sessions that preserve prompt cache hits.
+- **MCP gateway behind budgets** — `POST /v1/mcp/<server>` JSON-RPC passthrough where your virtual-key budgets and RPM limits apply to tool calls.
+
+Plus a semantic response cache (exact + Jaccard-similar, hit-rate in the dashboard) and immutable config snapshots with rollback.
 
 OpenAI Codex account setup, model discovery, quota/reset safety, and validation are documented in [docs/codex-provider.md](docs/codex-provider.md).
+
+## Three editions, one binary
+
+| | OSS | Cloud | Enterprise |
+|---|---|---|---|
+| For | self-host devs & homelabs | hosted demo (PLG funnel) | companies: compliance, VPC |
+| Gets | everything below, MIT-style Apache-2.0 | OSS stack + signup/credits | license unlocks SSO/OIDC, organizations + org budgets, audit export |
+| Gating | — | deployment | offline Ed25519 license file; features fail closed to OSS without it |
+
+Strategy details: [docs/strategy-v3.md](docs/strategy-v3.md).
 
 ## Quick Install (30s)
 
@@ -60,9 +79,13 @@ Design system and widget console are in [`open-design/`](open-design/) — hand-
 - Multiple accounts per public model alias.
 - Upstream proxies for every account and a global pool — all protocols (http/https/socks4/4a/5/5h) in any format (`http://user:pass@host:8080`, `socks5://host:1080`, `host:3128`, `host:3128:user:pass`, `[::1]:9090`, lists per line/comma/JSON). Round-robin rotation per request with failover; `X-Gateway-Proxy` response header shows the masked proxy used. The pool is managed in the dashboard (Settings → Proxy pool).
 - Routing strategies: `priority`, `balanced`, `fastest`, `cheapest`, `quota-drain`, `fallback-chain`.
+- **Multi-provider aliases (`sources[]`)**: one public model served by different providers with their own upstream model names, weights, and per-source pricing — the gateway rewrites per attempt and telemetry records the actual upstream.
+- **MCP gateway**: configure `mcp_servers` in your config file and expose them at `/v1/mcp/<name>` behind virtual-key auth — budgets and RPM apply to tool calls; tool calls land in request logs. (Control-plane CRUD for MCP servers is on the roadmap; file config is the OSS path.)
+- **Semantic response cache**: exact + Jaccard-similar matching with hit-rate/exact/similar stats in the dashboard.
 - Virtual API keys with constant-time keyed-HMAC comparison, model allowlists, and RPM token buckets.
 - Sticky affinity from `X-Gateway-Session`, `metadata.gateway_session`, or stable user/model fallback.
 - Account cooldowns, circuit breakers, concurrency caps, and route diagnostic headers.
+- Enterprise (license-gated): OIDC single sign-on for the dashboard, organizations above teams with org-budget caps, audit export (NDJSON). Cloud edition adds self-serve signup with email verification, a signup credit grant, and prepaid balance enforcement (`min(team budget, balance)`).
 
 ## Docker-first development
 
@@ -130,5 +153,6 @@ Start from `config/example.yaml`. It defines a versioned immutable snapshot:
 - `proxies` (optional): global upstream proxy pool for accounts without their own proxy.
 - `routing`: strategy, sticky TTL, and max pre-commit attempts.
 - `resilience`: cooldown and circuit-breaker thresholds.
+- `mcp_servers` (optional): upstream MCP endpoints exposed at `/v1/mcp/<name>` behind virtual-key auth.
 
 The request hot path uses only an immutable in-memory snapshot. The dashboard stores desired state in PostgreSQL, publishes version notifications through Redis, and the Go gateway atomically adopts validated snapshots while retaining its last valid configuration if the control plane is unavailable.

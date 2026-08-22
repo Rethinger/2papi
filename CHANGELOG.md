@@ -2,6 +2,22 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-08-22 — Cloud edition foundation
+
+### Edition gate
+- `internal/edition` — one binary, three editions (`oss|cloud|ent`) via `2PAPI_EDITION` env or signed `2papi.license`; unknown values degrade to OSS so stray env can never unlock paid paths.
+- `internal/license` — Ed25519 offline validation (`prefix:b64payload.b64sig`, prefix inside signature); env-overridable trusted pubkey (`2PAPI_LICENSE_PUBKEY`); no network — air-gap safe; expired/not-yet/foreign-key/garbage all degrade to OSS. Spec: plan/build-spine-specs.md шаг 1. Decision + rationale: plan/2papi-3-editions-strategy.md.
+
+### Schema (control-plane migrations)
+- `011_users_rbac.sql` — self-serve `users` (lower(email) unique, platform_role user/operator), `user_sessions` (hashed tokens), `team_members` (owner/member), teams += `trust_tier` (0–2) and `status`.
+- `012_credit_ledger.sql` — prepaid `credit_transactions` per team with idempotency `UNIQUE(source, external_id)` (partial: manual adjustments exempt), teams += `balance_usd` (updated in same tx as ledger insert).
+- `013_model_source_overrides.sql` — multi-provider aliases: `model_account_mappings` += `upstream_model_override`, `weight`, per-source input/output costs; empty override inherits alias defaults (back-compat).
+- `014_tier_policies.sql` — free-tier per-model daily token limits (`tier × model_alias_id`), operator-editable, published via config snapshot.
+
+### Decisions
+- License: Apache-2.0 for the OSS edition (patent grant matters for adoption).
+- Free tier supply = owner's own sources + commercially-permitted free lanes; provider free quotas (Google/Cerebras) excluded by their ToS (resell/proxy prohibited).
+
 ## 2026-08-20 — Provider adapters, quota, TUI, plugins, hostname, DeepSeek
 
 ### Speed (Bifrost-style)

@@ -33,6 +33,9 @@ type Config struct {
 	// Plugins lists sidecar/config plugins (like dsh plugins but HTTP sidecars).
 	// Each becomes a plugin.Registry entry wired on runtime start.
 	Plugins []PluginConfig `yaml:"plugins,omitempty" json:"plugins,omitempty"`
+	// MCPServers exposes upstream Model Context Protocol endpoints through
+	// the gateway (/v1/mcp/<name>) behind virtual-key auth.
+	MCPServers []McpServer `yaml:"mcp_servers,omitempty" json:"mcp_servers,omitempty"`
 }
 
 // PluginConfig declares a gateway plugin: HTTP sidecar endpoint or in-process
@@ -110,6 +113,25 @@ type Team struct {
 type Org struct {
 	ID        string  `yaml:"id" json:"id"`
 	BudgetUSD float64 `yaml:"budget_usd" json:"budget_usd"` // caps team budgets, 0 = unlimited
+}
+
+// McpServer is an upstream Model Context Protocol endpoint exposed through
+// the gateway at /v1/mcp/<name> behind virtual-key auth. Headers carry the
+// upstream credentials (same trust level as account api_key in file config).
+type McpServer struct {
+	Name    string            `yaml:"name" json:"name"`
+	URL     string            `yaml:"url" json:"url"`
+	Enabled *bool             `yaml:"enabled,omitempty" json:"enabled,omitempty"` // omitted = enabled
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+}
+
+// IsEnabled reports whether the server accepts traffic; file configs may
+// omit the flag, in which case the server is enabled.
+func (m McpServer) IsEnabled() bool {
+	if m.Enabled == nil {
+		return true
+	}
+	return *m.Enabled
 }
 type Model struct {
 	Alias             string       `yaml:"alias" json:"alias"`
@@ -230,6 +252,7 @@ type Snapshot struct {
 	ModelsByAlias                     map[string]Model
 	VirtualKeysByName                 map[string]VirtualKey
 	AccountsByName                    map[string]Account
+	MCPServersByName                  map[string]McpServer
 	GlobalProxies                     []proxylib.Entry            // parsed from Config.Proxies
 	AccountProxies                    map[string][]proxylib.Entry // parsed per account (nil = unset)
 	StickyTTL, Cooldown, CircuitReset time.Duration
@@ -267,7 +290,7 @@ func Build(c Config) (*Snapshot, error) {
 	if c.Resilience.CircuitFailures <= 0 {
 		c.Resilience.CircuitFailures = 3
 	}
-	s := &Snapshot{Config: c, KeyHashes: map[string][]byte{}, ModelsByAlias: map[string]Model{}, VirtualKeysByName: map[string]VirtualKey{}, AccountsByName: map[string]Account{}, AccountProxies: map[string][]proxylib.Entry{}}
+	s := &Snapshot{Config: c, KeyHashes: map[string][]byte{}, ModelsByAlias: map[string]Model{}, VirtualKeysByName: map[string]VirtualKey{}, AccountsByName: map[string]Account{}, MCPServersByName: map[string]McpServer{}, AccountProxies: map[string][]proxylib.Entry{}}
 	// Global proxy pool (strict: any invalid entry fails the snapshot).
 	if len(c.Proxies) > 0 {
 		global, err := proxylib.Parse(strings.Join(c.Proxies, "\n"))
@@ -468,6 +491,20 @@ func Build(c Config) (*Snapshot, error) {
 			s.KeyHashes[k.Name] = mac.Sum(nil)
 		}
 		s.VirtualKeysByName[k.Name] = k
+	}
+	seenMcp := map[string]bool{}
+	for _, srv := range c.MCPServers {
+		if srv.Name == "" {
+			return nil, errors.New("mcp server name required")
+		}
+		if seenMcp[srv.Name] {
+			return nil, fmt.Errorf("duplicate mcp server %s", srv.Name)
+		}
+		seenMcp[srv.Name] = true
+		if !strings.HasPrefix(srv.URL, "http://") && !strings.HasPrefix(srv.URL, "https://") {
+			return nil, fmt.Errorf("mcp server %s needs an http(s) url", srv.Name)
+		}
+		s.MCPServersByName[srv.Name] = srv
 	}
 	if len(s.VirtualKeys) == 0 {
 		return nil, errors.New("at least one virtual key required")

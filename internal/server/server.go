@@ -9,11 +9,13 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/Rethinger/2papi/internal/adapter"
 	"github.com/Rethinger/2papi/internal/dashboard"
+	"github.com/Rethinger/2papi/internal/mcp"
 	"github.com/Rethinger/2papi/internal/quota"
 	"github.com/Rethinger/2papi/internal/config"
 	"github.com/Rethinger/2papi/internal/policy"
@@ -154,6 +156,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/audio/speech", s.audioSpeech)
 	mux.HandleFunc("/v1/audio/transcriptions", s.audioTranscriptions)
 	mux.HandleFunc("/v1/moderations", s.moderations)
+	mux.HandleFunc("/v1/mcp/", s.mcp)
 	return requestIDMiddleware(mux)
 }
 
@@ -253,6 +256,25 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rt.Proxy.Chat(w, r.WithContext(telemetry.WithVirtualKey(r.Context(), vk.Name)), meta, body)
+}
+
+// mcp serves /v1/mcp/<server>: JSON-RPC passthrough to a configured MCP
+// upstream, fronted by virtual-key auth (budgets/RPM apply to tool calls).
+func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
+	rt := s.Runtime()
+	name := strings.TrimPrefix(r.URL.Path, "/v1/mcp/")
+	if name == "" || strings.Contains(name, "/") {
+		proxy.Error(w, http.StatusNotFound, "unknown mcp server")
+		return
+	}
+	gateway := &mcp.Gateway{
+		Snapshot:      func() *config.Snapshot { return rt.Snap },
+		Auth:          rt.Auth,
+		Client:        rt.Proxy.Client,
+		Telemetry:     rt.Proxy.Telemetry,
+		ConfigVersion: s.configVersion.Load(),
+	}
+	gateway.Serve(w, r, name)
 }
 
 // messages serves the Anthropic-native /v1/messages endpoint. The payload is

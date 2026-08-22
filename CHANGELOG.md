@@ -4,6 +4,12 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-22 — Cloud edition foundation
 
+### MCP gateway (хребет, после шага 6)
+- `POST /v1/mcp/<server>` — streamable-HTTP JSON-RPC passthrough к настроенным upstream MCP-серверам; за виртуальными ключами: бюджеты/RPM/конкарренси действуют на tool-calls как на модельный трафик.
+- Конфиг из файла (`mcp_servers: [{name,url,enabled?,headers}]`) — ноль обязательного контроль-плейна, DX энтузиаста; заголовки несут креды апстрима (тот же уровень доверия, что api_key аккаунтов).
+- Ответ апстрима идёт клиенту дословно (SSE-стримы проходят); tool-call пишется в request_events (endpoint `/v1/mcp/<server>`, без токенов).
+- Валидация: уникальные имена, http(s) URL; неизвестный/выключенный сервер → 404. Тесты: forwards/headers/телеметрия, unknown/disabled/auth, бюджет 429.
+
 ### Signup/login + кредиты (шаг 6 хребта, Cloud)
 - Self-serve контур: POST `/api/auth/signup` (без перечисления — ответ одинаков для существующего email), `/api/auth/verify` (токен хранится хэшем, одноразовый, TTL 24ч), `/api/auth/login` (scrypt из node:crypto, без внешних зависимостей), `/api/auth/session` GET=me / POST=logout.
 - Верификация в одной транзакции: email_verified_at + личная команда (trust_tier 0) + роль owner + первый virtual key `default` + грант `SIGNUP_BONUS_USD` (по умолчанию $2, диапазон спеки $1–3) через credit_transactions source=signup_bonus с UNIQUE(source, external_id) — идемпотентно.

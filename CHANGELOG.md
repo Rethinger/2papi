@@ -4,6 +4,17 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-22 — Cloud edition foundation
 
+### Organizations (шаг 3 хребта, Enterprise)
+- `lib/edition.ts` — гейт изданий для control-plane (зеркало internal/edition + internal/license): `2PAPI_EDITION` env → подписанная `2papi.license` (Ed25519, offline, mtime-кэш) → OSS; `requireFeature('orgs')` спит без лицензии — DX энтузиаста не меняется.
+- Organizations API в catch-all роуте: GET/POST/PATCH/DELETE (`organizations`), дубликат имени → 409; привязка `teams.org_id` в POST/PATCH teams. Без лицензии ветки отвечают 403 feature_not_licensed.
+- Снапшот: бюджет орги едет на ключе как `team.org {id,budget_usd}` (только когда > 0).
+- `internal/policy`: `effectiveTeamBudget` — бюджет орги каппирует команду (включая безлимитную); спенд команды считается против капа.
+- `016_org_budget.sql` — organizations += budget_usd (верхняя граница бюджетов команд).
+
+### Fixes
+- compose: CONTROL_PLANE_MASTER_KEY был обрезан до 26 байт (не 32) — падали все крипто-тесты сюита; канонические 44 символа base64.
+- Тесты контроль-плейна доведены до зелёных в контейнере (171/171): codex-quota фикстуры с протухшей датой reset-кредита → относительные даты; snapshot-envelope/security собирали неполные схемы → полная миграция в изолированной per-pid схеме; SSRF-тест требует ALLOW_PRIVATE_UPSTREAMS=false при прогоне.
+
 ### Edition gate
 - `internal/edition` — one binary, three editions (`oss|cloud|ent`) via `2PAPI_EDITION` env or signed `2papi.license`; unknown values degrade to OSS so stray env can never unlock paid paths.
 - `internal/license` — Ed25519 offline validation (`prefix:b64payload.b64sig`, prefix inside signature); env-overridable trusted pubkey (`2PAPI_LICENSE_PUBKEY`); no network — air-gap safe; expired/not-yet/foreign-key/garbage all degrade to OSS. Spec: plan/build-spine-specs.md шаг 1. Decision + rationale: plan/2papi-3-editions-strategy.md.

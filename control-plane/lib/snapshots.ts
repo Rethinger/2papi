@@ -45,8 +45,11 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   const proxyPool = typeof proxyPoolValue?.raw === 'string' && proxyPoolValue.raw.trim()
     ? parseProxyList(proxyPoolValue.raw).entries.map(normalizeProxy)
     : [];
-  const keysR = await client.query(`SELECT vk.*, t.id team_id, t.budget_usd team_budget_usd
-    FROM virtual_keys vk LEFT JOIN teams t ON t.id=vk.team_id WHERE vk.enabled ORDER BY vk.name`);
+  const keysR = await client.query(`SELECT vk.*, t.id team_id, t.budget_usd team_budget_usd, o.id org_id, o.budget_usd org_budget_usd
+    FROM virtual_keys vk
+    LEFT JOIN teams t ON t.id=vk.team_id
+    LEFT JOIN organizations o ON o.id=t.org_id
+    WHERE vk.enabled ORDER BY vk.name`);
   const teamKeyCountsR = await client.query(`SELECT team_id, count(*)::int key_count
     FROM virtual_keys WHERE enabled=true AND team_id IS NOT NULL GROUP BY team_id`);
   const teamKeyCounts = new Map(teamKeyCountsR.rows.map((row: any) => [row.team_id, Number(row.key_count)]));
@@ -98,9 +101,16 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
     ...(Number(k.tpm) > 0 ? { tpm: Number(k.tpm) } : {}),
     ...(Number(k.max_concurrency) > 0 ? { max_concurrency: Number(k.max_concurrency) } : {}),
     ...(Number(k.budget_usd) > 0 ? { budget_usd: Number(k.budget_usd) } : {}),
-    ...(k.team_id && Number(k.team_budget_usd) > 0 ? (() => {
+    ...(k.team_id && (Number(k.team_budget_usd) > 0 || Number(k.org_budget_usd) > 0) ? (() => {
       const share = Number(k.team_budget_usd) / (teamKeyCounts.get(k.team_id) ?? 1);
-      return { team: { id: k.team_id, budget_usd: Number(k.team_budget_usd), ...(share > 0 ? { share_usd: Math.round(share * 1e6) / 1e6 } : {}) } };
+      return { team: {
+        id: k.team_id,
+        budget_usd: Number(k.team_budget_usd),
+        ...(share > 0 ? { share_usd: Math.round(share * 1e6) / 1e6 } : {}),
+        // Org budget caps every team under it (enforced in internal/policy);
+        // emitted only when the org actually has one.
+        ...(k.org_id && Number(k.org_budget_usd) > 0 ? { org: { id: k.org_id, budget_usd: Number(k.org_budget_usd) } } : {}),
+      } };
     })() : {}),
   })), models, accounts, ...(proxyPool.length > 0 ? { proxies: proxyPool } : {}), routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience, optimization: { rtk_compression: Boolean(optimization.rtk_compression), caveman: Boolean(optimization.caveman), headroom: Boolean(optimization.headroom), headroom_reserve: Number(optimization.headroom_reserve) || 120000, headroom_keep: Number(optimization.headroom_keep) || 8 }, ...(webhookValue ? { webhook: { enabled: Boolean(webhookValue.enabled), url: typeof webhookValue.url === 'string' ? webhookValue.url : '', secret: typeof webhookValue.secret === 'string' ? webhookValue.secret : '' } } : {}) };
   if (snapshot.virtual_keys.length === 0) throw new Error('at least one virtual key required');

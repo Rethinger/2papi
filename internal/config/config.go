@@ -96,6 +96,15 @@ type Team struct {
 	ID        string  `yaml:"id" json:"id"`
 	BudgetUSD float64 `yaml:"budget_usd" json:"budget_usd"`                   // shared daily team budget, 0 = unlimited
 	ShareUSD  float64 `yaml:"share_usd,omitempty" json:"share_usd,omitempty"` // per-key fair share = budget / key count
+	// Org is the enterprise organization owning this team (migration 015).
+	// Its budget is an upper bound on every team budget under it.
+	Org *Org `yaml:"org,omitempty" json:"org,omitempty"`
+}
+
+// Org carries only what policy enforcement needs from organizations.
+type Org struct {
+	ID        string  `yaml:"id" json:"id"`
+	BudgetUSD float64 `yaml:"budget_usd" json:"budget_usd"` // caps team budgets, 0 = unlimited
 }
 type Model struct {
 	Alias             string       `yaml:"alias" json:"alias"`

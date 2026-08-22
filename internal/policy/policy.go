@@ -109,6 +109,21 @@ type BeginResult struct {
 	TeamBudgetRemainingUSD float64
 }
 
+// effectiveTeamBudget returns the enforced team budget for a key: the
+// team's own daily budget capped by its organization's budget (Enterprise,
+// migration 015/016). The org budget is an upper bound: it limits even an
+// unlimited (0) team. 0 = unlimited.
+func effectiveTeamBudget(vk config.VirtualKey) float64 {
+	if vk.Team == nil {
+		return 0
+	}
+	budget := vk.Team.BudgetUSD
+	if org := vk.Team.Org; org != nil && org.BudgetUSD > 0 && (budget == 0 || budget > org.BudgetUSD) {
+		budget = org.BudgetUSD
+	}
+	return budget
+}
+
 func (a *Auth) Begin(vk config.VirtualKey) BeginResult {
 	now := time.Now()
 	result := BeginResult{Allowed: true, RPMRemaining: -1, TPMRemaining: -1, ConcurrencyRemaining: -1}
@@ -184,12 +199,12 @@ func (a *Auth) Begin(vk config.VirtualKey) BeginResult {
 			return result
 		}
 	}
-	if vk.Team != nil && vk.Team.BudgetUSD > 0 {
+	if budget := effectiveTeamBudget(vk); budget > 0 {
 		day := now.UTC().Format("2006-01-02")
 		spent := a.teamSpendFor(vk.Team.ID, day)
-		result.TeamBudgetUSD = vk.Team.BudgetUSD
-		result.TeamBudgetRemainingUSD = vk.Team.BudgetUSD - spent
-		if spent >= vk.Team.BudgetUSD {
+		result.TeamBudgetUSD = budget
+		result.TeamBudgetRemainingUSD = budget - spent
+		if spent >= budget {
 			result.Allowed = false
 			result.Reason = "budget_exceeded"
 			return result
@@ -253,7 +268,7 @@ func (a *Auth) Finalize(vk config.VirtualKey, tokens int64, costUSD float64, com
 		spent := sh.spendFor(vk.Name, day)
 		sh.spend[vk.Name] = &daySpend{day: day, spent: spent + costUSD}
 	}
-	if vk.Team != nil && vk.Team.BudgetUSD > 0 && costUSD > 0 {
+	if effectiveTeamBudget(vk) > 0 && costUSD > 0 {
 		day := now.UTC().Format("2006-01-02")
 		a.teamMu.Lock()
 		entry := a.teamSpend[vk.Team.ID]

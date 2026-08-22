@@ -85,9 +85,14 @@ const ProviderModelSchema = ModelBaseSchema.extend({
 export const ModelSchema = z.union([ProviderModelSchema, ManualModelSchema]);
 export const RoutingSchema = z.object({ strategy: z.enum(['balanced','priority','weighted','p2c','least_used','lkgp','reset_aware','fastest','cheapest','quota_drain','adaptive']).default('balanced'), sticky_ttl: z.string().default('1h'), max_attempts: z.number().int().positive().default(2), resilience: z.object({ cooldown: z.string().default('30s'), circuit_failures: z.number().int().positive().default(3), circuit_reset: z.string().default('1m'), lockout_failures: z.number().int().nonnegative().default(10), lockout_duration: z.string().default('15m') }).default({ cooldown: '30s', circuit_failures: 3, circuit_reset: '1m', lockout_failures: 10, lockout_duration: '15m' }), optimization: z.object({ rtk_compression: z.boolean().default(false), caveman: z.boolean().default(false), headroom: z.boolean().default(false), headroom_reserve: z.number().int().positive().default(120000), headroom_keep: z.number().int().positive().default(8) }).default({ rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8 }) });
 export const VirtualKeySchema = z.object({ name: z.string().min(1), plaintext_key: z.string().min(8).optional(), enabled: z.boolean().default(true), models: z.array(z.string()).default([]), rpm: z.number().int().positive().default(60), tpm: z.number().int().nonnegative().default(0), max_concurrency: z.number().int().nonnegative().default(0), budget_usd: z.number().nonnegative().default(0), team_id: z.string().uuid().optional().nullable() });
-export const TeamSchema = z.object({ name: z.string().min(1), enabled: z.boolean().default(true), budget_usd: z.number().nonnegative().default(0) });
+export const TeamSchema = z.object({ name: z.string().min(1), enabled: z.boolean().default(true), budget_usd: z.number().nonnegative().default(0), org_id: z.string().uuid().optional().nullable() });
 export const WebhookSchema = z.object({ enabled: z.boolean().default(false), url: z.string().url().or(z.literal('')).default(''), secret: z.string().default('') });
-export const TeamPatchSchema = z.object({ name: z.string().min(1).optional(), enabled: z.boolean().optional(), budget_usd: z.number().nonnegative().optional() });
+export const TeamPatchSchema = z.object({ name: z.string().min(1).optional(), enabled: z.boolean().optional(), budget_usd: z.number().nonnegative().optional(), org_id: z.string().uuid().nullable().optional() });
+
+// Enterprise (migration 015/016): organizations above teams; org budget
+// caps every team budget under it (see internal/policy + snapshots).
+export const OrganizationSchema = z.object({ name: z.string().min(1), owner_user_id: z.string().uuid().optional().nullable(), budget_usd: z.number().nonnegative().default(0) });
+export const OrganizationPatchSchema = z.object({ name: z.string().min(1).optional(), owner_user_id: z.string().uuid().nullable().optional(), budget_usd: z.number().nonnegative().optional() });
 
 // Zod 4 applies defaults inside `.partial()`. PATCH schemas must therefore be
 // explicit: omitted properties have to remain omitted or a narrow update can

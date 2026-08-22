@@ -574,12 +574,20 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - node:test: типа test.Test нет в @types — структурный { after(fn) }.
 
 ### ОСТАЛОСЬ (следующая сессия, по порядку)
-1) шаг 5 хребта: адаптеры топ-провайдеров через sources[] (спека strategy-v3 +
-   цикл E; миграция 013 уже даёт upstream_model_override/weight/costs);
-2) шаг 6: signup/login API + кредиты (грант $1–3 после верификации email)
+1) шаг 6: signup/login API + кредиты (грант $1–3 после верификации email)
    + effective budget = min(team budget, balance) в policy.go;
-3) MCP gateway — поднят в очередь после шага 5 (решение цикла L);
+2) MCP gateway — поднят в очередь после шага 5 (решение цикла L);
+3) витрина шага 5: README/доки про sources[] (мульти-провайдер на алиасе);
 4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.
+
+### Шаг 5 sources[] — СДЕЛАН ✅
+- config.Model += Sources []ModelSource; ResolvedFor/UpstreamFor/WeightFor:
+  оверрайд подставляется в копию модели внутри proxy.try() — адаптеры
+  не тронуты; телеметрия пишет фактический upstream_model; веса источников
+  переопределяют account.Weight в стратегиях.
+- Снапшот эмитит sources[] только при реальных оверрайдах (колонки 013).
+- Тесты: sources_test.go + sources-snapshot.test.ts. Go ./... -race зелёный,
+  Node сюит 186/186 в контейнере.
 
 ### Шаг 4 SSO/OIDC — СДЕЛАН ✅ (76ba9ea)
 - lib/auth.ts: сессии дашборда (createSession/resolveSession/cookie),

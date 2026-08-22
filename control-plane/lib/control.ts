@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
-import { decryptSecretJson, encryptSecretJson, type EncryptedSecretRecord } from './crypto';
-import { compileDeclarativeSnapshot, credentialDigestForDeclarative, materializeLegacyRuntimeSnapshot, materializeRuntimeSnapshot } from './snapshots';
+import { decryptSecretJson, encryptSecretJson, type EncryptedSecretRecord } from './crypto';import { compileDeclarativeSnapshot, credentialDigestForDeclarative, materializeLegacyRuntimeSnapshot, materializeRuntimeSnapshot } from './snapshots';
 import { sha256Canonical } from './canonical-json';
 import { env } from './env';
 import { ApiError } from './api';
 import { parseProxyList } from './proxylib';
+import type { Queryable } from './db';
 
 // SSRF guard: upstream endpoints must be public http(s). IP literals in
 // private/loopback/link-local ranges are rejected unless
@@ -147,7 +147,7 @@ export async function insertSecret(client: PoolClient, purpose: string, credenti
   return r.rows[0].id as string;
 }
 
-export async function audit(client: PoolClient, action: string, resourceType: string, resourceId?: string, payload: unknown = {}) {
+export async function audit(client: Queryable, action: string, resourceType: string, resourceId?: string, payload: unknown = {}) {
   await client.query('INSERT INTO audit_events (action, resource_type, resource_id, payload) VALUES ($1,$2,$3,$4)', [action, resourceType, resourceId ?? null, JSON.stringify(payload)]);
 }
 

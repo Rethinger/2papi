@@ -4,6 +4,11 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Paddle webhook
+- `POST /api/webhooks/paddle`: HMAC-SHA256 подпись (`ts=…;h1=…`, окно 5 мин) → transaction.completed → идемпотентный топап: `credit_transactions` UNIQUE(source, external_id) + `balance_usd += delta` в одной транзакции + audit_event.
+- Реплеи безопасны (ack без двойного зачисления), forged/stale подписи → 401; не-USD/не-paid/без team_id → 422; без `PADDLE_WEBHOOK_SECRET` → 503; hosted-only.
+- Тесты: зачисление+реплей+второй платёж+аудит; подделки; валюты/статусы; гейты.
+
 ### Платёжный контур (шаг 6, «Платежи»)
 - Декремент `teams.balance_usd` в той же транзакции ingest'а request_events (только команды с балансом > 0; неуспешные запросы бесплатны).
 - Ночной reconcile (`lib/balance.ts`, `BALANCE_RECONCILE_INTERVAL_MS`, 0 = выкл): баланс пересчитывается из леджера − успешный спенд; расхождение с живым значением — алерт в лог. Планировщик подключён через instrumentation.

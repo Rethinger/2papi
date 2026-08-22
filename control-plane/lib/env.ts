@@ -22,6 +22,7 @@ const EnvSchema = z.object({
   SESSION_TTL_DAYS: z.coerce.number().positive().optional(),
   SIGNUP_BONUS_USD: z.coerce.number().min(0).max(10).default(2),
   VERIFICATION_TOKEN_TTL_HOURS: z.coerce.number().positive().default(24),
+  PADDLE_WEBHOOK_SECRET: z.string().optional(),
 });
 
 const parsedEnv = EnvSchema.parse(process.env);

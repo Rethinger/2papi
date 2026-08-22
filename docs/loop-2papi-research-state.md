@@ -574,9 +574,18 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - node:test: типа test.Test нет в @types — структурный { after(fn) }.
 
 ### ОСТАЛОСЬ (следующая сессия, по порядку)
-1) шаг 4 хребта: SSO/OIDC для дашборда (users/user_sessions из 011 готовы);
-2) шаг 5: адаптеры топ-провайдеров через sources[] (спека strategy-v3 +
-   цикл E);
-3) шаг 6: signup/login API + кредиты (грант $1–3 после верификации email)
+1) шаг 5 хребта: адаптеры топ-провайдеров через sources[] (спека strategy-v3 +
+   цикл E; миграция 013 уже даёт upstream_model_override/weight/costs);
+2) шаг 6: signup/login API + кредиты (грант $1–3 после верификации email)
    + effective budget = min(team budget, balance) в policy.go;
+3) MCP gateway — поднят в очередь после шага 5 (решение цикла L);
 4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.
+
+### Шаг 4 SSO/OIDC — СДЕЛАН ✅ (76ba9ea)
+- lib/auth.ts: сессии дашборда (createSession/resolveSession/cookie),
+  findOrCreateOidcUser — переиспользовать в шаге 6 для парольного логина.
+- lib/oidc.ts: discovery, auth-url, exchange, verifyIdToken
+  (RS256/384/512 JWKS + HS256 secret; iss/aud/exp(60s)/nonce), state = HMAC.
+- Роуты /api/auth/oidc/{start,callback} + конфиг оператора в catch-all
+  ('oidc', гейт 'sso'). Тесты oidc.test.ts + sso.integration.test.ts
+  (фейковый IdP через мок fetch). Полный сюит 185/185 в контейнере.

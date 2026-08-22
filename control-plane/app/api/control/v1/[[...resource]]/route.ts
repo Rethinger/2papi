@@ -66,6 +66,27 @@ export async function GET(req: Request, ctx: Ctx) {
       ]);
       return ok({ ...q.rows[0], requests_24h: metrics.requests, success_rate_24h: metrics.success_rate, p95_latency_ms_24h: metrics.p95_latency_ms, tokens_24h: metrics.total_tokens });
     }
+    // audit-export: NDJSON stream of audit_events (operator tooling).
+    // Bounded at 10k rows per call; page with from/to or id cursors later.
+    if (r === 'audit-export') {
+      const url = new URL(req.url);
+      const params: unknown[] = [];
+      let where = 'TRUE';
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      if (from) { params.push(from); where += ` AND created_at >= $${params.length}`; }
+      if (to) { params.push(to); where += ` AND created_at <= $${params.length}`; }
+      const res = await pool.query(
+        `SELECT id, actor, action, resource_type, resource_id, payload, created_at
+           FROM audit_events WHERE ${where} ORDER BY id ASC LIMIT 10000`,
+        params,
+      );
+      const body = res.rows.map(row => JSON.stringify(row)).join('\n');
+      return new Response(body ? body + '\n' : '', {
+        status: 200,
+        headers: { 'content-type': 'application/x-ndjson; charset=utf-8' },
+      });
+    }
     if (r === 'request-events') {
       const requested = Number(new URL(req.url).searchParams.get('limit') ?? 100);
       return ok(await listRequestEvents(pool, { limit: Number.isFinite(requested) ? requested : 100 }));

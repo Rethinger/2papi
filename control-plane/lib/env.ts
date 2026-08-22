@@ -18,6 +18,8 @@ const EnvSchema = z.object({
   MIN_ACTIVE_GATEWAYS: z.coerce.number().int().nonnegative().default(1),
   GATEWAY_INTERNAL_URL: z.string().url().default('http://127.0.0.1:8081'),
   ALLOW_PRIVATE_UPSTREAMS: boolish,
+  DASHBOARD_PUBLIC_URL: z.string().url().optional(),
+  SESSION_TTL_DAYS: z.coerce.number().positive().optional(),
 });
 
 const parsedEnv = EnvSchema.parse(process.env);

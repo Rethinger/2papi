@@ -23,6 +23,7 @@ import {
   storeDraft,
 } from '@/lib/control';
 import { requireFeature } from '@/lib/edition';
+import { getOidcStatus, saveOidcSettings } from '@/lib/sso-routes';
 import { sha256Canonical } from '@/lib/canonical-json';
 import { deleteAccountResource, deleteProviderResource } from '@/lib/resource-deletion';
 import { deleteModelRoute, updateProviderModelStrategy } from '@/lib/model-routes';
@@ -157,6 +158,7 @@ export async function GET(req: Request, ctx: Ctx) {
       FROM organizations o
       LEFT JOIN teams t ON t.org_id=o.id
       GROUP BY o.id ORDER BY o.name`)).rows.map(row => ({ ...row, budget_usd: Number(row.budget_usd), team_budget_sum: Number(row.team_budget_sum), budget_remaining_usd: Number(row.budget_usd) > 0 ? Math.max(Number(row.budget_usd) - Number(row.team_budget_sum), 0) : 0 }))); }
+    if (r === 'oidc') { requireFeature('sso'); return ok(await getOidcStatus(pool)); }
     if (r === 'settings') return ok((await pool.query('SELECT * FROM system_settings ORDER BY key')).rows);
     if (r === 'proxy-pool') {
       const row = (await pool.query(`SELECT value FROM system_settings WHERE key='proxy_pool'`)).rows[0];
@@ -193,6 +195,7 @@ export async function POST(req: Request, ctx: Ctx) {
     if (r === 'routing') return ok(await tx(async c => { const v = RoutingSchema.parse(body); const q = await c.query('INSERT INTO routing_settings (id,strategy,sticky_ttl,max_attempts,resilience) VALUES (true,$1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET strategy=EXCLUDED.strategy, sticky_ttl=EXCLUDED.sticky_ttl, max_attempts=EXCLUDED.max_attempts, resilience=EXCLUDED.resilience RETURNING *', [v.strategy,v.sticky_ttl,v.max_attempts,JSON.stringify(v.resilience)]); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('optimization',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify({ rtk_compression: v.optimization.rtk_compression, caveman: v.optimization.caveman, headroom: v.optimization.headroom, headroom_reserve: v.optimization.headroom_reserve, headroom_keep: v.optimization.headroom_keep })]); await draftAfter(c,'update','routing_settings','singleton',v); return q.rows[0]; }));
     if (r === 'organizations') return ok(await tx(async c => { requireFeature('orgs'); const v = OrganizationSchema.parse(body); let q; try { q = await c.query('INSERT INTO organizations (name,owner_user_id,budget_usd) VALUES ($1,$2,$3) RETURNING *', [v.name, v.owner_user_id ?? null, v.budget_usd]); } catch (e: any) { if (e?.code === '23505') throw new ApiError(409, 'organization_exists', 'An organization with this name already exists'); throw e; } await draftAfter(c,'create','organization',q.rows[0].id,v); return q.rows[0]; }), 201);
     if (r === 'teams') return ok(await tx(async c => { const v = TeamSchema.parse(body); const hasOrg = Object.prototype.hasOwnProperty.call(v, 'org_id'); const q = await c.query(`INSERT INTO teams (name,enabled,budget_usd${hasOrg ? ',org_id' : ''}) VALUES ($1,$2,$3${hasOrg ? ',$4' : ''}) RETURNING *`, [v.name,v.enabled,v.budget_usd,...(hasOrg ? [v.org_id ?? null] : [])]); await draftAfter(c,'create','team',q.rows[0].id,v); return q.rows[0]; }), 201);
+    if (r === 'oidc') return ok(await saveOidcSettings(pool, body));
     if (r === 'webhook') return ok(await tx(async c => { const v = WebhookSchema.parse(body); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('webhook',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify(v)]); await draftAfter(c,'update','webhook','singleton',v); return v; }));
     if (r === 'proxy-pool') return ok(await saveProxyPool(body));
     if (r === 'import') return ok(await tx(async c => { const snapshot = isRecord(body) && 'snapshot' in body ? (body as { snapshot: unknown }).snapshot : body; const result = await importSnapshot(c, snapshot); return result; }), 201);

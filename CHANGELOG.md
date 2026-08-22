@@ -4,6 +4,13 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-22 — Cloud edition foundation
 
+### SSO/OIDC (шаг 4 хребта, Enterprise)
+- Вход в дашборд через OIDC Authorization Code: `/api/auth/oidc/start` → IdP → `/api/auth/oidc/callback`; сессии в `user_sessions` (011), cookie `papi_session` HttpOnly/SameSite=Lax/Secure(prod), TTL 7 дней (`SESSION_TTL_DAYS`).
+- Проверка id_token: RS256/384/512 по JWKS (+HS256 через client_secret); подпись, iss, aud, exp (60с skew), nonce. CSRF-state = HMAC от master key, TTL 10 мин, сверка cookie↔query до любых обращений к IdP.
+- Провижининг: find-or-create по lower(email), email_verified_at от IdP; suspended-аккаунты не пускаются (`sso_user_disabled`).
+- Конфиг оператора: POST/GET `/api/control/v1/oidc` (system_settings 'oidc'; issuer/client_id/scopes/redirect_uri), client_secret не возвращается наружу. Всё под фичей `sso` — без лицензии спит (403 feature_not_licensed).
+- Тесты: oidc.test.ts (подпись/клеймы/state) + sso.integration.test.ts (полный флоу против фейкового IdP с мокнутым fetch).
+
 ### Organizations (шаг 3 хребта, Enterprise)
 - `lib/edition.ts` — гейт изданий для control-plane (зеркало internal/edition + internal/license): `2PAPI_EDITION` env → подписанная `2papi.license` (Ed25519, offline, mtime-кэш) → OSS; `requireFeature('orgs')` спит без лицензии — DX энтузиаста не меняется.
 - Organizations API в catch-all роуте: GET/POST/PATCH/DELETE (`organizations`), дубликат имени → 409; привязка `teams.org_id` в POST/PATCH teams. Без лицензии ветки отвечают 403 feature_not_licensed.

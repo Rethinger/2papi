@@ -45,7 +45,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   const proxyPool = typeof proxyPoolValue?.raw === 'string' && proxyPoolValue.raw.trim()
     ? parseProxyList(proxyPoolValue.raw).entries.map(normalizeProxy)
     : [];
-  const keysR = await client.query(`SELECT vk.*, t.id team_id, t.budget_usd team_budget_usd, o.id org_id, o.budget_usd org_budget_usd
+  const keysR = await client.query(`SELECT vk.*, t.id team_id, t.budget_usd team_budget_usd, t.balance_usd team_balance_usd, o.id org_id, o.budget_usd org_budget_usd
     FROM virtual_keys vk
     LEFT JOIN teams t ON t.id=vk.team_id
     LEFT JOIN organizations o ON o.id=t.org_id
@@ -119,12 +119,14 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
     ...(Number(k.tpm) > 0 ? { tpm: Number(k.tpm) } : {}),
     ...(Number(k.max_concurrency) > 0 ? { max_concurrency: Number(k.max_concurrency) } : {}),
     ...(Number(k.budget_usd) > 0 ? { budget_usd: Number(k.budget_usd) } : {}),
-    ...(k.team_id && (Number(k.team_budget_usd) > 0 || Number(k.org_budget_usd) > 0) ? (() => {
+    ...(k.team_id && (Number(k.team_budget_usd) > 0 || Number(k.org_budget_usd) > 0 || Number(k.team_balance_usd) > 0) ? (() => {
       const share = Number(k.team_budget_usd) / (teamKeyCounts.get(k.team_id) ?? 1);
       return { team: {
         id: k.team_id,
         budget_usd: Number(k.team_budget_usd),
         ...(share > 0 ? { share_usd: Math.round(share * 1e6) / 1e6 } : {}),
+        // Prepaid balance (шаг 6) caps the effective team budget in policy.
+        ...(Number(k.team_balance_usd) > 0 ? { balance_usd: Number(k.team_balance_usd) } : {}),
         // Org budget caps every team under it (enforced in internal/policy);
         // emitted only when the org actually has one.
         ...(k.org_id && Number(k.org_budget_usd) > 0 ? { org: { id: k.org_id, budget_usd: Number(k.org_budget_usd) } } : {}),

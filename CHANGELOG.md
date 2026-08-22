@@ -4,6 +4,13 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-22 — Cloud edition foundation
 
+### Signup/login + кредиты (шаг 6 хребта, Cloud)
+- Self-serve контур: POST `/api/auth/signup` (без перечисления — ответ одинаков для существующего email), `/api/auth/verify` (токен хранится хэшем, одноразовый, TTL 24ч), `/api/auth/login` (scrypt из node:crypto, без внешних зависимостей), `/api/auth/session` GET=me / POST=logout.
+- Верификация в одной транзакции: email_verified_at + личная команда (trust_tier 0) + роль owner + первый virtual key `default` + грант `SIGNUP_BONUS_USD` (по умолчанию $2, диапазон спеки $1–3) через credit_transactions source=signup_bonus с UNIQUE(source, external_id) — идемпотентно.
+- policy.go: prepaid баланс команды (`team.balance_usd`) каппирует effective budget — формула владельца min(budget, balance), поверх org-капа; точность ограничена свежестью снапшота (декремент контроль-плейном + ночной reconcile).
+- Снапшот эмитит team.balance_usd только когда > 0; OSS не затронут — весь контур под requireHosted() (403 hosted_only).
+- Тесты: auth-flow.integration.test.ts (полный флоу + гейты OSS) + TestBalanceCapsTeamBudget.
+
 ### Sources[] — multi-provider aliases (шаг 5 хребта)
 - `config.Model` += `sources[] {account, upstream_model, weight, input/output_cost_per_mtok}`: один публичный алиас обслуживают разные провайдеры со своими именами апстрим-моделей, весами и ценами; пусто = прежнее поведение 1:1 (бэкомпат).
 - Gateway: `ResolvedFor/UpstreamFor/WeightFor` — оверрайд подставляется в копию модели на каждую попытку, поэтому адаптеры и переписывание ответов не меняются; телеметрия пишет фактический `upstream_model`; веса источников переопределяют account.Weight при упорядочении стратегий.

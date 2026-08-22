@@ -143,6 +143,20 @@ export function requireFeature(feature: string): void {
   }
 }
 
+// requireHosted gates self-serve account flows (signup/login/credits) to
+// hosted editions. Plain OSS is a self-hosted proxy: no accounts, no
+// telemetry, no signup surface at all.
+export function requireHosted(): void {
+  const edition = activeEdition();
+  if (edition === 'oss') {
+    throw new ApiError(
+      403,
+      'hosted_only',
+      'Self-serve accounts are available on 2papi Cloud (see https://github.com/Rethinger/2papi)',
+    );
+  }
+}
+
 // Test hook: reset the mtime cache between tests that rewrite the license file.
 export function resetEditionCacheForTests(): void {
   cache = null;

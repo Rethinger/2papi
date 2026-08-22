@@ -96,6 +96,11 @@ type Team struct {
 	ID        string  `yaml:"id" json:"id"`
 	BudgetUSD float64 `yaml:"budget_usd" json:"budget_usd"`                   // shared daily team budget, 0 = unlimited
 	ShareUSD  float64 `yaml:"share_usd,omitempty" json:"share_usd,omitempty"` // per-key fair share = budget / key count
+	// BalanceUSD is the prepaid credit remaining (шаг 6, Cloud). It caps the
+	// effective team budget (owner formula: min(budget, balance)). Precision
+	// is bounded by snapshot freshness — control-plane decrements balance per
+	// request_event and a nightly reconcile keeps it honest.
+	BalanceUSD float64 `yaml:"balance_usd,omitempty" json:"balance_usd,omitempty"`
 	// Org is the enterprise organization owning this team (migration 015).
 	// Its budget is an upper bound on every team budget under it.
 	Org *Org `yaml:"org,omitempty" json:"org,omitempty"`

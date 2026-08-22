@@ -224,3 +224,32 @@ func TestOrgWithoutBudgetLeavesTeamUnlimited(t *testing.T) {
 		t.Fatalf("no budgets configured -> never blocks: %+v", result)
 	}
 }
+
+
+func TestBalanceCapsTeamBudget(t *testing.T) {
+	auth := New(testSnapshot(t))
+	// Unlimited daily budget, finite prepaid balance.
+	vk := config.VirtualKey{Name: "bal-1", RPM: 0, Team: &config.Team{ID: "t-bal", BudgetUSD: 0, BalanceUSD: 3}}
+	if result := auth.Begin(vk); !result.Allowed || result.TeamBudgetRemainingUSD != 3 {
+		t.Fatalf("balance should cap an unlimited team: %+v", result)
+	}
+	auth.Finalize(vk, 0, 2.5, true)
+	if result := auth.Begin(vk); !result.Allowed || result.TeamBudgetRemainingUSD != 0.5 {
+		t.Fatalf("under-balance spend still passes: %+v", result)
+	}
+	auth.Finalize(vk, 0, 1.0, true)
+	if result := auth.Begin(vk); result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("spend past the balance must block: %+v", result)
+	}
+
+	// Balance lower than the daily budget wins (owner formula min()).
+	vk2 := config.VirtualKey{Name: "bal-2", RPM: 0, Team: &config.Team{ID: "t-bal2", BudgetUSD: 10, BalanceUSD: 3}}
+	if result := auth.Begin(vk2); !result.Allowed || result.TeamBudgetRemainingUSD != 3 {
+		t.Fatalf("min(budget, balance) expected: %+v", result)
+	}
+	// Daily budget lower than balance stays decisive.
+	vk3 := config.VirtualKey{Name: "bal-3", RPM: 0, Team: &config.Team{ID: "t-bal3", BudgetUSD: 2, BalanceUSD: 50}}
+	if result := auth.Begin(vk3); !result.Allowed || result.TeamBudgetRemainingUSD != 2 {
+		t.Fatalf("budget below balance must stay enforced: %+v", result)
+	}
+}

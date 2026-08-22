@@ -110,9 +110,10 @@ type BeginResult struct {
 }
 
 // effectiveTeamBudget returns the enforced team budget for a key: the
-// team's own daily budget capped by its organization's budget (Enterprise,
-// migration 015/016). The org budget is an upper bound: it limits even an
-// unlimited (0) team. 0 = unlimited.
+// team's own daily budget, capped by its organization's budget (Enterprise,
+// migration 015/016) and by the prepaid credit balance (Cloud, шаг 6).
+// The org budget is an upper bound: it limits even an unlimited (0) team.
+// The balance bounds everything when it is lower. 0 = unlimited.
 func effectiveTeamBudget(vk config.VirtualKey) float64 {
 	if vk.Team == nil {
 		return 0
@@ -120,6 +121,9 @@ func effectiveTeamBudget(vk config.VirtualKey) float64 {
 	budget := vk.Team.BudgetUSD
 	if org := vk.Team.Org; org != nil && org.BudgetUSD > 0 && (budget == 0 || budget > org.BudgetUSD) {
 		budget = org.BudgetUSD
+	}
+	if bal := vk.Team.BalanceUSD; bal > 0 && (budget == 0 || bal < budget) {
+		budget = bal
 	}
 	return budget
 }

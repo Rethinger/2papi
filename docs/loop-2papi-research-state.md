@@ -535,10 +535,13 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - Спеки перенесены в репо: docs/strategy-v3.md, docs/build-spine-specs.md,
   open-design/CLOUD-SPECS.md (коммиты 089dfdd, b5816c9).
 - Apache-2.0 подтверждён владельцем.
+- Шаги 2b+3 частично реализованы: audit-export NDJSON (276d5cc),
+  миграция 015 organizations+роли (d459342).
+- ВЕРИФИКАЦИЯ НА ЖИВОЙ БАЗЕ ✅: compose postgres поднят, ВСЕ 15 миграций
+  применены без ошибок в papi_control_test; таблицы users/teams/
+  organizations/credit_transactions/tier_policies/audit_events на месте.
 - ОСТАЛОСЬ (следующая сессия, по порядку):
-  1) шаг 2b audit export (control-plane, compose+TEST_DATABASE_URL);
-  2) шаг 3 Organizations; 4 SSO/OIDC; 5 адаптеры провайдеров;
-     6 signup/кредиты Cloud;
-  3) перенос спек из CLOUD-SPECS.md в рабочие файлы open-design/
-     (widgets-spec.md/landing) при их ревизии;
+  1) контроль-плейн тесты npm test в контейнере (образ пересобрать);
+  2) Organizations API-ветки + бюджет орги в policy.go;
+  3) шаг 4 SSO/OIDC; 5 адаптеры провайдеров; 6 signup/кредиты Cloud;
   4) владелец: MoR-заявки.

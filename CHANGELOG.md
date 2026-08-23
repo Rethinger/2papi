@@ -4,6 +4,11 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Fix: hosted control mutations require operator session
+- Адверсариальный аудит нашёл дыру: в cloud/ent издании мутации `/api/control/v1/*` (включая money-path `billing/adjust`) принимались без аутентификации.
+- `requireOperator(req, db)`: hosted → сессия с platform_role='operator' обязательна на все методы catch-all; OSS не тронут (локальный тул остаётся открытым, DX сохранён).
+- Тесты переведены на операторскую сессию (organizations/sso/auth-flow).
+
 ### Tenant billing (страница + API тенанта)
 - `GET /api/auth/billing` — по сессии: баланс/леджер/ключи ТОЛЬКО своей команды (+ checkout_url из env); hosted-only, 401 без сессии.
 - Страница `/tenant-billing`: баланс (красный при нуле), кнопка «Add credits» из PADDLE_CHECKOUT_URL, список ключей с копированием префикса, история кредитов.

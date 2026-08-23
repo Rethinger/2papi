@@ -4,6 +4,13 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Гейтинг закрыт: audit_export + ipacl (Ent)
+- `audit-export` (NDJSON) прикрыт флагом `audit_export` — раньше отдавался всем hosted-операторам, что нарушало собственный гейтинг.
+- **ipacl** — новая Ent-фича: allowlist IPv4 CIDR на control API. Хранение в `system_settings` ('ipacl'), настройка `POST /api/control/v1/ipacl` (`requireFeature('ipacl')`), enforcement `assertIpacl()` на входе GET/POST/PATCH/DELETE.
+- Семантика: проверяется только X-Forwarded-For (трафик через прокси); прямые/локальные запросы без XFF не блокируются — защита от self-lockout; OSS не исполняет ACL даже при наличии списка.
+- Коды: `ip_not_allowed` 403, `invalid_cidrs` 400 (каталог дополнен).
+- Тесты: юнит CIDR-матчинга (диапазоны, host-bits, /0, IPv6 literal) + интеграция гейтинга. Сюит 206 → **212**.
+
 ### /status — публичный статус-эндпоинт
 - `GET /status` на гейтвее: version (ldflags), uptime_seconds, счётчики accounts total/enabled/cooling, models, mcp_servers, config_version. Без секретов; только GET.
 - Основа для внешнего status page (бэклог Cloud Фазы 2). Тест: публичность/отсутствие секретов/405 на POST.

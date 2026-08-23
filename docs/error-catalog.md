@@ -37,6 +37,8 @@ Diagnostic headers on success/failure: `X-Gateway-Route`, `-Attempts`,
 | 403 | `email_unverified` | Login before email verification |
 | 403 | `account_disabled` / `sso_user_disabled` | Suspended account |
 | 403 | `feature_not_licensed` | Enterprise feature without license (sso, orgs, audit_export…) |
+| 403 | `ip_not_allowed` | Client IP (X-Forwarded-For) outside the configured ipacl allowlist |
+| 400 | `invalid_cidrs` | ipacl payload is not an array of valid IPv4 CIDRs / literal IPs |
 | 403 | `hosted_only` | Self-serve accounts on plain OSS |
 | 403 | `sso_email_missing` / `sso_email_unverified` | IdP claims insufficient |
 | 400 | `invalid_verification_token` | Expired/used/unknown verification token |

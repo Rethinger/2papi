@@ -24,6 +24,7 @@ import {
   storeDraft,
 } from '@/lib/control';
 import { activeEdition, requireFeature, requireOperator } from '@/lib/edition';
+import { assertIpacl, parseCidrs } from '@/lib/ipacl';
 import { getOidcStatus, saveOidcSettings } from '@/lib/sso-routes';
 import { McpServerSchema, McpServerPatchSchema } from '@/lib/control';
 import { sha256Canonical } from '@/lib/canonical-json';
@@ -64,6 +65,7 @@ async function draftAfter(client: any, action: string, typ: string, id?: string,
 
 export async function GET(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
     if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0];
     if (r === 'overview') {
@@ -74,8 +76,10 @@ export async function GET(req: Request, ctx: Ctx) {
       return ok({ ...q.rows[0], requests_24h: metrics.requests, success_rate_24h: metrics.success_rate, p95_latency_ms_24h: metrics.p95_latency_ms, tokens_24h: metrics.total_tokens });
     }
     // audit-export: NDJSON stream of audit_events (operator tooling).
-    // Bounded at 10k rows per call; page with from/to or id cursors later.
+    // Enterprise feature (SIEM shipping) — sleeps in OSS like the rest of
+    // the license-gated surface; dashboard's audit-events view stays open.
     if (r === 'audit-export') {
+      requireFeature('audit_export');
       const url = new URL(req.url);
       const params: unknown[] = [];
       let where = 'TRUE';
@@ -190,8 +194,7 @@ export async function GET(req: Request, ctx: Ctx) {
       });
     }
     if (r === 'oidc') { requireFeature('sso'); return ok(await getOidcStatus(pool)); }
-    if (r === 'settings') return ok((await pool.query('SELECT * FROM system_settings ORDER BY key')).rows);
-    if (r === 'proxy-pool') {
+    if (r === 'settings') return ok((await pool.query('SELECT * FROM system_settings ORDER BY key')).rows);    if (r === 'proxy-pool') {
       const row = (await pool.query(`SELECT value FROM system_settings WHERE key='proxy_pool'`)).rows[0];
       return ok({ raw: typeof row?.value?.raw === 'string' ? row.value.raw : '' });
     }
@@ -211,6 +214,10 @@ export async function GET(req: Request, ctx: Ctx) {
       const row = (await pool.query(`SELECT value FROM system_settings WHERE key='webhook'`)).rows[0];
       return ok({ enabled: Boolean(row?.value?.enabled), url: typeof row?.value?.url === 'string' ? row.value.url : '', secret: typeof row?.value?.secret === 'string' ? row.value.secret : '' });
     }
+    if (r === 'ipacl') {
+      const row = (await pool.query(`SELECT value FROM system_settings WHERE key='ipacl'`)).rows[0];
+      return ok({ cidrs: Array.isArray(row?.value?.cidrs) ? row.value.cidrs : [] });
+    }
     if (r === 'audit-events') return ok((await pool.query('SELECT * FROM audit_events ORDER BY id DESC LIMIT 200')).rows);
     if (r === 'config-versions') return ok((await pool.query('SELECT version,status,checksum,errors,published_at,created_at,source_version FROM config_versions ORDER BY version DESC LIMIT 100')).rows);
     throw new ApiError(404, 'not_found', `Unknown resource ${r}`);
@@ -219,6 +226,7 @@ export async function GET(req: Request, ctx: Ctx) {
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
     if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const body = await json(req);
     if (r === 'providers') return ok(await tx(async c => { const v = ProviderSchema.parse(body); const q = await c.query('INSERT INTO providers (slug,name,adapter,base_url,enabled,metadata) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [v.slug,v.name,v.adapter,v.base_url,v.enabled,JSON.stringify(v.metadata)]); await draftAfter(c,'create','provider',q.rows[0].id,v); return q.rows[0]; }), 201);
@@ -262,6 +270,7 @@ export async function POST(req: Request, ctx: Ctx) {
     }));
     if (r === 'oidc') return ok(await saveOidcSettings(pool, body));
     if (r === 'webhook') return ok(await tx(async c => { const v = WebhookSchema.parse(body); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('webhook',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify(v)]); await draftAfter(c,'update','webhook','singleton',v); return v; }));
+    if (r === 'ipacl') return ok(await tx(async c => { requireFeature('ipacl'); const v = { cidrs: parseCidrs((body as any).cidrs) }; await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('ipacl',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify(v)]); await draftAfter(c,'update','ipacl','singleton',v); return v; }));
     if (r === 'proxy-pool') return ok(await saveProxyPool(body));
     if (r === 'import') return ok(await tx(async c => { const snapshot = isRecord(body) && 'snapshot' in body ? (body as { snapshot: unknown }).snapshot : body; const result = await importSnapshot(c, snapshot); return result; }), 201);
     if (r === 'virtual-keys') return ok(await tx(async c => { const v = VirtualKeySchema.parse(body); const plaintext = v.plaintext_key ?? `sk-cp-${crypto.randomBytes(24).toString('base64url')}`; const hash = crypto.createHmac('sha256', process.env.GATEWAY_SHARED_SECRET ?? 'dev-secret-change-me').update(plaintext).digest('hex'); const q = await c.query('INSERT INTO virtual_keys (name,key_hash,key_prefix,enabled,models,rpm,tpm,max_concurrency,budget_usd,team_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,name,key_prefix,enabled,models,rpm,tpm,max_concurrency,budget_usd,team_id,created_at', [v.name,hash,plaintext.slice(0,10),v.enabled,v.models,v.rpm,v.tpm,v.max_concurrency,v.budget_usd,v.team_id ?? null]); await draftAfter(c,'create','virtual_key',q.rows[0].id,{...v,plaintext_key:'[redacted]'}); return { ...q.rows[0], plaintext_key: plaintext }; }), 201);
@@ -273,6 +282,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
     if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const id = p[1]; const body = await json(req);
     if (!id) throw new ApiError(400, 'missing_id', 'Resource id is required');
@@ -299,6 +309,7 @@ ON CONFLICT (model_alias_id) DO UPDATE SET input_per_mtok=EXCLUDED.input_per_mto
 
 export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
     if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const id = p[1]; if (!id) throw new ApiError(400, 'missing_id', 'Resource id is required');
     if (r === 'mcp-servers') return ok(await tx(async c => {

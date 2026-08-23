@@ -162,6 +162,16 @@ docker compose --profile bench up --build bench-runner
 
 Prints RPS plus TTFB p50/p95/p99 and the gateway's self-reported overhead (`X-Gateway-Overhead-MS`) per concurrency tier. Tune with `BENCH_TIERS`, `BENCH_DURATION_MS`, `GATEWAY_URL`.
 
+Reference numbers from a Windows laptop running Docker Desktop (WSL2) — treat as a floor, Linux bare-metal does better:
+
+| concurrency | reqs | RPS | TTFB p50 | p95 | p99 | gateway overhead avg |
+|---|---|---|---|---|---|---|
+| 10 | 3 265 | 408 | 3 ms | 5 ms | 9 ms | **0.02 ms** |
+| 50 | 14 376 | 1 797 | 6 ms | 13 ms | 22 ms | **0.10 ms** |
+| 100 | 19 351 | 2 419 | 20 ms | 37 ms | 47 ms | **0.31 ms** |
+
+Zero errors across 37k requests. The overhead column is the pure gateway cost (total minus upstream wait) — the "<5 ms" claim refers to this number at low concurrency, not to provider latency.
+
 Full-stack E2E against a running `docker compose up` stack:
 
 ```sh

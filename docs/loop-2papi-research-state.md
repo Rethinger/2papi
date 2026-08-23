@@ -654,3 +654,9 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
   curl --data @file ломает JSON-парсер гейтвея (наш windows-грабильник).
 - Конфиг теста: %TEMP%\opencode\fw-gateway.yaml (ключ НЕ в репо),
   контейнер 2papi-fw-test на 127.0.0.1:18099.
+
+### Полишмент: алиас в стриминге — СДЕЛАН ✅ (2026-08-23)
+- protocol.NewSSEModelRewriteReader + включение в proxy.try (когда
+  alias ≠ upstream). Построчный буфер — JSON, разрезанный по сети,
+  не ломается. Живо подтверждено на Fireworks: чанки несут публичный
+  алиас. Коммит feat(stream).

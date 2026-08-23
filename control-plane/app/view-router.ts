@@ -1,4 +1,4 @@
-export type View = 'overview' | 'requests' | 'accounts' | 'models' | 'keys' | 'teams' | 'billing' | 'audit' | 'settings';
+export type View = 'overview' | 'requests' | 'accounts' | 'models' | 'keys' | 'teams' | 'billing' | 'mcp' | 'audit' | 'settings';
 
 const VIEW_PATHS: Record<View, string> = {
   overview: '/',
@@ -8,6 +8,7 @@ const VIEW_PATHS: Record<View, string> = {
   keys: '/keys',
   teams: '/teams',
   billing: '/billing',
+  mcp: '/mcp',
   audit: '/audit',
   settings: '/settings',
 };

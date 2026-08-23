@@ -94,6 +94,22 @@ export const TeamPatchSchema = z.object({ name: z.string().min(1).optional(), en
 export const OrganizationSchema = z.object({ name: z.string().min(1), owner_user_id: z.string().uuid().optional().nullable(), budget_usd: z.number().nonnegative().default(0) });
 export const OrganizationPatchSchema = z.object({ name: z.string().min(1).optional(), owner_user_id: z.string().uuid().nullable().optional(), budget_usd: z.number().nonnegative().optional() });
 
+// MCP gateway servers (OSS; file config is the other source — this is the
+// dashboard path). Headers carry upstream credentials and are stored
+// encrypted via secret_records.
+export const McpServerSchema = z.object({
+  name: z.string().min(1).max(100),
+  url: httpUrl(),
+  enabled: z.boolean().default(true),
+  headers: z.record(z.string(), z.string()).default({}),
+});
+export const McpServerPatchSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  url: httpUrl().optional(),
+  enabled: z.boolean().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+});
+
 // Zod 4 applies defaults inside `.partial()`. PATCH schemas must therefore be
 // explicit: omitted properties have to remain omitted or a narrow update can
 // silently reset unrelated persisted state (for example Codex auth metadata).

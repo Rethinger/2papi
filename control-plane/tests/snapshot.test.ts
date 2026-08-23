@@ -40,6 +40,8 @@ function mockClient(extra?: { noSecret?: boolean; published?: unknown; optimizat
     if (sql.startsWith('SELECT vk.*, t.id team_id')) return { rows: declarative.virtual_keys };
     if (sql.startsWith('SELECT team_id, count(*)::int key_count')) return { rows: [] };
     if (sql.startsWith('SELECT version,snapshot FROM config_versions')) return { rows: extra?.published ? [extra.published] : [] };
+    if (sql.startsWith('SELECT m.name, m.url, m.enabled FROM mcp_servers')) return { rows: [] };
+    if (sql.includes('FROM mcp_servers m LEFT JOIN secret_records')) return { rows: [] };
     throw new Error(sql);
   };
   return { client: { query } as any, queries };

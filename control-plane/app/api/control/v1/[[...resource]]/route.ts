@@ -24,6 +24,7 @@ import {
 } from '@/lib/control';
 import { requireFeature } from '@/lib/edition';
 import { getOidcStatus, saveOidcSettings } from '@/lib/sso-routes';
+import { McpServerSchema, McpServerPatchSchema } from '@/lib/control';
 import { sha256Canonical } from '@/lib/canonical-json';
 import { deleteAccountResource, deleteProviderResource } from '@/lib/resource-deletion';
 import { deleteModelRoute, updateProviderModelStrategy } from '@/lib/model-routes';
@@ -158,6 +159,9 @@ export async function GET(req: Request, ctx: Ctx) {
       FROM organizations o
       LEFT JOIN teams t ON t.org_id=o.id
       GROUP BY o.id ORDER BY o.name`)).rows.map(row => ({ ...row, budget_usd: Number(row.budget_usd), team_budget_sum: Number(row.team_budget_sum), budget_remaining_usd: Number(row.budget_usd) > 0 ? Math.max(Number(row.budget_usd) - Number(row.team_budget_sum), 0) : 0 }))); }
+    if (r === 'mcp-servers') return ok((await pool.query(`SELECT m.id, m.name, m.url, m.enabled, m.created_at, m.updated_at,
+        (m.headers_secret_id IS NOT NULL) headers_set
+      FROM mcp_servers m ORDER BY m.name`)).rows);
     if (r === 'oidc') { requireFeature('sso'); return ok(await getOidcStatus(pool)); }
     if (r === 'settings') return ok((await pool.query('SELECT * FROM system_settings ORDER BY key')).rows);
     if (r === 'proxy-pool') {
@@ -195,6 +199,19 @@ export async function POST(req: Request, ctx: Ctx) {
     if (r === 'routing') return ok(await tx(async c => { const v = RoutingSchema.parse(body); const q = await c.query('INSERT INTO routing_settings (id,strategy,sticky_ttl,max_attempts,resilience) VALUES (true,$1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET strategy=EXCLUDED.strategy, sticky_ttl=EXCLUDED.sticky_ttl, max_attempts=EXCLUDED.max_attempts, resilience=EXCLUDED.resilience RETURNING *', [v.strategy,v.sticky_ttl,v.max_attempts,JSON.stringify(v.resilience)]); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('optimization',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify({ rtk_compression: v.optimization.rtk_compression, caveman: v.optimization.caveman, headroom: v.optimization.headroom, headroom_reserve: v.optimization.headroom_reserve, headroom_keep: v.optimization.headroom_keep })]); await draftAfter(c,'update','routing_settings','singleton',v); return q.rows[0]; }));
     if (r === 'organizations') return ok(await tx(async c => { requireFeature('orgs'); const v = OrganizationSchema.parse(body); let q; try { q = await c.query('INSERT INTO organizations (name,owner_user_id,budget_usd) VALUES ($1,$2,$3) RETURNING *', [v.name, v.owner_user_id ?? null, v.budget_usd]); } catch (e: any) { if (e?.code === '23505') throw new ApiError(409, 'organization_exists', 'An organization with this name already exists'); throw e; } await draftAfter(c,'create','organization',q.rows[0].id,v); return q.rows[0]; }), 201);
     if (r === 'teams') return ok(await tx(async c => { const v = TeamSchema.parse(body); const hasOrg = Object.prototype.hasOwnProperty.call(v, 'org_id'); const q = await c.query(`INSERT INTO teams (name,enabled,budget_usd${hasOrg ? ',org_id' : ''}) VALUES ($1,$2,$3${hasOrg ? ',$4' : ''}) RETURNING *`, [v.name,v.enabled,v.budget_usd,...(hasOrg ? [v.org_id ?? null] : [])]); await draftAfter(c,'create','team',q.rows[0].id,v); return q.rows[0]; }), 201);
+    if (r === 'mcp-servers') return ok(await tx(async c => {
+      const v = McpServerSchema.parse(body);
+      const headersId = Object.keys(v.headers).length > 0 ? await insertSecret(c, 'mcp_headers', v.headers) : null;
+      let q;
+      try {
+        q = await c.query('INSERT INTO mcp_servers (name,url,enabled,headers_secret_id) VALUES ($1,$2,$3,$4) RETURNING id,name,url,enabled', [v.name, v.url, v.enabled, headersId]);
+      } catch (e: any) {
+        if (e?.code === '23505') throw new ApiError(409, 'mcp_server_exists', 'An MCP server with this name already exists');
+        throw e;
+      }
+      await draftAfter(c, 'create', 'mcp_server', q.rows[0].id, { ...v, headers: Object.keys(v.headers).length ? '[redacted]' : undefined });
+      return q.rows[0];
+    }), 201);
     if (r === 'oidc') return ok(await saveOidcSettings(pool, body));
     if (r === 'webhook') return ok(await tx(async c => { const v = WebhookSchema.parse(body); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('webhook',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify(v)]); await draftAfter(c,'update','webhook','singleton',v); return v; }));
     if (r === 'proxy-pool') return ok(await saveProxyPool(body));
@@ -216,6 +233,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
 ON CONFLICT (model_alias_id) DO UPDATE SET input_per_mtok=EXCLUDED.input_per_mtok, output_per_mtok=EXCLUDED.output_per_mtok, updated_at=now()`, [id, v.input_per_mtok ?? Number(current?.input_per_mtok ?? 0), v.output_per_mtok ?? Number(current?.output_per_mtok ?? 0)]); } if (v.accounts) { await c.query('DELETE FROM model_account_mappings WHERE model_alias_id=$1', [id]); for (let i=0;i<v.accounts.length;i++) await c.query('INSERT INTO model_account_mappings (model_alias_id,account_id,position) VALUES ($1,$2,$3)', [id,v.accounts[i],i]); } await draftAfter(c,'update','model_alias',id,v); return q.rows[0]; }));
     if (r === 'organizations') return ok(await tx(async c => { requireFeature('orgs'); const v = OrganizationPatchSchema.parse(body); const q = await c.query('UPDATE organizations SET name=COALESCE($2,name), owner_user_id=$3, budget_usd=COALESCE($4,budget_usd), updated_at=now() WHERE id=$1 RETURNING *', [id,v.name,v.owner_user_id,v.budget_usd]); if (!q.rows[0]) throw new ApiError(404,'not_found','Organization not found'); await draftAfter(c,'update','organization',id,v); return q.rows[0]; }));
     if (r === 'teams') return ok(await tx(async c => { const v = TeamPatchSchema.parse(body); const hasOrg = Object.prototype.hasOwnProperty.call(v, 'org_id'); const q = await c.query(`UPDATE teams SET name=COALESCE($2,name), enabled=COALESCE($3,enabled), budget_usd=COALESCE($4,budget_usd)${hasOrg ? ', org_id=$5' : ''}, updated_at=now() WHERE id=$1 RETURNING *`, [id,v.name,v.enabled,v.budget_usd,...(hasOrg ? [v.org_id ?? null] : [])]); if (!q.rows[0]) throw new ApiError(404,'not_found','Team not found'); await draftAfter(c,'update','team',id,v); return q.rows[0]; }));
+    if (r === 'mcp-servers') return ok(await tx(async c => {
+      const v = McpServerPatchSchema.parse(body);
+      const headersId = v.headers && Object.keys(v.headers).length > 0 ? await insertSecret(c, 'mcp_headers', v.headers) : undefined;
+      const q = await c.query(`UPDATE mcp_servers SET name=COALESCE($2,name), url=COALESCE($3,url), enabled=COALESCE($4,enabled),
+        headers_secret_id=COALESCE($5,headers_secret_id), updated_at=now() WHERE id=$1 RETURNING id,name,url,enabled`,
+      [id, v.name, v.url, v.enabled, headersId ?? null]);
+      if (!q.rows[0]) throw new ApiError(404, 'not_found', 'MCP server not found');
+      await draftAfter(c, 'update', 'mcp_server', id, { ...v, headers: v.headers ? '[redacted]' : undefined });
+      return q.rows[0];
+    }));
     if (r === 'virtual-keys') return ok(await tx(async c => { const v = VirtualKeyPatchSchema.parse(body); const hasTeam = Object.prototype.hasOwnProperty.call(v, 'team_id'); const q = await c.query(`UPDATE virtual_keys SET name=COALESCE($2,name), enabled=COALESCE($3,enabled), models=COALESCE($4,models), rpm=COALESCE($5,rpm), tpm=COALESCE($6,tpm), max_concurrency=COALESCE($7,max_concurrency), budget_usd=COALESCE($8,budget_usd)${hasTeam ? ', team_id=$9' : ''} WHERE id=$1 RETURNING id,name,key_prefix,enabled,models,rpm,tpm,max_concurrency,budget_usd,team_id,created_at`, [id,v.name,v.enabled,v.models,v.rpm,v.tpm,v.max_concurrency,v.budget_usd,...(hasTeam ? [v.team_id ?? null] : [])]); if (!q.rows[0]) throw new ApiError(404,'not_found','Virtual key not found'); await draftAfter(c,'update','virtual_key',id,v); return q.rows[0]; }));
     throw new ApiError(404, 'not_found', `Unknown resource ${r}`);
   } catch (e) { return problem(e); }
@@ -224,6 +251,12 @@ ON CONFLICT (model_alias_id) DO UPDATE SET input_per_mtok=EXCLUDED.input_per_mto
 export async function DELETE(_req: Request, ctx: Ctx) {
   try {
     const p = await pathOf(ctx); const r = p[0]; const id = p[1]; if (!id) throw new ApiError(400, 'missing_id', 'Resource id is required');
+    if (r === 'mcp-servers') return ok(await tx(async c => {
+      const q = await c.query('DELETE FROM mcp_servers WHERE id=$1 RETURNING id', [id]);
+      if (!q.rows[0]) throw new ApiError(404, 'not_found', 'MCP server not found');
+      await draftAfter(c, 'delete', 'mcp_server', id);
+      return q.rows[0];
+    }));
     if (r === 'organizations') return ok(await tx(async c => { requireFeature('orgs'); const q = await c.query('DELETE FROM organizations WHERE id=$1 RETURNING id', [id]); if (!q.rows[0]) throw new ApiError(404,'not_found','Organization not found'); await draftAfter(c,'delete','organization',id); return q.rows[0]; }));
     if (r === 'accounts') return ok(await tx(async c => { const result = await deleteAccountResource(c, id); await draftAfter(c, 'delete', 'account', id); return result; }));
     if (r === 'providers') return ok(await tx(async c => { const result = await deleteProviderResource(c, id); await draftAfter(c, 'delete', 'provider', id, { deleted_accounts: result.deleted_accounts }); return result; }));

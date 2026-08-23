@@ -37,6 +37,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
      ORDER BY ma.alias,a.priority,a.name`,
   );
   const routingR = await client.query('SELECT * FROM routing_settings WHERE id=true');
+  const mcpR = await client.query(`SELECT m.name, m.url, m.enabled FROM mcp_servers m WHERE m.enabled ORDER BY m.name`);
   const settingsR = await client.query(`SELECT key, value FROM system_settings WHERE key IN ('optimization','webhook','proxy_pool')`);
   const settingsByKey = new Map(settingsR.rows.map((row: any) => [row.key, row.value]));
   const optimization = settingsByKey.get('optimization') ?? { rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8 };
@@ -101,6 +102,9 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
       ...(sourcesByAlias.get(m.alias)?.length ? { sources: sourcesByAlias.get(m.alias) } : {}),
     };
   });
+  // MCP servers ride declaratively WITHOUT credentials — headers are
+  // injected during runtime materialization (same split as account creds).
+  const mcpServers = mcpR.rows.map((m: any) => ({ name: m.name, url: m.url, enabled: true }));
   validateFallbackChains(models);
   const routing = routingR.rows[0] ?? { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: { cooldown: '30s', circuit_failures: 3, circuit_reset: '1m', lockout_failures: 10, lockout_duration: '15m' } };
   const resilience = {
@@ -132,7 +136,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
         ...(k.org_id && Number(k.org_budget_usd) > 0 ? { org: { id: k.org_id, budget_usd: Number(k.org_budget_usd) } } : {}),
       } };
     })() : {}),
-  })), models, accounts, ...(proxyPool.length > 0 ? { proxies: proxyPool } : {}), routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience, optimization: { rtk_compression: Boolean(optimization.rtk_compression), caveman: Boolean(optimization.caveman), headroom: Boolean(optimization.headroom), headroom_reserve: Number(optimization.headroom_reserve) || 120000, headroom_keep: Number(optimization.headroom_keep) || 8 }, ...(webhookValue ? { webhook: { enabled: Boolean(webhookValue.enabled), url: typeof webhookValue.url === 'string' ? webhookValue.url : '', secret: typeof webhookValue.secret === 'string' ? webhookValue.secret : '' } } : {}) };
+  })), models, accounts, ...(proxyPool.length > 0 ? { proxies: proxyPool } : {}), routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience, optimization: { rtk_compression: Boolean(optimization.rtk_compression), caveman: Boolean(optimization.caveman), headroom: Boolean(optimization.headroom), headroom_reserve: Number(optimization.headroom_reserve) || 120000, headroom_keep: Number(optimization.headroom_keep) || 8 }, ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}), ...(webhookValue ? { webhook: { enabled: Boolean(webhookValue.enabled), url: typeof webhookValue.url === 'string' ? webhookValue.url : '', secret: typeof webhookValue.secret === 'string' ? webhookValue.secret : '' } } : {}) };
   if (snapshot.virtual_keys.length === 0) throw new Error('at least one virtual key required');
   return { snapshot, checksum: sha256Canonical(snapshot), schemaVersion: 2 };
 }
@@ -172,7 +176,18 @@ export async function materializeRuntimeSnapshot(client: PoolClient, declarative
     const kind = current.credential.kind ?? (a.adapter === 'openai-codex' ? 'oauth' : 'api_key');
     return { ...a, credential_revision: current.revision, credential: { ...current.credential, kind, revision: current.revision } };
   });
-  return { ...declarative, version: 2, secret: env.GATEWAY_SHARED_SECRET, accounts };
+  // MCP headers are credentials too: decrypted only at runtime materialization.
+  const mcpRows = await client.query(`
+    SELECT m.name, m.url, m.enabled, sr.key_version, sr.data_key_nonce, sr.data_key_ciphertext, sr.data_key_tag,
+           sr.secret_nonce, sr.secret_ciphertext, sr.secret_tag
+    FROM mcp_servers m LEFT JOIN secret_records sr ON sr.id = m.headers_secret_id
+    WHERE m.enabled ORDER BY m.name`);
+  const mcp_servers = mcpRows.rows.map((row: any) => ({
+    name: row.name,
+    url: row.url,
+    ...(row.secret_nonce ? { headers: decryptSecretJson<Record<string, string>>(rowToEncrypted(row)) } : {}),
+  }));
+  return { ...declarative, version: 2, secret: env.GATEWAY_SHARED_SECRET, accounts, ...(mcp_servers.length > 0 ? { mcp_servers } : {}) };
 }
 
 export async function materializeLegacyRuntimeSnapshot(client: PoolClient, declarative: any): Promise<RuntimeSnapshot> {

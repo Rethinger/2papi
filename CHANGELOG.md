@@ -4,6 +4,12 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### MCP servers CRUD (контроль-плейн)
+- Миграция 018 `mcp_servers` (name unique, url, enabled, headers_secret_id → secret_records).
+- CRUD в catch-all: GET (без значений заголовков, только флаг headers_set), POST/PATCH (headers шифруются envelope'ом через insertSecret, ротация = новая запись), DELETE; дубликат имени → 409.
+- Снапшот: декларативная часть несёт только name/url/enabled (credential-free инвариант сохранён — проверено тестом); runtime-материализация инжектит расшифрованные заголовки. Поле пропадает, когда серверов нет.
+- Тест mcp-crud.integration.test.ts: CRUD + ротация + отсутствие утечек в GET и stored snapshot.
+
 ### Paddle webhook
 - `POST /api/webhooks/paddle`: HMAC-SHA256 подпись (`ts=…;h1=…`, окно 5 мин) → transaction.completed → идемпотентный топап: `credit_transactions` UNIQUE(source, external_id) + `balance_usd += delta` в одной транзакции + audit_event.
 - Реплеи безопасны (ack без двойного зачисления), forged/stale подписи → 401; не-USD/не-paid/без team_id → 422; без `PADDLE_WEBHOOK_SECRET` → 503; hosted-only.

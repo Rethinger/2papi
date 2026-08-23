@@ -591,6 +591,12 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.End
 			out = protocol.NewOpenAISSEToAnthropicReader(result.Body, requested)
 			result.Header.Set("Content-Type", "text/event-stream")
 		}
+	} else if stream && model.UpstreamModel != "" && model.UpstreamModel != model.Alias {
+		// OpenAI-format streaming: normalize the upstream model id to the
+		// public alias per chunk (non-streaming is handled by the pipe path).
+		if rc, ok := out.(io.ReadCloser); ok {
+			out = protocol.NewSSEModelRewriteReader(rc, model.UpstreamModel, model.Alias)
+		}
 	}
 	if p.Snap.Server.Gzip && !stream && len(respBytes) >= 1024 && acceptsGzip(r.Header) {
 		respBytes = compressGzipBody(respBytes)

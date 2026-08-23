@@ -4,6 +4,11 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Стриминг: публичный алиас в чанках
+- `protocol.NewSSEModelRewriteReader` — построчная перезапись upstream model id → публичный алиас в OpenAI-SSE стриме; построчный буфер безопасен при разрезании JSON по сетевым чанкам, остальное — дословно.
+- Включён для OpenAI-формата когда alias ≠ upstream (non-streaming уже нормализовался через pipe-path). Проверено живьём на Fireworks deepseek-v4-flash: чанки несут `model: <алиас>`.
+- Тесты: компактная/пробельная форма, разрезанная строка, bypass при совпадении имён.
+
 ### MCP servers CRUD (контроль-плейн)
 - Миграция 018 `mcp_servers` (name unique, url, enabled, headers_secret_id → secret_records).
 - CRUD в catch-all: GET (без значений заголовков, только флаг headers_set), POST/PATCH (headers шифруются envelope'ом через insertSecret, ротация = новая запись), DELETE; дубликат имени → 409.

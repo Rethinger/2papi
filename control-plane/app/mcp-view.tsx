@@ -77,6 +77,29 @@ export function McpServersView({ mcpServers, locale, t, onDone }: McpServersView
     }
   };
 
+  const rotateHeaders = async (row: any) => {
+    const raw = window.prompt(t('mcp.rotatePrompt', { name: row.name }), '{"Authorization":"Bearer new-token"}');
+    if (raw === null) return;
+    let clean: Record<string, string> | null = null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        clean = Object.fromEntries(Object.entries(parsed).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+      }
+    } catch {}
+    if (!clean) { setError(t('mcp.headersInvalid')); return; }
+    setBusy(true); setError(null);
+    try {
+      await call('PATCH', `mcp-servers/${row.id}`, { headers: clean });
+      setMessage(t('mcp.rotated', { name: row.name }));
+      onDone();
+    } catch (cause: any) {
+      setError(cause?.message ?? String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const deleteServer = async (row: any) => {
     if (!window.confirm(t('mcp.deleteConfirm', { name: row.name }))) return;
     setBusy(true); setError(null);
@@ -140,6 +163,7 @@ export function McpServersView({ mcpServers, locale, t, onDone }: McpServersView
                       <button className="ghost" disabled={busy} onClick={() => void toggleServer(row)}>
                         {row.enabled ? t('mcp.disable') : t('mcp.enable')}
                       </button>
+                      <button className="ghost" disabled={busy} onClick={() => void rotateHeaders(row)}>{t('mcp.rotate')}</button>
                       <button className="ghost" disabled={busy} onClick={() => void deleteServer(row)}>{t('mcp.delete')}</button>
                     </div>
                   </td>

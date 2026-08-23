@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { ApiError } from './api';
+import { env } from './env';
 
 // Edition gate for the control-plane — mirrors internal/edition +
 // internal/license on the Go side (one binary, three editions; spec:
@@ -158,11 +159,24 @@ export function requireHosted(): void {
 }
 
 // requireOperator gates mutating control APIs on HOSTED editions: only
-// users with platform_role='operator' may change state. Plain OSS stays
+// users with platform_role='operator' may change state. Two credential
+// shapes are accepted: the dashboard session cookie, or a short-lived
+// bearer JWT minted at /api/auth/token (machine access). Plain OSS stays
 // open (local tool, loopback) — the enthusiast DX is untouched.
 export async function requireOperator(req: Request, db: import('./db').Queryable): Promise<{ id: string; email: string }> {
   const edition = activeEdition();
   if (edition === 'oss') return { id: 'local', email: 'local@oss' };
+
+  const { bearerFrom, verifyJwt } = await import('./jwt');
+  const bearer = bearerFrom(req);
+  if (bearer) {
+    const claims = verifyJwt(bearer, env.CONTROL_PLANE_MASTER_KEY);
+    if (!claims || claims.role !== 'operator') {
+      throw new ApiError(401, 'operator_session_required', 'Invalid or expired API token');
+    }
+    return { id: claims.sub, email: `operator:${claims.sub}` };
+  }
+
   const token = req.headers.get('cookie')?.match(/(?:^|;\s*)papi_session=([^;]+)/)?.[1];
   const { resolveSession } = await import('./auth');
   const user = await resolveSession(db, token);

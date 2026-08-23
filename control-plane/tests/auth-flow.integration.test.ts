@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Pool } from 'pg';
-import { signupCore, verifyCore, loginCore, logoutCore, meCore } from '../lib/cloud-auth.ts';
+import { signupCore, verifyCore, loginCore, logoutCore, meCore, tokenCore } from '../lib/cloud-auth.ts';
 import { clearRateLimitsForTests } from '../lib/rate-limit.ts';
 import { resolveSession } from '../lib/auth.ts';
 
@@ -233,7 +233,7 @@ test('operator manual adjustment lands in ledger, balance and audit', options, a
 
     const req = new Request('http://x/api/control/v1/billing/adjust', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer operator', cookie: `papi_session=${opSession.token}` },
+      headers: { 'content-type': 'application/json', cookie: `papi_session=${opSession.token}` },
       body: JSON.stringify({ team_id: teamId, delta_usd: -0.25, note: 'compensation for outage' }),
     });
     const res = await route.POST(req, { params: Promise.resolve({ resource: ['billing', 'adjust'] }) });
@@ -331,5 +331,64 @@ test('signup and login are rate limited per ip', options, async () => {
     delete process.env.SIGNUP_RATE_LIMIT;
     delete process.env.LOGIN_RATE_LIMIT;
     clearRateLimitsForTests();
+  }
+});
+
+
+test('operator session can mint a bearer JWT for programmatic API access', options, async () => {
+  process.env[EDITION_ENV] = 'cloud';
+  try {
+    const route: any = await import('../app/api/control/v1/[[...resource]]/route.ts');
+    // Fresh plain tenant (verified) must NOT be able to mint tokens.
+    const crypto = await import('node:crypto');
+    const { hashPassword } = await import('../lib/passwords.ts');
+    const tenant = `plain${Date.now()}@example.com`;
+    await pool!.query(
+      `INSERT INTO users (email, password_hash, email_verified_at) VALUES ($1,$2,now())`,
+      [tenant, hashPassword('longenough123')],
+    );
+    const tenantLogin = await loginCore(post('/api/auth/login', { email: tenant, password: 'longenough123' }));
+    const tenantCookie = /papi_session=([^;]+)/.exec(tenantLogin.headers.get('set-cookie')!)![1];
+
+    const tenantTokenRes = await tokenCore(new Request('http://x/api/auth/token', {
+      method: 'POST',
+      headers: { cookie: `papi_session=${tenantCookie}` },
+    }));
+    assert.equal(tenantTokenRes.status, 403);
+    assert.equal((await tenantTokenRes.json()).error.code, 'operator_required');
+
+    // …while an operator session mints one.
+    process.env[EDITION_ENV] = 'cloud';
+    await pool!.query(`UPDATE users SET platform_role='operator' WHERE lower(email)='dev@example.com'`);
+    const login = await loginCore(post('/api/auth/login', { email: 'dev@example.com', password: 'longenough123' }));
+    const cookie = /papi_session=([^;]+)/.exec(login.headers.get('set-cookie')!)![1];
+
+    const tokenReq = new Request('http://x/api/auth/token', { method: 'POST', headers: { cookie: `papi_session=${cookie}` } });
+    const tokenRes = await tokenCore(tokenReq);
+    assert.equal(tokenRes.status, 200);
+    const { access_token } = (await tokenRes.json()).data;
+    assert.ok(access_token && access_token.split('.').length === 3);
+
+    // Bearer JWT authorizes a control mutation without any cookie.
+    const teamId = (await pool!.query(
+      `SELECT t.id FROM teams t JOIN team_members tm ON tm.team_id=t.id JOIN users u ON u.id=tm.user_id WHERE lower(u.email)='dev@example.com'`,
+    )).rows[0].id;
+    const adjust = new Request('http://x/api/control/v1/billing/adjust', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${access_token}` },
+      body: JSON.stringify({ team_id: teamId, delta_usd: 0.1, note: 'jwt smoke' }),
+    });
+    const res = await route.POST(adjust, { params: Promise.resolve({ resource: ['billing', 'adjust'] }) });
+    assert.equal(res.status, 200);
+
+    // Garbage bearer is rejected.
+    const bad = new Request('http://x/api/control/v1/billing/adjust', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer not-a-jwt' },
+      body: JSON.stringify({ team_id: teamId, delta_usd: 0.1 }),
+    });
+    assert.equal((await route.POST(bad, { params: Promise.resolve({ resource: ['billing', 'adjust'] }) })).status, 401);
+  } finally {
+    delete process.env[EDITION_ENV];
   }
 });

@@ -4,6 +4,11 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### JWT-auth для API (Ent)
+- `POST /api/auth/token`: операторская сессия → короткоживущий HS256 JWT (1ч, `API_TOKEN_TTL_SECONDS`) для программного доступа к `/api/control/v1/*`.
+- `requireOperator` принимает Bearer JWT наравне с cookie; проверка подписи/aud/exp (30s skew), только HS256 (alg-swap отвергается).
+- Тесты: юнит (roundtrip/tamper/expiry/alg-confusion) + интеграция (токен → мутация 200, мусор → 401, тенант → 403).
+
 ### Rate limiting auth-эндпоинтов
 - `lib/rate-limit.ts` — фиксированное окно per key (ip+маршрут), ленивая чистка, лимит 0 = эндпоинт закрыт.
 - signup 5/час/IP · login 10/час/IP · verify 20/час/IP (`SIGNUP_RATE_LIMIT`, `LOGIN_RATE_LIMIT`, `VERIFY_RATE_LIMIT`); 429 rate_limited при исчерпании.

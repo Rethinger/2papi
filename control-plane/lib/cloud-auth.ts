@@ -214,6 +214,30 @@ export async function logoutCore(req: Request, deps: CloudAuthDeps = cloudAuthDe
   }
 }
 
+// POST /api/auth/token — exchange the operator session cookie for a
+// short-lived bearer JWT for programmatic access to /api/control/v1.
+export async function tokenCore(req: Request, deps: CloudAuthDeps = cloudAuthDeps()) {
+  try {
+    requireHosted();
+    const db = deps.pool!;
+    const token = req.headers.get('cookie')?.match(/(?:^|;\s*)papi_session=([^;]+)/)?.[1];
+    const user = await resolveSession(db, token);
+    if (!user) throw new ApiError(401, 'unauthorized', 'Not signed in');
+    if (user.platform_role !== 'operator') throw new ApiError(403, 'operator_required', 'Only operators can mint API tokens');
+    const { signJwt } = await import('./jwt');
+    const ttl = Number(process.env.API_TOKEN_TTL_SECONDS ?? 3600);
+    return Response.json({
+      data: {
+        access_token: signJwt({ sub: user.id, role: 'operator' }, env.CONTROL_PLANE_MASTER_KEY, Number.isFinite(ttl) && ttl > 0 ? ttl : 3600),
+        token_type: 'Bearer',
+        expires_in: Number.isFinite(ttl) && ttl > 0 ? ttl : 3600,
+      },
+    });
+  } catch (e) {
+    return problem(e);
+  }
+}
+
 // GET /api/auth/me — who am I (used by the dashboard once auth exists).
 export async function meCore(req: Request, deps: CloudAuthDeps = cloudAuthDeps()) {
   try {

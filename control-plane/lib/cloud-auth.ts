@@ -4,6 +4,7 @@ import { pool as defaultPool, type Queryable } from './db';
 import { problem, ApiError } from './api';
 import { env } from './env';
 import { requireHosted } from './edition';
+import { rateLimit, clientIp } from './rate-limit';
 import { createSession, sessionCookie, clearSessionCookie, resolveSession } from './auth';
 import { hashPassword, verifyPassword } from './passwords';
 
@@ -40,6 +41,10 @@ function hashToken(token: string): string {
 export async function signupCore(req: Request, deps: CloudAuthDeps = cloudAuthDeps()) {
   try {
     requireHosted();
+    const ip = clientIp(req);
+    if (!rateLimit(`signup:${ip}`, Number(process.env.SIGNUP_RATE_LIMIT ?? 5), 3600_000)) {
+      throw new ApiError(429, 'rate_limited', 'Too many signup attempts. Try again later.');
+    }
     const db = deps.pool!;
     const body = SignupSchema.parse(await req.json());
     const existing = (await db.query('SELECT id FROM users WHERE lower(email)=$1', [body.email])).rows[0];
@@ -74,6 +79,10 @@ async function issueVerificationToken(db: Queryable, userId: string): Promise<st
 export async function verifyCore(req: Request, deps: CloudAuthDeps = cloudAuthDeps()) {
   try {
     requireHosted();
+    const ip = clientIp(req);
+    if (!rateLimit(`verify:${ip}`, Number(process.env.VERIFY_RATE_LIMIT ?? 20), 3600_000)) {
+      throw new ApiError(429, 'rate_limited', 'Too many verification attempts. Try again later.');
+    }
     const db = deps.pool!;
     const body = z.object({ token: z.string().min(16).max(200) }).parse(await req.json());
     const row = (await db.query(
@@ -130,6 +139,10 @@ export async function verifyCore(req: Request, deps: CloudAuthDeps = cloudAuthDe
 export async function loginCore(req: Request, deps: CloudAuthDeps = cloudAuthDeps()) {
   try {
     requireHosted();
+    const ip = clientIp(req);
+    if (!rateLimit(`login:${ip}`, Number(process.env.LOGIN_RATE_LIMIT ?? 10), 3600_000)) {
+      throw new ApiError(429, 'rate_limited', 'Too many login attempts. Try again later.');
+    }
     const db = deps.pool!;
     const body = LoginSchema.parse(await req.json());
     const user = (await db.query('SELECT * FROM users WHERE lower(email)=$1', [body.email])).rows[0];

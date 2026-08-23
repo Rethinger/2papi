@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Pool } from 'pg';
 import { signupCore, verifyCore, loginCore, logoutCore, meCore } from '../lib/cloud-auth.ts';
+import { clearRateLimitsForTests } from '../lib/rate-limit.ts';
 import { resolveSession } from '../lib/auth.ts';
 
 // Шаг 6 хребта (Cloud): self-serve signup → verification (bonus + team +
@@ -145,8 +146,7 @@ test('me/logout close the loop over sessions', options, async () => {  process.e
 });
 
 
-test('prepaid balance decrements on spend and reconciles from the ledger', options, async () => {
-  process.env[EDITION_ENV] = 'cloud';
+test('prepaid balance decrements on spend and reconciles from the ledger', options, async () => {  process.env[EDITION_ENV] = 'cloud';
   try {
     const { storeRequestEvents } = await import('../lib/request-events.ts');
     const { reconcileTeamBalances } = await import('../lib/balance.ts');
@@ -291,5 +291,45 @@ test('tenant billing endpoint shows own team only', options, async () => {
     assert.equal(anon.status, 401);
   } finally {
     delete process.env[EDITION_ENV];
+  }
+});
+
+
+test('signup and login are rate limited per ip', options, async () => {
+  process.env[EDITION_ENV] = 'cloud';
+  process.env.SIGNUP_RATE_LIMIT = '2';
+  process.env.LOGIN_RATE_LIMIT = '2';
+  try {
+    const ip = (n: number) => `10.9.9.${n}`;
+    const emailAt = (n: number) => `ratelimit${n}@example.com`;
+    const reqFromIp = (p: string, b: unknown, n: number) =>
+      new Request(`http://localhost:3000${p}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': ip(n) },
+        body: JSON.stringify(b),
+      });
+
+    // Signup: two attempts from one ip pass, third is throttled.
+    assert.equal((await signupCore(reqFromIp('/api/auth/signup', { email: emailAt(1), password: 'longenough123' }, 1))).status, 200);
+    assert.equal((await signupCore(reqFromIp('/api/auth/signup', { email: emailAt(2), password: 'longenough123' }, 1))).status, 200);
+    const third = await signupCore(reqFromIp('/api/auth/signup', { email: emailAt(3), password: 'longenough123' }, 1));
+    assert.equal(third.status, 429);
+    assert.equal((await third.json()).error.code, 'rate_limited');
+
+    // Another ip is unaffected.
+    assert.equal((await signupCore(reqFromIp('/api/auth/signup', { email: emailAt(3), password: 'longenough123' }, 2))).status, 200);
+
+    // Login counts against its own bucket (unverified still consumes a slot).
+    const loginFrom = (n: number, email: string) => loginCore(reqFromIp('/api/auth/login', { email, password: 'longenough123' }, n));
+    await loginFrom(3, emailAt(1));
+    await loginFrom(3, emailAt(1));
+    const throttled = await loginFrom(3, emailAt(1));
+    assert.equal(throttled.status, 429);
+    assert.equal((await throttled.json()).error.code, 'rate_limited');
+  } finally {
+    delete process.env[EDITION_ENV];
+    delete process.env.SIGNUP_RATE_LIMIT;
+    delete process.env.LOGIN_RATE_LIMIT;
+    clearRateLimitsForTests();
   }
 });

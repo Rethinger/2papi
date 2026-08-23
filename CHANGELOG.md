@@ -4,6 +4,11 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Rate limiting auth-эндпоинтов
+- `lib/rate-limit.ts` — фиксированное окно per key (ip+маршрут), ленивая чистка, лимит 0 = эндпоинт закрыт.
+- signup 5/час/IP · login 10/час/IP · verify 20/час/IP (`SIGNUP_RATE_LIMIT`, `LOGIN_RATE_LIMIT`, `VERIFY_RATE_LIMIT`); 429 rate_limited при исчерпании.
+- Тесты: юнит (окно/изоляция/сброс/ноль) + интеграция 429 на третьем signup и логине с одного IP; другой IP не затронут.
+
 ### Fix: hosted control mutations require operator session
 - Адверсариальный аудит нашёл дыру: в cloud/ent издании мутации `/api/control/v1/*` (включая money-path `billing/adjust`) принимались без аутентификации.
 - `requireOperator(req, db)`: hosted → сессия с platform_role='operator' обязательна на все методы catch-all; OSS не тронут (локальный тул остаётся открытым, DX сохранён).

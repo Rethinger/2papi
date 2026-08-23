@@ -4,6 +4,11 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Tenant billing (страница + API тенанта)
+- `GET /api/auth/billing` — по сессии: баланс/леджер/ключи ТОЛЬКО своей команды (+ checkout_url из env); hosted-only, 401 без сессии.
+- Страница `/tenant-billing`: баланс (красный при нуле), кнопка «Add credits» из PADDLE_CHECKOUT_URL, список ключей с копированием префикса, история кредитов.
+- Тест: чужие команды и транзакции не утекают; аноним → 401.
+
 ### Fix: X-Gateway-Overhead-MS считал весь апстрим
 - Заголовок показывал полное время запроса (включая ожидание провайдера), а не добавленную гейтвеем задержку — на живом Fireworks overhead=upstream≈1368ms при wall ~1.4s.
 - Семантика Ferro: overhead = elapsed − upstream_ms (floor 0). Живо проверено: overhead 0–1ms, upstream 1368ms. Усилен тест latency headers (sleep 30ms у апстрима + assert overhead<upstream).

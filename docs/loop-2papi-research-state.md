@@ -574,10 +574,17 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - node:test: типа test.Test нет в @types — структурный { after(fn) }.
 
 ### ОСТАЛОСЬ (следующая сессия, по порядку)
-1) control-plane CRUD для mcp_servers (сейчас конфиг из файла — OSS-путь);
-2) Billing-страница дашборда + чекаут-линк Paddle (вебхук уже принимает);
-3) витрина: benchmark-сюита по методологии Ferro (репро <5ms TTF);
+1) Billing-страница дашборда + чекаут-линк Paddle (вебхук уже принимает);
+2) витрина: benchmark-сюита по методологии Ferro (репро <5ms TTF);
+3) SCIM/JWT-auth для API (Ent, после первых B2B-лидов);
 4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.
+
+### MCP CRUD в контроль-плейне — СДЕЛАНО ✅ (2026-08-23)
+- Миграция 018 mcp_servers; CRUD в catch-all (headers шифруются
+  envelope'ом); дубликат имени → 409; GET без секретов.
+- Снапшот: декларативно name/url/enabled (credential-free инвариант
+  сохранён), runtime инжектит расшифрованные headers. Тест
+  mcp-crud.integration.test.ts. Сюит 195/195.
 
 ### Paddle webhook — СДЕЛАН ✅ (2026-08-23)
 - lib/webhooks.ts: подпись HMAC ts:h1 (окно 5 мин), transaction.completed

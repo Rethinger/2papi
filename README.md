@@ -77,6 +77,20 @@ Design system and widget console are in [`open-design/`](open-design/) — hand-
 - Token-saver optimizations like 9Router, toggled from the dashboard **or per-model/per-key**: RTK compression of large tool results (saves 20-40% input tokens), Caveman mode (terse replies, saves up to 65% output tokens), and **Headroom** (auto-prune old tool history when context nears limit). All also opt-in per request via `X-Gateway-Compress` / `X-Gateway-Caveman` / `X-Gateway-Headroom` (`X-Gateway-Headroom-Reserve` to tune).
 - **Reasoning models note**: reasoning-capable upstreams (DeepSeek R/V-series, o-series, Claude extended thinking) spend your `max_tokens` on hidden `reasoning_content` *before* any visible content — a small limit yields an empty answer with `finish_reason:"length"`. Budget ≥512–2000 tokens for such aliases, and prefer per-key/per-model Caveman to tame verbose thinking.
 - SSE and JSON response streaming without full response buffering.
+- **MCP gateway** (`POST /v1/mcp/<name>`): expose upstream Model Context Protocol servers behind virtual-key auth — budgets, RPM and concurrency apply to tool calls, every call lands in request logs. Configure in your config file:
+
+```yaml
+mcp_servers:
+  - name: my-tools
+    url: https://mcp.example.com/mcp
+    headers: { Authorization: "Bearer <upstream-token>" }
+```
+
+```sh
+curl http://localhost:8080/v1/mcp/my-tools \
+  -H "Authorization: Bearer sk-cp-…" -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
 - Multiple accounts per public model alias.
 - Upstream proxies for every account and a global pool — all protocols (http/https/socks4/4a/5/5h) in any format (`http://user:pass@host:8080`, `socks5://host:1080`, `host:3128`, `host:3128:user:pass`, `[::1]:9090`, lists per line/comma/JSON). Round-robin rotation per request with failover; `X-Gateway-Proxy` response header shows the masked proxy used. The pool is managed in the dashboard (Settings → Proxy pool).
 - Routing strategies: `priority`, `balanced`, `fastest`, `cheapest`, `quota-drain`, `fallback-chain`.

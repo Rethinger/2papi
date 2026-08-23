@@ -3,6 +3,7 @@
 // Billing view (шаг 6, Cloud): operator-facing balances + credit ledger +
 // manual adjustment. Money path — adjustments always ask for confirmation
 // and land in the ledger (source of truth) server-side.
+// Markup uses the shared dashboard vocabulary (page/panel/table-card).
 
 import { useState } from 'react';
 
@@ -27,12 +28,8 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  if (!billing) {
-    return <ResourceFrame t={t}><p className="muted">…</p></ResourceFrame>;
-  }
-
-  const balances: any[] = billing.balances ?? [];
-  const transactions: any[] = billing.transactions ?? [];
+  const balances: any[] = billing?.balances ?? [];
+  const transactions: any[] = billing?.transactions ?? [];
 
   const submitAdjustment = async () => {
     const parsed = Number(delta);
@@ -42,7 +39,7 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
       return;
     }
     const sign = parsed > 0 ? '+' : '';
-    const confirmed = window.confirm(t('billing.adjustConfirm', {
+    const confirmed = window.confirm(t('adjust.confirm', {
       team: team.name,
       amount: `${sign}${fmtUsd(parsed)}`,
       note: note || '—',
@@ -57,29 +54,36 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
         body: JSON.stringify({ team_id: teamId, delta_usd: parsed, note }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.error?.message ?? t('billing.adjustFailed'));
-      setMessage(t('billing.adjustDone', { team: team.name, amount: `${sign}${fmtUsd(parsed)}` }));
+      if (!res.ok) throw new Error(body?.error?.message ?? t('adjust.failed'));
+      setMessage(t('adjust.done', { team: team.name, amount: `${sign}${fmtUsd(parsed)}` }));
       setDelta('');
       setNote('');
       onAdjusted();
     } catch (cause: any) {
-      setMessage(cause?.message ?? t('billing.adjustFailed'));
+      setMessage(cause?.message ?? t('adjust.failed'));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div>
-      <h2 className="page-title">{t('billing.title')}</h2>
-      <p className="muted">{t('billing.subtitle')}</p>
+    <section className="page">
+      <div className="page-heading compact">
+        <div>
+          <span className="eyebrow">{t('nav.billing')}</span>
+          <h1>{t('billing.title')}</h1>
+          <p>{t('billing.subtitle')}</p>
+        </div>
+      </div>
 
-      {!billing.configured && (
-        <p className="callout warn">{t('billing.webhookNotConfigured')}</p>
+      {!billing?.configured && (
+        <p style={{ color: 'var(--muted)', border: '1px dashed rgba(255,190,120,.5)', borderRadius: 12, padding: '10px 14px' }}>
+          ⚠ {t('billing.webhookNotConfigured')}
+        </p>
       )}
 
-      <section className="panel">
-        <h3>{t('balances.title')}</h3>
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-heading"><h2>{t('balances.title')}</h2></div>
         <div className="table-card">
           <table>
             <thead><tr>
@@ -93,7 +97,7 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
               {balances.map(b => (
                 <tr key={b.id}>
                   <td><b>{b.name}</b></td>
-                  <td className={Number(b.balance_usd) <= 0 ? 'danger' : ''}>{fmtUsd(b.balance_usd)}</td>
+                  <td style={Number(b.balance_usd) <= 0 ? { color: '#ff9c9c' } : undefined}>{fmtUsd(b.balance_usd)}</td>
                   <td>{Number(b.budget_usd) > 0 ? `$${Number(b.budget_usd).toFixed(2)}/day` : '∞'}</td>
                   <td>{fmtUsd(b.credited_usd)}</td>
                   <td>{fmtUsd(b.debited_usd)}</td>
@@ -101,17 +105,17 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
               ))}
             </tbody>
           </table>
-          {!balances.length && <EmptyState label={t('balances.empty')} />}
+          {!balances.length && <p style={{ color: 'var(--muted)' }}>{t('balances.empty')}</p>}
         </div>
       </section>
 
-      <section className="panel">
-        <h3>{t('adjust.title')}</h3>
-        {!billing.checkout_url && <p className="muted">{t('adjust.noCheckoutHint')}</p>}
-        {billing.checkout_url && (
+      <section className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-heading"><h2>{t('adjust.title')}</h2></div>
+        {!billing?.checkout_url && <p style={{ color: 'var(--muted)' }}>{t('adjust.noCheckoutHint')}</p>}
+        {billing?.checkout_url && (
           <p><a href={billing.checkout_url} target="_blank" rel="noreferrer">{t('adjust.openCheckout')}</a></p>
         )}
-        <div className="form-row">
+        <div className="form-row three">
           <select value={teamId} onChange={e => setTeamId(e.target.value)} aria-label={t('adjust.team')}>
             <option value="">{t('adjust.pickTeam')}</option>
             {balances.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -124,15 +128,17 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
             type="text" placeholder={t('adjust.notePlaceholder')}
             value={note} onChange={e => setNote(e.target.value)} aria-label={t('adjust.notePlaceholder')}
           />
+        </div>
+        <div style={{ marginTop: 11, display: 'flex', gap: 11, alignItems: 'center' }}>
           <button className="primary" disabled={busy || !teamId} onClick={() => void submitAdjustment()}>
             {busy ? t('adjust.saving') : t('adjust.submit')}
           </button>
+          {message && <span style={{ color: 'var(--muted)' }}>{message}</span>}
         </div>
-        {message && <p className="muted">{message}</p>}
       </section>
 
       <section className="panel">
-        <h3>{t('ledger.title')}</h3>
+        <div className="panel-heading"><h2>{t('ledger.title')}</h2></div>
         <div className="table-card">
           <table>
             <thead><tr>
@@ -144,7 +150,7 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
                 <tr key={txRow.id}>
                   <td>{new Date(txRow.created_at).toLocaleString(dateLocale(locale))}</td>
                   <td>{txRow.team_name}</td>
-                  <td className={Number(txRow.delta_usd) < 0 ? 'danger' : ''}>{fmtUsd(txRow.delta_usd)}</td>
+                  <td style={Number(txRow.delta_usd) < 0 ? { color: '#ff9c9c' } : undefined}>{fmtUsd(txRow.delta_usd)}</td>
                   <td>{txRow.kind}</td>
                   <td>{txRow.source}</td>
                   <td><code>{txRow.external_id || '—'}</code></td>
@@ -152,17 +158,9 @@ export function BillingView({ billing, locale, t, onAdjusted }: BillingViewProps
               ))}
             </tbody>
           </table>
-          {!transactions.length && <EmptyState label={t('ledger.empty')} />}
+          {!transactions.length && <p style={{ color: 'var(--muted)' }}>{t('ledger.empty')}</p>}
         </div>
       </section>
-    </div>
+    </section>
   );
-}
-
-function ResourceFrame({ t, children }: { t: (k: string) => string; children: React.ReactNode }) {
-  return <div><h2 className="page-title">{t('billing.title')}</h2>{children}</div>;
-}
-
-function EmptyState({ label }: { label: string }) {
-  return <p className="muted">{label}</p>;
 }

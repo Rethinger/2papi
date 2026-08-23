@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { z } from 'zod';
 import { pool, tx } from '@/lib/db';
 import { ok, problem, ApiError } from '@/lib/api';
 import { publishConfigVersion } from '@/lib/redis';
@@ -162,6 +163,31 @@ export async function GET(req: Request, ctx: Ctx) {
     if (r === 'mcp-servers') return ok((await pool.query(`SELECT m.id, m.name, m.url, m.enabled, m.created_at, m.updated_at,
         (m.headers_secret_id IS NOT NULL) headers_set
       FROM mcp_servers m ORDER BY m.name`)).rows);
+    if (r === 'billing') {
+      const balances = (await pool.query(`
+        SELECT t.id, t.name, t.balance_usd, t.budget_usd, t.enabled,
+               count(ct.id)::int tx_count,
+               COALESCE(SUM(ct.delta_usd) FILTER (WHERE ct.delta_usd > 0), 0) credited_usd,
+               COALESCE(-SUM(ct.delta_usd) FILTER (WHERE ct.delta_usd < 0), 0) debited_usd
+        FROM teams t LEFT JOIN credit_transactions ct ON ct.team_id = t.id
+        GROUP BY t.id ORDER BY t.name`)).rows.map(row => ({
+          ...row,
+          balance_usd: Number(row.balance_usd),
+          budget_usd: Number(row.budget_usd),
+          credited_usd: Number(row.credited_usd),
+          debited_usd: Number(row.debited_usd),
+        }));
+      const transactions = (await pool.query(`
+        SELECT ct.id, ct.team_id, t.name team_name, ct.delta_usd, ct.kind, ct.source, ct.external_id, ct.note, ct.created_at
+        FROM credit_transactions ct JOIN teams t ON t.id = ct.team_id
+        ORDER BY ct.created_at DESC LIMIT 50`)).rows;
+      return ok({
+        checkout_url: process.env.PADDLE_CHECKOUT_URL ?? '',
+        configured: Boolean(process.env.PADDLE_WEBHOOK_SECRET),
+        balances,
+        transactions,
+      });
+    }
     if (r === 'oidc') { requireFeature('sso'); return ok(await getOidcStatus(pool)); }
     if (r === 'settings') return ok((await pool.query('SELECT * FROM system_settings ORDER BY key')).rows);
     if (r === 'proxy-pool') {
@@ -212,6 +238,26 @@ export async function POST(req: Request, ctx: Ctx) {
       await draftAfter(c, 'create', 'mcp_server', q.rows[0].id, { ...v, headers: Object.keys(v.headers).length ? '[redacted]' : undefined });
       return q.rows[0];
     }), 201);
+    if (r === 'billing' && p[1] === 'adjust') return ok(await tx(async c => {
+      const teamId = z.string().uuid().parse((body as any)?.team_id);
+      const delta = z.number().finite().parse((body as any)?.delta_usd);
+      const note = z.string().max(300).parse((body as any)?.note ?? '');
+      if (!Number.isFinite(delta) || Math.abs(delta) < 1e-9 || Math.abs(delta) > 10000) {
+        throw new ApiError(422, 'invalid_amount', 'delta_usd must be a non-zero amount within ±10 000');
+      }
+      const team = await c.query('SELECT id, name, balance_usd FROM teams WHERE id=$1', [teamId]);
+      if (!team.rows[0]) throw new ApiError(404, 'not_found', 'Team not found');
+      // Money path: ledger first (source of truth), then the cached balance,
+      // then the audit trail — all in this transaction.
+      await c.query(
+        `INSERT INTO credit_transactions (team_id, delta_usd, kind, source, external_id, note)
+         VALUES ($1,$2,'adjustment','manual','', $3)`,
+        [teamId, delta, note],
+      );
+      await c.query('UPDATE teams SET balance_usd = balance_usd + $2, updated_at=now() WHERE id=$1', [teamId, delta]);
+      await audit(c, 'adjustment', 'team', teamId, { delta_usd: delta, note });
+      return { team_id: teamId, balance_usd: Number(team.rows[0].balance_usd) + delta };
+    }));
     if (r === 'oidc') return ok(await saveOidcSettings(pool, body));
     if (r === 'webhook') return ok(await tx(async c => { const v = WebhookSchema.parse(body); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('webhook',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify(v)]); await draftAfter(c,'update','webhook','singleton',v); return v; }));
     if (r === 'proxy-pool') return ok(await saveProxyPool(body));

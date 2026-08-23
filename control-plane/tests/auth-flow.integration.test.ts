@@ -213,3 +213,42 @@ test('prepaid balance decrements on spend and reconciles from the ledger', optio
     delete process.env[EDITION_ENV];
   }
 });
+
+
+test('operator manual adjustment lands in ledger, balance and audit', options, async () => {
+  process.env[EDITION_ENV] = 'cloud';
+  try {
+    const route: any = await import('../app/api/control/v1/[[...resource]]/route.ts');
+    const teamId = (await pool!.query(
+      `SELECT t.id FROM teams t JOIN team_members tm ON tm.team_id=t.id
+       JOIN users u ON u.id=tm.user_id WHERE lower(u.email)='dev@example.com'`,
+    )).rows[0].id;
+    const before = Number((await pool!.query(`SELECT balance_usd FROM teams WHERE id=$1`, [teamId])).rows[0].balance_usd);
+
+    const req = new Request('http://x/api/control/v1/billing/adjust', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer operator' },
+      body: JSON.stringify({ team_id: teamId, delta_usd: -0.25, note: 'compensation for outage' }),
+    });
+    const res = await route.POST(req, { params: Promise.resolve({ resource: ['billing', 'adjust'] }) });
+    assert.equal(res.status, 200);
+    const after = Number((await pool!.query(`SELECT balance_usd FROM teams WHERE id=$1`, [teamId])).rows[0].balance_usd);
+    assert.equal(Math.round((after - before) * 1e6) / 1e6, -0.25);
+
+    const txRow = (await pool!.query(
+      `SELECT kind, source, delta_usd FROM credit_transactions WHERE team_id=$1 AND source='manual' ORDER BY created_at DESC LIMIT 1`,
+      [teamId],
+    )).rows[0];
+    assert.equal(txRow.kind, 'adjustment');
+    assert.equal(Number(txRow.delta_usd), -0.25);
+
+    // Validation: zero amount refused.
+    const zero = await route.POST(new Request('http://x/api/control/v1/billing/adjust', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ team_id: teamId, delta_usd: 0 }),
+    }), { params: Promise.resolve({ resource: ['billing', 'adjust'] }) });
+    assert.equal(zero.status, 422);
+  } finally {
+    delete process.env[EDITION_ENV];
+  }
+});

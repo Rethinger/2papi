@@ -4,6 +4,10 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Benchmark (Ferro-методология, воспроизводимый)
+- `docker compose --profile bench up --build bench-runner` — фиксированный локальный fake-upstream (без сети провайдера), тиры конкурентности, отчёт RPS + TTFB p50/p95/p99 + self-reported overhead (`X-Gateway-Overhead-MS`).
+- Замер на Windows/Docker Desktop: 408/1797/2419 RPS @10/50/100 conc, TTFB p50 3–20ms, overhead гейтвея avg 0.02–0.31ms, 37k+ запросов без ошибок. Скрипт `test/bench.mjs`, конфиг `config/bench.yaml`, профиль `bench` в compose.
+
 ### Стриминг: публичный алиас в чанках
 - `protocol.NewSSEModelRewriteReader` — построчная перезапись upstream model id → публичный алиас в OpenAI-SSE стриме; построчный буфер безопасен при разрезании JSON по сетевым чанкам, остальное — дословно.
 - Включён для OpenAI-формата когда alias ≠ upstream (non-streaming уже нормализовался через pipe-path). Проверено живьём на Fireworks deepseek-v4-flash: чанки несут `model: <алиас>`.

@@ -78,6 +78,28 @@ services:
       timeout: 2s
       retries: 30
 
+  gateway-bench:
+    profiles: ["bench"]
+    build: .
+    command: ["-config", "/app/config/bench.yaml"]
+    environment:
+      GATEWAY_ID: gateway-bench
+      LITE_STORE_PATH: /tmp/lite-bench.json
+    volumes: ["./config/bench.yaml:/app/config/bench.yaml:ro"]
+    depends_on:
+      - fake-upstream
+
+  bench-runner:
+    profiles: ["bench"]
+    image: node:22-alpine
+    working_dir: /bench
+    volumes: ["./test:/bench"]
+    environment:
+      GATEWAY_URL: http://gateway-bench:8080
+    command: node bench.mjs
+    depends_on:
+      - gateway-bench
+
 volumes:
   papi-postgres:
   papi-redis:

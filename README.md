@@ -135,6 +135,16 @@ docker compose exec control-plane npm test
 
 The integration tests require `TEST_DATABASE_URL`, which compose sets to a dedicated `papi_control_test` database. Create it once with `docker compose exec postgres createdb -U postgres papi_control_test`; without it those tests skip instead of failing.
 
+### Benchmark
+
+Reproducible gateway-overhead benchmark (fixed local fake upstream, no provider network in the loop):
+
+```sh
+docker compose --profile bench up --build bench-runner
+```
+
+Prints RPS plus TTFB p50/p95/p99 and the gateway's self-reported overhead (`X-Gateway-Overhead-MS`) per concurrency tier. Tune with `BENCH_TIERS`, `BENCH_DURATION_MS`, `GATEWAY_URL`.
+
 Full-stack E2E against a running `docker compose up` stack:
 
 ```sh

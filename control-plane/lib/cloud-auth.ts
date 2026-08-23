@@ -150,6 +150,45 @@ export async function loginCore(req: Request, deps: CloudAuthDeps = cloudAuthDep
   }
 }
 
+// GET data for the signed-in tenant's own team (balances + last ledger
+// rows). Operator view is separate (/api/control/v1/billing); tenants never
+// see other teams.
+export async function billingCore(req: Request, deps: CloudAuthDeps = cloudAuthDeps()) {
+  try {
+    requireHosted();
+    const db = deps.pool!;
+    const token = req.headers.get('cookie')?.match(/(?:^|;\s*)papi_session=([^;]+)/)?.[1];
+    const user = await resolveSession(db, token);
+    if (!user) throw new ApiError(401, 'unauthorized', 'Not signed in');
+    const team = (await db.query(
+      `SELECT t.id, t.name, t.balance_usd FROM teams t
+       JOIN team_members tm ON tm.team_id = t.id WHERE tm.user_id=$1 ORDER BY t.created_at LIMIT 1`,
+      [user.id],
+    )).rows[0];
+    if (!team) return Response.json({ data: { team: null, balance_usd: 0, transactions: [] } });
+    const transactions = (await db.query(
+      `SELECT delta_usd, kind, source, external_id, note, created_at
+       FROM credit_transactions WHERE team_id=$1 ORDER BY created_at DESC LIMIT 50`,
+      [team.id],
+    )).rows;
+    const keys = (await db.query(
+      `SELECT name, key_prefix, enabled FROM virtual_keys WHERE team_id=$1 AND enabled ORDER BY created_at`,
+      [team.id],
+    )).rows;
+    return Response.json({
+      data: {
+        team: { id: team.id, name: team.name },
+        balance_usd: Number(team.balance_usd),
+        transactions,
+        keys,
+        checkout_url: process.env.PADDLE_CHECKOUT_URL ?? '',
+      },
+    });
+  } catch (e) {
+    return problem(e);
+  }
+}
+
 // POST /api/auth/logout — drop the current session.
 export async function logoutCore(req: Request, deps: CloudAuthDeps = cloudAuthDeps()) {
   try {

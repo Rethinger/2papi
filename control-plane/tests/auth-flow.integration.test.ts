@@ -252,3 +252,38 @@ test('operator manual adjustment lands in ledger, balance and audit', options, a
     delete process.env[EDITION_ENV];
   }
 });
+
+
+test('tenant billing endpoint shows own team only', options, async () => {
+  process.env[EDITION_ENV] = 'cloud';
+  try {
+    const { billingCore } = await import('../lib/cloud-auth.ts');
+    const login = await loginCore(post('/api/auth/login', { email: 'dev@example.com', password: 'longenough123' }));
+    const cookie = login.headers.get('set-cookie')!;
+
+    // Other teams exist in the DB but must not leak.
+    await pool!.query(`INSERT INTO teams (name, budget_usd, balance_usd) VALUES ('stranger-team', 0, 999)`);
+    const strangerKey = (await pool!.query(
+      `INSERT INTO credit_transactions (team_id, delta_usd, kind, source, external_id)
+       SELECT id, 777,'topup','paddle','txn_stranger' FROM teams WHERE name='stranger-team' RETURNING id`,
+    )).rows[0];
+
+    const req = new Request('http://x/api/auth/billing', { headers: { cookie: `papi_session=${cookie.match(/papi_session=([^;]+)/)![1]}` } });
+    void strangerKey;
+    const res = await billingCore(req);
+    assert.equal(res.status, 200);
+    const data = (await res.json()).data;
+    assert.equal(data.team.name.startsWith('dev@'), true, 'own personal team by email');
+    assert.ok(Number(data.balance_usd) > 0 && Number(data.balance_usd) < 900, 'own balance only');
+    for (const txRow of data.transactions) {
+      assert.equal(txRow.source === 'paddle' && Number(txRow.delta_usd) === 777, false, 'no foreign transactions');
+    }
+    assert.ok(Array.isArray(data.keys) && data.keys.length >= 1, 'own keys listed');
+
+    // No session → 401.
+    const anon = await billingCore(new Request('http://x/api/auth/billing'));
+    assert.equal(anon.status, 401);
+  } finally {
+    delete process.env[EDITION_ENV];
+  }
+});

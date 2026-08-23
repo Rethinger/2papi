@@ -615,7 +615,13 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.End
 	}
 	w.Header().Set("X-Gateway-Route", acct.Name)
 	w.Header().Set("X-Gateway-Attempts", fmt.Sprint(attempt))
-	w.Header().Set("X-Gateway-Overhead-MS", strconv.FormatInt(time.Since(overheadStart).Milliseconds(), 10))
+	// Pure gateway cost = elapsed since request start minus the time the
+	// upstream spent producing response headers (Ferro-compatible semantics).
+	overhead := time.Since(overheadStart).Milliseconds() - upstreamMS
+	if overhead < 0 {
+		overhead = 0
+	}
+	w.Header().Set("X-Gateway-Overhead-MS", strconv.FormatInt(overhead, 10))
 	w.Header().Set("X-Gateway-Upstream-MS", strconv.FormatInt(upstreamMS, 10))
 	if used := proxyUse.Used(); used != "" {
 		w.Header().Set("X-Gateway-Proxy", used)

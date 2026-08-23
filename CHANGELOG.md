@@ -4,6 +4,10 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### Fix: X-Gateway-Overhead-MS считал весь апстрим
+- Заголовок показывал полное время запроса (включая ожидание провайдера), а не добавленную гейтвеем задержку — на живом Fireworks overhead=upstream≈1368ms при wall ~1.4s.
+- Семантика Ferro: overhead = elapsed − upstream_ms (floor 0). Живо проверено: overhead 0–1ms, upstream 1368ms. Усилен тест latency headers (sleep 30ms у апстрима + assert overhead<upstream).
+
 ### Benchmark (Ferro-методология, воспроизводимый)
 - `docker compose --profile bench up --build bench-runner` — фиксированный локальный fake-upstream (без сети провайдера), тиры конкурентности, отчёт RPS + TTFB p50/p95/p99 + self-reported overhead (`X-Gateway-Overhead-MS`).
 - Замер на Windows/Docker Desktop: 408/1797/2419 RPS @10/50/100 conc, TTFB p50 3–20ms, overhead гейтвея avg 0.02–0.31ms, 37k+ запросов без ошибок. Скрипт `test/bench.mjs`, конфиг `config/bench.yaml`, профиль `bench` в compose.

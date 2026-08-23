@@ -23,7 +23,7 @@ import {
   publishLatest,
   storeDraft,
 } from '@/lib/control';
-import { requireFeature } from '@/lib/edition';
+import { activeEdition, requireFeature, requireOperator } from '@/lib/edition';
 import { getOidcStatus, saveOidcSettings } from '@/lib/sso-routes';
 import { McpServerSchema, McpServerPatchSchema } from '@/lib/control';
 import { sha256Canonical } from '@/lib/canonical-json';
@@ -64,6 +64,7 @@ async function draftAfter(client: any, action: string, typ: string, id?: string,
 
 export async function GET(req: Request, ctx: Ctx) {
   try {
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0];
     if (r === 'overview') {
       const [q, metrics] = await Promise.all([
@@ -218,6 +219,7 @@ export async function GET(req: Request, ctx: Ctx) {
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const body = await json(req);
     if (r === 'providers') return ok(await tx(async c => { const v = ProviderSchema.parse(body); const q = await c.query('INSERT INTO providers (slug,name,adapter,base_url,enabled,metadata) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [v.slug,v.name,v.adapter,v.base_url,v.enabled,JSON.stringify(v.metadata)]); await draftAfter(c,'create','provider',q.rows[0].id,v); return q.rows[0]; }), 201);
     if (r === 'accounts') return ok(await tx(async c => { const v = AccountSchema.parse(body); const sid = v.credential ? await insertSecret(c, 'account_credential', v.credential) : null; const metadata = { ...v.metadata, ...(v.proxy !== undefined ? { proxy: v.proxy } : {}) }; const q = await c.query('INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url,enabled,priority,weight,max_concurrency,cost,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *', [v.provider_id,sid,v.name,v.display_name,v.base_url,v.enabled,v.priority,v.weight,v.max_concurrency,v.cost,JSON.stringify(metadata)]); await draftAfter(c,'create','account',q.rows[0].id,{...v,credential: v.credential ? '[redacted]' : undefined, proxy: v.proxy ? '[redacted]' : undefined}); return q.rows[0]; }), 201);
@@ -271,6 +273,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const id = p[1]; const body = await json(req);
     if (!id) throw new ApiError(400, 'missing_id', 'Resource id is required');
     if (r === 'providers') return ok(await tx(async c => { const v = ProviderPatchSchema.parse(body); const q = await c.query('UPDATE providers SET name=COALESCE($2,name), adapter=COALESCE($3,adapter), base_url=COALESCE($4,base_url), enabled=COALESCE($5,enabled), metadata=COALESCE($6,metadata), updated_at=now() WHERE id=$1 RETURNING *', [id,v.name,v.adapter,v.base_url,v.enabled,v.metadata && JSON.stringify(v.metadata)]); await draftAfter(c,'update','provider',id,v); return q.rows[0]; }));
@@ -294,8 +297,9 @@ ON CONFLICT (model_alias_id) DO UPDATE SET input_per_mtok=EXCLUDED.input_per_mto
   } catch (e) { return problem(e); }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const id = p[1]; if (!id) throw new ApiError(400, 'missing_id', 'Resource id is required');
     if (r === 'mcp-servers') return ok(await tx(async c => {
       const q = await c.query('DELETE FROM mcp_servers WHERE id=$1 RETURNING id', [id]);

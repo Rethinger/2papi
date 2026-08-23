@@ -28,7 +28,15 @@ test.before(async () => {
     `INSERT INTO virtual_keys (name, key_hash, key_prefix, models, rpm) VALUES ('seed-key', $1, 'sk-seed', ARRAY['model-a'], 60)`,
     ['a'.repeat(64)],
   );
+  // Operator session for gated control mutations (see requireOperator).
+  await pool.query(
+    `INSERT INTO users (email, password_hash, platform_role) VALUES ('op@sso.test', 'x', 'operator')`,
+  );
   route = await import('../app/api/control/v1/[[...resource]]/route.ts');
+  const { createSession } = await import('../lib/auth.ts');
+  const opUser = (await pool.query(`SELECT id FROM users WHERE email='op@sso.test'`)).rows[0];
+  const session = await createSession(pool, opUser.id);
+  operatorCookie = `papi_session=${session.token}`;
 });
 
 test.after(async () => {
@@ -36,6 +44,7 @@ test.after(async () => {
 });
 
 const EDITION_ENV = '2PAPI_EDITION';
+let operatorCookie = '';
 
 const ISSUER = 'https://idp.test';
 const CLIENT_ID = '2papi-dashboard';
@@ -77,7 +86,11 @@ function fakeIdPFetch(tokenResponses: Array<{ status?: number; body?: unknown }>
 
 const callControl = (method: 'GET' | 'POST', resource: string[], body?: unknown) =>
   route[method](
-    new Request(`http://localhost/api/control/v1/${resource.join('/')}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }) }),
+    new Request(`http://localhost/api/control/v1/${resource.join('/')}`, {
+      method,
+      headers: { 'content-type': 'application/json', cookie: operatorCookie },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
     { params: Promise.resolve({ resource }) },
   );
 

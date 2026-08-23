@@ -29,7 +29,15 @@ test.before(async () => {
      VALUES ('seed-key', $1, 'sk-seed', ARRAY['model-a'], 60)`,
     ['a'.repeat(64)],
   );
+  // Hosted editions require an operator session on control mutations.
+  await pool.query(
+    `INSERT INTO users (email, password_hash, platform_role) VALUES ('op@test.local', 'x', 'operator')`,
+  );
   route = await import('../app/api/control/v1/[[...resource]]/route.ts');
+  const { createSession } = await import('../lib/auth.ts');
+  const opUser = (await pool.query(`SELECT id FROM users WHERE email='op@test.local'`)).rows[0];
+  const session = await createSession(pool, opUser.id);
+  operatorCookie = `papi_session=${session.token}`;
 });
 
 test.after(async () => {
@@ -38,11 +46,15 @@ test.after(async () => {
 
 const EDITION_ENV = '2PAPI_EDITION';
 
+// Operator session cookie minted once per run (see before()).
+let operatorCookie = '';
+
 function call(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', resource: string[], body?: unknown, id?: string) {
   const path = id ? [...resource, id] : resource;
   const req = new Request(`http://localhost/api/control/v1/${path.join('/')}`, {
     method,
-    ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }),
+    headers: { 'content-type': 'application/json', cookie: operatorCookie },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const ctx = { params: Promise.resolve({ resource: path }) };
   if (method === 'GET') return route.GET(req, ctx);

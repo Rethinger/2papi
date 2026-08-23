@@ -219,15 +219,21 @@ test('operator manual adjustment lands in ledger, balance and audit', options, a
   process.env[EDITION_ENV] = 'cloud';
   try {
     const route: any = await import('../app/api/control/v1/[[...resource]]/route.ts');
+    const { createSession } = await import('../lib/auth.ts');
     const teamId = (await pool!.query(
       `SELECT t.id FROM teams t JOIN team_members tm ON tm.team_id=t.id
        JOIN users u ON u.id=tm.user_id WHERE lower(u.email)='dev@example.com'`,
     )).rows[0].id;
+    // Promote the tenant to operator for this test and mint their session
+    // (hosted editions gate control mutations behind operator sessions).
+    const uid = (await pool!.query(`SELECT id FROM users WHERE lower(email)='dev@example.com'`)).rows[0].id;
+    await pool!.query(`UPDATE users SET platform_role='operator' WHERE id=$1`, [uid]);
+    const opSession = await createSession(pool!, uid);
     const before = Number((await pool!.query(`SELECT balance_usd FROM teams WHERE id=$1`, [teamId])).rows[0].balance_usd);
 
     const req = new Request('http://x/api/control/v1/billing/adjust', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer operator' },
+      headers: { 'content-type': 'application/json', authorization: 'Bearer operator', cookie: `papi_session=${opSession.token}` },
       body: JSON.stringify({ team_id: teamId, delta_usd: -0.25, note: 'compensation for outage' }),
     });
     const res = await route.POST(req, { params: Promise.resolve({ resource: ['billing', 'adjust'] }) });
@@ -244,7 +250,7 @@ test('operator manual adjustment lands in ledger, balance and audit', options, a
 
     // Validation: zero amount refused.
     const zero = await route.POST(new Request('http://x/api/control/v1/billing/adjust', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: `papi_session=${opSession.token}` },
       body: JSON.stringify({ team_id: teamId, delta_usd: 0 }),
     }), { params: Promise.resolve({ resource: ['billing', 'adjust'] }) });
     assert.equal(zero.status, 422);

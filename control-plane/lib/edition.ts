@@ -157,6 +157,20 @@ export function requireHosted(): void {
   }
 }
 
+// requireOperator gates mutating control APIs on HOSTED editions: only
+// users with platform_role='operator' may change state. Plain OSS stays
+// open (local tool, loopback) — the enthusiast DX is untouched.
+export async function requireOperator(req: Request, db: import('./db').Queryable): Promise<{ id: string; email: string }> {
+  const edition = activeEdition();
+  if (edition === 'oss') return { id: 'local', email: 'local@oss' };
+  const token = req.headers.get('cookie')?.match(/(?:^|;\s*)papi_session=([^;]+)/)?.[1];
+  const { resolveSession } = await import('./auth');
+  const user = await resolveSession(db, token);
+  if (!user) throw new ApiError(401, 'operator_session_required', 'Sign in as an operator to change configuration');
+  if (user.platform_role !== 'operator') throw new ApiError(403, 'operator_required', 'Only operators can change configuration');
+  return user;
+}
+
 // Test hook: reset the mtime cache between tests that rewrite the license file.
 export function resetEditionCacheForTests(): void {
   cache = null;

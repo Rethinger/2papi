@@ -1,5 +1,7 @@
 # 2papi Multi-account AI Gateway
 
+[![CI](https://github.com/Rethinger/2papi/actions/workflows/ci.yml/badge.svg)](https://github.com/Rethinger/2papi/actions/workflows/ci.yml)
+
 **A Go AI gateway for teams that outgrew LiteLLM.** Same virtual-key/budget
 model, but: **TTF overhead <5ms** (LiteLLM's Rust rewrite targets ~8ms p95),
 one static binary with an embedded dashboard (no Python ops tax), and three
@@ -21,7 +23,7 @@ OpenAI Codex account setup, model discovery, quota/reset safety, and validation 
 | Gets | everything below, MIT-style Apache-2.0 | OSS stack + signup/credits | license unlocks SSO/OIDC, organizations + org budgets, audit export |
 | Gating | — | deployment | offline Ed25519 license file; features fail closed to OSS without it |
 
-Strategy details: [docs/strategy-v3.md](docs/strategy-v3.md).
+Strategy details: [docs/strategy-v3.md](docs/strategy-v3.md). Error codes: [docs/error-catalog.md](docs/error-catalog.md). Security policy: [SECURITY.md](SECURITY.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Quick Install (30s)
 

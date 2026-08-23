@@ -575,10 +575,16 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 
 ### ОСТАЛОСЬ (следующая сессия, по порядку)
 1) control-plane CRUD для mcp_servers (сейчас конфиг из файла — OSS-путь);
-2) Paddle/Dodo вебхук → credit_transactions topup + Billing-страница
-   («Платежи» спеки, после MoR-одобрения владельцем);
+2) Billing-страница дашборда + чекаут-линк Paddle (вебхук уже принимает);
 3) витрина: benchmark-сюита по методологии Ferro (репро <5ms TTF);
 4) владелец: MoR-заявки (Paddle/Dodo/Polar) — вне кода.
+
+### Paddle webhook — СДЕЛАН ✅ (2026-08-23)
+- lib/webhooks.ts: подпись HMAC ts:h1 (окно 5 мин), transaction.completed
+  → идемпотентный топап в одной транзакции (UNIQUE source+external_id,
+  balance += delta, audit_event). Реплеи ack без двойного зачисления.
+- Роут /api/webhooks/paddle; гейты hosted-only и «не настроен» → 503.
+- Тесты webhooks.integration.test.ts (4). Сюит 194/194.
 
 ### Платёжный контур + E1 — СДЕЛАНО ✅ (2026-08-23)
 - lib/balance.ts: ночной reconcile из леджера, дрейф = алерт;

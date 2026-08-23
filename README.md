@@ -122,6 +122,8 @@ docker compose up --build
 
 Open the dashboard at `http://localhost:13000`. The OpenAI-compatible gateway remains at `http://localhost:18080`.
 
+Public status endpoint: `GET http://localhost:18080/status` — build version, uptime and account/model counters (no secrets), ready to feed an external status page.
+
 Call the gateway:
 
 ```sh

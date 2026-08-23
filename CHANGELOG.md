@@ -4,6 +4,10 @@ Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
 ## 2026-08-23 — Payment loop + E1 showcase
 
+### /status — публичный статус-эндпоинт
+- `GET /status` на гейтвее: version (ldflags), uptime_seconds, счётчики accounts total/enabled/cooling, models, mcp_servers, config_version. Без секретов; только GET.
+- Основа для внешнего status page (бэклог Cloud Фазы 2). Тест: публичность/отсутствие секретов/405 на POST.
+
 ### JWT-auth для API (Ent)
 - `POST /api/auth/token`: операторская сессия → короткоживущий HS256 JWT (1ч, `API_TOKEN_TTL_SECONDS`) для программного доступа к `/api/control/v1/*`.
 - `requireOperator` принимает Bearer JWT наравне с cookie; проверка подписи/aud/exp (30s skew), только HS256 (alg-swap отвергается).

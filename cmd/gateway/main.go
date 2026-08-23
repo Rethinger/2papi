@@ -110,6 +110,7 @@ func main() {
 		}
 		st := resilience.New()
 		gw := server.NewRuntimeServer(snap, st)
+		gw.Version = version
 		recorder := telemetry.NewAsyncRecorder(cp, telemetry.AsyncOptions{})
 		gw.SetTelemetry(recorder)
 		defer func() {
@@ -167,6 +168,7 @@ func main() {
 		}
 		st := resilience.New()
 		gw := server.NewRuntimeServer(snap, st)
+		gw.Version = version
 		installCodexAdapter(gw, nil, newSnapshotRefreshTrigger())
 		installAnthropicAdapter(gw, nil, newSnapshotRefreshTrigger())
 		rt := gw.Runtime()
@@ -203,6 +205,7 @@ func main() {
 	snap := store.Snapshot()
 	st := resilience.New()
 	gw := server.NewRuntimeServer(snap, st)
+		gw.Version = version
 	store.OnUpdate(func(newSnap *config.Snapshot) { gw.Adopt(newSnap) })
 	installCodexAdapter(gw, nil, newSnapshotRefreshTrigger())
 	installAnthropicAdapter(gw, nil, newSnapshotRefreshTrigger())

@@ -40,6 +40,9 @@ type Server struct {
 	telemetry     telemetry.Recorder
 	metrics       *MetricsCollector
 	configVersion atomic.Int64
+	// Status page (/status) metadata: injected build info + process start.
+	Version   string
+	StartedAt time.Time
 }
 
 type compoundRecorder struct {
@@ -58,7 +61,7 @@ func (c compoundRecorder) Record(e telemetry.Event) {
 
 func New(snapshot *config.Snapshot, p *proxy.Proxy) *Server {
 	m := NewMetricsCollector()
-	srv := &Server{state: p.State, auth: policy.New(snapshot), router: p.Router, telemetry: p.Telemetry, metrics: m}
+	srv := &Server{state: p.State, auth: policy.New(snapshot), router: p.Router, telemetry: p.Telemetry, metrics: m, StartedAt: time.Now()}
 	p.Policy = srv.auth
 	p.Telemetry = compoundRecorder{primary: p.Telemetry, metrics: m}
 	srv.runtime.Store(&Runtime{Snap: snapshot, Auth: srv.auth, Proxy: p})
@@ -68,7 +71,7 @@ func New(snapshot *config.Snapshot, p *proxy.Proxy) *Server {
 func NewRuntimeServer(snapshot *config.Snapshot, state *resilience.State) *Server {
 	runtimeRouter := router.New(snapshot, state)
 	m := NewMetricsCollector()
-	srv := &Server{state: state, auth: policy.New(snapshot), router: runtimeRouter, metrics: m}
+	srv := &Server{state: state, auth: policy.New(snapshot), router: runtimeRouter, metrics: m, StartedAt: time.Now()}
 	srv.Adopt(snapshot)
 	return srv
 }
@@ -146,6 +149,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ready")) })
 	mux.HandleFunc("/metrics", s.metricsHandler)
+	mux.HandleFunc("/status", s.status)
 	mux.HandleFunc("/v1/models", s.models)
 	mux.HandleFunc("/v1/chat/completions", s.chat)
 	mux.HandleFunc("/v1/responses", s.responses)
@@ -275,6 +279,44 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 		ConfigVersion: s.configVersion.Load(),
 	}
 	gateway.Serve(w, r, name)
+}
+
+// status serves the public status page payload (no secrets): build info,
+// uptime and coarse fleet counters for external status page tooling.
+func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	resp := map[string]any{
+		"status":         "ok",
+		"version":        s.Version,
+		"uptime_seconds": int(time.Since(s.StartedAt).Seconds()),
+	}
+	if rt := s.RuntimeOrNil(); rt != nil {
+		snap := rt.Snap
+		accountsTotal, accountsEnabled, cooling := 0, 0, 0
+		for _, a := range snap.AccountsByName {
+			accountsTotal++
+			if a.Enabled {
+				accountsEnabled++
+			}
+			if s.state.Cooling(a.Name) {
+				cooling++
+			}
+		}
+		modelsEnabled := 0
+		for range snap.ModelsByAlias {
+			modelsEnabled++
+		}
+		resp["accounts"] = map[string]any{"total": accountsTotal, "enabled": accountsEnabled, "cooling": cooling}
+		resp["models"] = map[string]any{"total": modelsEnabled}
+		resp["mcp_servers"] = len(snap.MCPServersByName)
+		resp["config_version"] = s.configVersion.Load()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // messages serves the Anthropic-native /v1/messages endpoint. The payload is

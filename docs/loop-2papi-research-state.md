@@ -637,3 +637,20 @@ from&to → NDJSON; гейт фичей audit_export. Следующая сес�
 - Роуты /api/auth/oidc/{start,callback} + конфиг оператора в catch-all
   ('oidc', гейт 'sso'). Тесты oidc.test.ts + sso.integration.test.ts
   (фейковый IdP через мок fetch). Полный сюит 185/185 в контейнере.
+
+### Живой тест провайдера Fireworks — ✅ ПРОЙДЕН (2026-08-23)
+- Провайдер: api.fireworks.ai/inference/v1, модель
+  accounts/fireworks/models/deepseek-v4-flash-0731, адаптер
+  openai-compatible, файловый конфиг без контроль-плейна (lite mode).
+- Матрица: /v1/models показывает алиас; non-streaming 200 с контентом;
+  SSE-стриминг идёт чанками; Caveman работает живьём (ответ в одно
+  предложение); X-Gateway-Route/Attempts/Ratelimit-Remaining/
+  Concurrency-Remaining на месте; чужой ключ → 401.
+- Находки: (1) deepseek-v4-flash — reasoning-модель: маленький max_tokens
+  съедается reasoning_content до контента (документировать в README для
+  reasoning-моделей); (2) в стриминговых чанках openai-compatible
+  адаптера поле model = имя апстрима, не публичный алиас — переписывание
+  модели в стриме сделать полишментом; (3) PS5.1 пишет UTF-8 c BOM —
+  curl --data @file ломает JSON-парсер гейтвея (наш windows-грабильник).
+- Конфиг теста: %TEMP%\opencode\fw-gateway.yaml (ключ НЕ в репо),
+  контейнер 2papi-fw-test на 127.0.0.1:18099.

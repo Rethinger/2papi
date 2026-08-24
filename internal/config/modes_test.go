@@ -7,8 +7,8 @@ import (
 
 func baseConfig() Config {
 	return Config{
-		Version: 1,
-		Secret:  "s",
+		Version:     1,
+		Secret:      "s",
 		VirtualKeys: []VirtualKey{{Name: "k", Key: "sk-test-123456"}},
 		Accounts:    []Account{{Name: "a", BaseURL: "http://x", APIKey: "ak", Enabled: true}},
 		Models:      []Model{{Alias: "m", UpstreamModel: "u", Accounts: []string{"a"}}},
@@ -50,3 +50,46 @@ func TestBuildRejectsUnknownOptimizationModes(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestBuildSquozeExclusive(t *testing.T) {
+	// squoze alone is valid on every cascade level.
+	c := baseConfig()
+	c.Optimization.Squoze = true
+	if _, err := Build(c); err != nil {
+		t.Fatalf("pure squoze config rejected: %v", err)
+	}
+	c.Models[0].Optimization = &Optimization{Squoze: true}
+	c.VirtualKeys[0].Optimization = &Optimization{Squoze: true}
+	if _, err := Build(c); err != nil {
+		t.Fatalf("per-level pure squoze rejected: %v", err)
+	}
+
+	// Any combination with the built-in optimizers must fail fast.
+	for _, tc := range []struct {
+		name string
+		mut  func(*Optimization)
+		want string
+	}{
+		{"rtk_mode", func(o *Optimization) { o.RTKMode = "standard" }, "rtk"},
+		{"rtk_legacy", func(o *Optimization) { o.RTKCompression = true }, "rtk"},
+		{"caveman_mode", func(o *Optimization) { o.CavemanMode = "lite" }, "caveman"},
+		{"caveman_legacy", func(o *Optimization) { o.Caveman = true }, "caveman"},
+		{"headroom_profile", func(o *Optimization) { o.HeadroomProfile = "balanced" }, "headroom"},
+		{"headroom_legacy", func(o *Optimization) { o.Headroom = true }, "headroom"},
+	} {
+		c := baseConfig()
+		c.Optimization.Squoze = true
+		tc.mut(&c.Optimization)
+		_, err := Build(c)
+		if err == nil || !contains(err.Error(), tc.want) {
+			t.Fatalf("%s: expected conflict error mentioning %q, got %v", tc.name, tc.want, err)
+		}
+	}
+
+	// Per-model conflicts are caught with their scope in the message.
+	c = baseConfig()
+	c.Models[0].Optimization = &Optimization{Squoze: true, RTKMode: "light"}
+	if _, err := Build(c); err == nil || !contains(err.Error(), "model m") {
+		t.Fatalf("expected scoped model conflict, got %v", err)
+	}
+}

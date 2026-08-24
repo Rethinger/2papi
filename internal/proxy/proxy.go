@@ -35,6 +35,7 @@ import (
 	"github.com/Rethinger/2papi/internal/resilience"
 	"github.com/Rethinger/2papi/internal/router"
 	"github.com/Rethinger/2papi/internal/telemetry"
+	"github.com/Rethinger/squoze"
 )
 
 const defaultResponseBodyLimit = 16 << 20
@@ -184,6 +185,11 @@ func (p *Proxy) Moderations(w http.ResponseWriter, r *http.Request, meta protoco
 	p.Endpoint(w, r, adapter.EndpointModerations, meta, body)
 }
 
+// squozeEngine backs the experimental exclusive squoze mode. One instance
+// per process: its decision memo must persist across requests for cache
+// stability (same original bytes → same compressed bytes).
+var squozeEngine = squoze.NewEngine(squoze.DefaultMemoCapacity)
+
 func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapter.Endpoint, meta protocol.EndpointMetadata, body []byte) {
 	started := time.Now()
 
@@ -194,8 +200,29 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 	optVKName := telemetry.VirtualKeyFromContext(r.Context())
 	optVK := p.Snap.VirtualKeysByName[optVKName]
 	optModelCfg := p.Snap.ModelsByAlias[meta.Model]
+
+	// Experimental EXCLUSIVE mode: when squoze is enabled anywhere in the
+	// cascade (global/model/vk), it is the ONLY body optimizer for this
+	// request; rtk/caveman/headroom are skipped entirely (Build() already
+	// rejects configs that combine them).
+	var squozeActive bool
+	{
+		g, m, v := &p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization
+		if (g != nil && g.Squoze) || (m != nil && m.Squoze) || (v != nil && v.Squoze) {
+			out, res := squozeEngine.Apply(body)
+			body = out
+			squozeActive = true
+			w.Header().Set("X-Gateway-Squoze", strconv.FormatBool(res.BlocksSqueezed > 0))
+			w.Header().Set("X-Gateway-Squoze-Format", res.Format.String())
+			if res.SavedBytes > 0 {
+				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(res.SavedBytes))
+				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(res.SavedBytes/4))
+			}
+		}
+	}
+
 	// Headroom first: prune old history to reserve output tokens (saves context overflow)
-	if run, profile, reserve, keep := compression.DecideHeadroom(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Headroom")); run {
+	if run, profile, reserve, keep := compression.DecideHeadroom(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Headroom")); run && !squozeActive {
 		// header reserve override: X-Gateway-Headroom-Reserve: 4000
 		if v := r.Header.Get("X-Gateway-Headroom-Reserve"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -229,7 +256,7 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 	if rtkHeader == "" {
 		rtkHeader = r.Header.Get("X-Gateway-Compression")
 	}
-	if d := compression.DecideRTK(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, rtkHeader); d.Run {
+	if d := compression.DecideRTK(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, rtkHeader); d.Run && !squozeActive {
 		mode := d.Mode
 		if mode == "" {
 			mode = compression.ModeStandard
@@ -255,7 +282,7 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 	}
 
 	// Caveman: terse system directive (skip if already injected)
-	if d := compression.DecideCaveman(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Caveman")); d.Run {
+	if d := compression.DecideCaveman(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Caveman")); d.Run && !squozeActive {
 		mode := d.Mode
 		directive := compression.CavemanDirective
 		switch {

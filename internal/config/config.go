@@ -77,6 +77,11 @@ type Optimization struct {
 	RTKMode         string `yaml:"rtk_mode,omitempty" json:"rtk_mode,omitempty"`
 	CavemanMode     string `yaml:"caveman_mode,omitempty" json:"caveman_mode,omitempty"`
 	HeadroomProfile string `yaml:"headroom_profile,omitempty" json:"headroom_profile,omitempty"`
+	// Squoze enables the experimental squoze engine (github.com/Rethinger/squoze)
+	// as the ONLY request-body optimizer: content-routed head/tail squeezing
+	// with never-elide, decision memo and reversible marker refs. Exclusive:
+	// when set, rtk/caveman/headroom must be empty or Build() fails.
+	Squoze bool `yaml:"squoze,omitempty" json:"squoze,omitempty"`
 }
 type Server struct {
 	Addr         string `yaml:"addr" json:"addr"`
@@ -87,16 +92,16 @@ type Server struct {
 	Gzip bool `yaml:"gzip,omitempty" json:"gzip,omitempty"`
 }
 type VirtualKey struct {
-	Name           string       `yaml:"name" json:"name"`
-	ID             string       `yaml:"id,omitempty" json:"id,omitempty"`
-	Key            string       `yaml:"key,omitempty" json:"key,omitempty"`
-	KeyHash        string       `yaml:"key_hash,omitempty" json:"key_hash,omitempty"`
-	Models         []string     `yaml:"models" json:"models"`
-	RPM            int          `yaml:"rpm" json:"rpm"`
-	TPM            int          `yaml:"tpm,omitempty" json:"tpm,omitempty"`
-	MaxConcurrency int          `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
-	BudgetUSD      float64      `yaml:"budget_usd,omitempty" json:"budget_usd,omitempty"` // daily, 0 = unlimited
-	Team           *Team        `yaml:"team,omitempty" json:"team,omitempty"`
+	Name           string        `yaml:"name" json:"name"`
+	ID             string        `yaml:"id,omitempty" json:"id,omitempty"`
+	Key            string        `yaml:"key,omitempty" json:"key,omitempty"`
+	KeyHash        string        `yaml:"key_hash,omitempty" json:"key_hash,omitempty"`
+	Models         []string      `yaml:"models" json:"models"`
+	RPM            int           `yaml:"rpm" json:"rpm"`
+	TPM            int           `yaml:"tpm,omitempty" json:"tpm,omitempty"`
+	MaxConcurrency int           `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	BudgetUSD      float64       `yaml:"budget_usd,omitempty" json:"budget_usd,omitempty"` // daily, 0 = unlimited
+	Team           *Team         `yaml:"team,omitempty" json:"team,omitempty"`
 	Optimization   *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
 	hash           []byte
 }
@@ -139,14 +144,15 @@ func (m McpServer) IsEnabled() bool {
 	}
 	return *m.Enabled
 }
+
 type Model struct {
-	Alias             string       `yaml:"alias" json:"alias"`
-	UpstreamModel     string       `yaml:"upstream_model" json:"upstream_model"`
-	Accounts          []string     `yaml:"accounts" json:"accounts"`
-	RoutingStrategy   string       `yaml:"routing_strategy,omitempty" json:"routing_strategy,omitempty"`
-	Fallbacks         []string     `yaml:"fallbacks,omitempty" json:"fallbacks,omitempty"`
-	InputCostPerMtok  float64      `yaml:"input_cost_per_mtok,omitempty" json:"input_cost_per_mtok,omitempty"`
-	OutputCostPerMtok float64      `yaml:"output_cost_per_mtok,omitempty" json:"output_cost_per_mtok,omitempty"`
+	Alias             string        `yaml:"alias" json:"alias"`
+	UpstreamModel     string        `yaml:"upstream_model" json:"upstream_model"`
+	Accounts          []string      `yaml:"accounts" json:"accounts"`
+	RoutingStrategy   string        `yaml:"routing_strategy,omitempty" json:"routing_strategy,omitempty"`
+	Fallbacks         []string      `yaml:"fallbacks,omitempty" json:"fallbacks,omitempty"`
+	InputCostPerMtok  float64       `yaml:"input_cost_per_mtok,omitempty" json:"input_cost_per_mtok,omitempty"`
+	OutputCostPerMtok float64       `yaml:"output_cost_per_mtok,omitempty" json:"output_cost_per_mtok,omitempty"`
 	Optimization      *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
 	// Sources (шаг 5 хребта): per-account overrides for multi-provider
 	// aliases — one public name served by different providers with their own
@@ -209,6 +215,7 @@ func (m Model) ResolvedFor(account string) Model {
 	}
 	return m
 }
+
 type Account struct {
 	ID             string     `yaml:"id,omitempty" json:"id,omitempty"`
 	Name           string     `yaml:"name" json:"name"`
@@ -588,6 +595,24 @@ func validateOptimizationModes(where string, o *Optimization) error {
 	}
 	if !hr[o.HeadroomProfile] {
 		return fmt.Errorf("%s: invalid headroom_profile %q", where, o.HeadroomProfile)
+	}
+	// squoze is an experimental EXCLUSIVE mode: it replaces (not combines
+	// with) the built-in optimizers, so mixing them is a config error.
+	if o.Squoze {
+		var conflicts []string
+		if o.RTKMode != "" || o.RTKCompression {
+			conflicts = append(conflicts, "rtk")
+		}
+		if o.CavemanMode != "" || o.Caveman {
+			conflicts = append(conflicts, "caveman")
+		}
+		if o.HeadroomProfile != "" || o.Headroom {
+			conflicts = append(conflicts, "headroom")
+		}
+		if len(conflicts) > 0 {
+			return fmt.Errorf("%s: squoze mode is exclusive and cannot be combined with: %s",
+				where, strings.Join(conflicts, ", "))
+		}
 	}
 	return nil
 }

@@ -112,3 +112,71 @@ func TestOptimizationModeEchoHeadersAndUpstreamRewrite(t *testing.T) {
 		t.Fatalf("disabled RTK must not echo a mode, got %q", got)
 	}
 }
+
+// squozeToolBody builds a chat request whose tool content looks like real
+// machine output (timestamped INFO lines + one ERROR with detail), so the
+// squoze router classifies it as squeezable.
+func squozeToolBody() []byte {
+	var sb strings.Builder
+	for i := 0; i < 400; i++ {
+		if i == 200 {
+			sb.WriteString("2026-08-24T10:00:00Z ERROR payment failed: want 4200 got 420\n")
+			continue
+		}
+		sb.WriteString("2026-08-24T10:00:00Z INFO api request handled latency=12ms\n")
+	}
+	return []byte(`{"model":"chat","messages":[{"role":"user","content":"run"},{"role":"tool","content":` +
+		jsonString(sb.String()) + `}]}`)
+}
+
+func TestSquozeExclusiveMode(t *testing.T) {
+	var upstreamBody []byte
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"role":"assistant","content":"ok"}}]}`)
+	}))
+	defer up.Close()
+
+	gw := NewRuntimeServer(optModesSnapshot(t, up.URL, config.Optimization{
+		Squoze: true, // exclusive: no rtk/caveman/headroom anywhere
+	}), resilience.New())
+	h := gw.Routes()
+
+	body := squozeToolBody()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer sk")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Gateway-Squoze"); got != "true" {
+		t.Fatalf("squoze echo = %q (body did not squeeze?)", got)
+	}
+	// Exclusivity: none of the built-in optimizers may report activity.
+	for _, hname := range []string{"X-Gateway-RTK-Mode", "X-Gateway-Caveman", "X-Gateway-Caveman-Mode", "X-Gateway-Headroom"} {
+		if got := rec.Header().Get(hname); got != "" {
+			t.Fatalf("exclusive mode violated: %s = %q", hname, got)
+		}
+	}
+	if len(upstreamBody) >= len(body) {
+		t.Fatalf("upstream body was not squeezed by squoze: %d -> %d", len(body), len(upstreamBody))
+	}
+	if !strings.Contains(string(upstreamBody), "[... squoze:") {
+		t.Fatal("squoze marker missing upstream")
+	}
+	// Error detail survives the squeeze end-to-end.
+	if !strings.Contains(string(upstreamBody), "want 4200 got 420") {
+		t.Fatal("error detail lost in squoze mode")
+	}
+	var probe struct {
+		Model string `json:"model"`
+	}
+	// The gateway rewrites the alias to the upstream model id ("chat" -> "u")
+	// before forwarding; squoze must not damage that field either way.
+	if err := json.Unmarshal(upstreamBody, &probe); err != nil || probe.Model != "u" {
+		t.Fatalf("model field damaged: %q %v", probe.Model, err)
+	}
+}

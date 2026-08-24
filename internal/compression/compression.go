@@ -49,7 +49,18 @@ func CompressToolResults(body []byte) ([]byte, int, bool) {
 // CompressToolResultsWith runs one RTK pass with explicit parameters
 // (mode presets map to these in modes.go).
 func CompressToolResultsWith(body []byte, p RTKParams) ([]byte, int, bool) {
-	if len(body) < p.MinBytes {
+	return compressToolResultsSel(body, func(int) RTKParams { return p })
+}
+
+// CompressToolResultsAuto is rtk_mode=auto: parameters are resolved PER BLOCK
+// from its size, so a given tool_result always gets identical treatment
+// across turns and provider prompt caches stay valid.
+func CompressToolResultsAuto(body []byte) ([]byte, int, bool) {
+	return compressToolResultsSel(body, AutoRTKParamsForBlock)
+}
+
+func compressToolResultsSel(body []byte, selectParams func(blockLen int) RTKParams) ([]byte, int, bool) {
+	if len(body) < MinCompressBytes {
 		return body, 0, false
 	}
 
@@ -81,6 +92,7 @@ func CompressToolResultsWith(body []byte, p RTKParams) ([]byte, int, bool) {
 			continue
 		}
 
+		p := selectParams(len(strContent))
 		if len(strContent) < p.MinBytes {
 			continue
 		}

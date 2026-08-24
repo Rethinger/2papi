@@ -189,28 +189,38 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 
 	// 1. Optimization toggles: RTK / Caveman / Headroom — global / per-model / per-key / header (9Router parity)
 	// Effective optimization merges global → model → vk → header; each decision
-	// also resolves a mode preset (light/standard/aggressive etc.). "auto"
-	// currently maps to its legacy default until the per-request heuristics land.
+	// also resolves a mode preset (light/standard/aggressive/.../auto). Mode
+	// "auto" is refined against the request right before execution (auto.go).
 	optVKName := telemetry.VirtualKeyFromContext(r.Context())
 	optVK := p.Snap.VirtualKeysByName[optVKName]
 	optModelCfg := p.Snap.ModelsByAlias[meta.Model]
 	// Headroom first: prune old history to reserve output tokens (saves context overflow)
 	if run, profile, reserve, keep := compression.DecideHeadroom(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Headroom")); run {
-		if profile == compression.ModeAuto {
-			profile = compression.ModeBalanced // refined per-request in auto heuristics
-		}
 		// header reserve override: X-Gateway-Headroom-Reserve: 4000
 		if v := r.Header.Get("X-Gateway-Headroom-Reserve"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				reserve = n
 			}
 		}
-		if pruned, saved, wasPruned := compression.PruneForHeadroom(body, reserve, keep); wasPruned {
-			body = pruned
-			w.Header().Set("X-Gateway-Headroom", "true")
-			w.Header().Set("X-Gateway-Headroom-Profile", profile)
-			w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved*4))
-			w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved))
+		if profile == compression.ModeAuto {
+			// Auto resolves against the request itself; below half the reserve
+			// it no-ops entirely — long cache-friendly epochs between prunes.
+			if ok, resolved := compression.AutoHeadroomProfile(compression.EstimateTokens(body), reserve); !ok {
+				run = false
+			} else {
+				profile = resolved
+				pp := compression.HeadroomProfileParams(resolved, 0, 0)
+				reserve, keep = pp.Reserve, pp.Keep
+			}
+		}
+		if run {
+			if pruned, saved, wasPruned := compression.PruneForHeadroom(body, reserve, keep); wasPruned {
+				body = pruned
+				w.Header().Set("X-Gateway-Headroom", "true")
+				w.Header().Set("X-Gateway-Headroom-Profile", profile)
+				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved*4))
+				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved))
+			}
 		}
 	}
 
@@ -221,27 +231,49 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 	}
 	if d := compression.DecideRTK(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, rtkHeader); d.Run {
 		mode := d.Mode
-		if mode == "" || mode == compression.ModeAuto {
-			mode = compression.ModeStandard // per-block auto resolution lands with auto heuristics
+		if mode == "" {
+			mode = compression.ModeStandard
 		}
-		params := compression.RTKParamsFor(mode)
-		if len(body) >= params.MinBytes { // fast path: avoid unmarshal for tiny payloads
-			if compressed, saved, wasCompressed := compression.CompressToolResultsWith(body, params); wasCompressed {
-				body = compressed
-				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved))
-				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved/4))
+		var compressed []byte
+		var saved int
+		var wasCompressed bool
+		if mode == compression.ModeAuto {
+			compressed, saved, wasCompressed = compression.CompressToolResultsAuto(body)
+			w.Header().Set("X-Gateway-RTK-Mode", "auto")
+		} else {
+			params := compression.RTKParamsFor(mode)
+			if len(body) >= params.MinBytes { // fast path: avoid unmarshal for tiny payloads
+				compressed, saved, wasCompressed = compression.CompressToolResultsWith(body, params)
+				w.Header().Set("X-Gateway-RTK-Mode", mode)
 			}
-			w.Header().Set("X-Gateway-RTK-Mode", mode)
+		}
+		if wasCompressed {
+			body = compressed
+			w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved))
+			w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved/4))
 		}
 	}
 
 	// Caveman: terse system directive (skip if already injected)
 	if d := compression.DecideCaveman(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Caveman")); d.Run {
 		mode := d.Mode
-		if mode == "" || mode == compression.ModeAuto {
-			mode = compression.ModeFull // tool-aware refinement lands with auto heuristics
+		directive := compression.CavemanDirective
+		switch {
+		case mode == "" || mode == compression.ModeFull:
+			mode = compression.ModeFull
+		case mode == compression.ModeLite:
+			directive = compression.CavemanLiteDirective
+		case mode == compression.ModeAuto:
+			// Agentic traffic (tools anywhere in the body) earns the full
+			// terse directive; plain chat gets the gentler lite variant.
+			directive = compression.AutoCavemanDirective(body)
+			if directive == compression.CavemanLiteDirective {
+				mode = compression.ModeLite
+			} else {
+				mode = compression.ModeFull
+			}
 		}
-		if updated, ok, err := compression.InjectCavemanDirectiveWith(body, compression.DirectiveFor(mode)); err == nil && ok {
+		if updated, ok, err := compression.InjectCavemanDirectiveWith(body, directive); err == nil && ok {
 			body = updated
 			w.Header().Set("X-Gateway-Caveman", "true")
 			w.Header().Set("X-Gateway-Caveman-Mode", mode)

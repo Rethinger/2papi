@@ -2,6 +2,15 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-08-24 — Optimization mode presets (виток 3/9: умный авто)
+
+### Авто-эвристики (`auto.go`)
+- **RTK auto решает ПО БЛОКУ** (`AutoRTKParamsForBlock`): <4k символов → light/пропуск, 4–32k → standard, >32k → aggressive. Размер блока стабилен между ходами → решение стабильно → промпт-кэш провайдера не страдает (deep-gap id=78).
+- **Headroom auto** (`AutoHeadroomProfile`): оценка <50% резерва → noop вовсе (долгие кэш-дружелюбные эпохи), ≤90% → conservative, выше → aggressive.
+- **Caveman auto**: агенты (tools/tool_calls/tool_result в теле) → full-директива, обычный чат → lite.
+- Идемпотентность RTK зафиксирована тестом: второй прогон по уже сжатому телу = no-op (маркер элизии → skip).
+- E2E-режимы в proxy: `X-Gateway-Compress: auto` / `X-Gateway-Caveman: auto` / headroom_profile=auto резолвятся перед выполнением и эхоют КОНКРЕТНЫЙ режим.
+
 ## 2026-08-24 — Optimization mode presets (витки 1-2/9)
 
 ### Proxy wiring + эхо-заголовки режимов

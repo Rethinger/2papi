@@ -10,7 +10,24 @@ const (
 	MinCompressBytes = 2048
 	HeadLines        = 20
 	TailLines        = 20
+
+	// elisionMarker identifies blocks this gateway already compressed.
+	// Re-compressing them would mutate conversation history between turns
+	// and invalidate provider prompt caches, so they are skipped always.
+	elisionMarker = "lines elided by gateway compression"
 )
+
+// RTKParams controls one RTK compression pass. Presets live in modes.go.
+type RTKParams struct {
+	MinBytes     int
+	HeadLines    int
+	TailLines    int
+	CommandAware bool
+}
+
+func StandardRTKParams() RTKParams {
+	return RTKParams{MinBytes: MinCompressBytes, HeadLines: HeadLines, TailLines: TailLines, CommandAware: true}
+}
 
 type message struct {
 	Role       string          `json:"role"`
@@ -26,7 +43,13 @@ type chatPayload struct {
 }
 
 func CompressToolResults(body []byte) ([]byte, int, bool) {
-	if len(body) < MinCompressBytes {
+	return CompressToolResultsWith(body, StandardRTKParams())
+}
+
+// CompressToolResultsWith runs one RTK pass with explicit parameters
+// (mode presets map to these in modes.go).
+func CompressToolResultsWith(body []byte, p RTKParams) ([]byte, int, bool) {
+	if len(body) < p.MinBytes {
 		return body, 0, false
 	}
 
@@ -58,11 +81,11 @@ func CompressToolResults(body []byte) ([]byte, int, bool) {
 			continue
 		}
 
-		if len(strContent) < MinCompressBytes {
+		if len(strContent) < p.MinBytes {
 			continue
 		}
 
-		compressed, saved := compressText(strContent)
+		compressed, saved := compressText(strContent, p)
 		if saved > 0 {
 			raw, err := json.Marshal(compressed)
 			if err == nil {
@@ -91,11 +114,19 @@ func CompressToolResults(body []byte) ([]byte, int, bool) {
 	return out, savedTotal, true
 }
 
-func compressText(input string) (string, int) {
+func compressText(input string, p RTKParams) (string, int) {
+	// Idempotency guard: a block this gateway already compressed must never
+	// be re-compressed — mutating history between turns invalidates provider
+	// prompt caches (see plan: cache-guard, deep-gap research id=78).
+	if strings.Contains(input, elisionMarker) {
+		return input, 0
+	}
 	// Command-aware RTK: detect git/test/grep/ls and use tighter limits (like rtk-ai/rtk Rust)
-	headLines, tailLines := HeadLines, TailLines
+	headLines, tailLines := p.HeadLines, p.TailLines
 	lowerHead := strings.ToLower(input[:min(500, len(input))])
 	switch {
+	case !p.CommandAware:
+		// light preset: no command presets, gentle fixed head/tail
 	case strings.Contains(lowerHead, "diff --git") || strings.Contains(input, "@@ "):
 		headLines, tailLines = 10, 10 // git diff
 	case strings.Contains(lowerHead, "commit ") && strings.Contains(lowerHead, "author:"):

@@ -2,6 +2,17 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-08-24 — Optimization mode presets (виток 1/9)
+
+### Go-ядро: режимы для RTK / Caveman / Headroom
+- `config.Optimization`: `rtk_mode` (light|standard|aggressive|auto), `caveman_mode` (lite|full|auto), `headroom_profile` (conservative|balanced|aggressive|auto); пусто = прежнее поведение. Валидация в `Build()` для global/model/vk — опечатка падает на старте.
+- Каскад как у булов: header > vk > model > global; заголовки принимают имена режимов (`X-Gateway-Compress: aggressive`) вместе с true/false, мусор игнорируется.
+- Пресеты RTK: light 8192Б/40+40 без командных пресетов; standard как было; aggressive 1024Б/8+8.
+- Headroom-профили: conservative keep=16/150k, aggressive keep=4/80k; явные reserve/keep сильнее профиля.
+- Caveman lite: короткая директива с полным набором safety-карвов (security/irreversible/multi-step).
+- **Идемпотентность RTK**: блок с маркером элизии повторно не сжимается никогда (глубже — защита промпт-кэша провайдера, research id=78).
+- Тесты: каскад приоритетов, пресеты, профили+оверрайды, safety-клаузы lite, идемпотентность (второй прогон = no-op), валидация мусорных режимов. Дерево: 0 FAIL.
+
 ## 2026-08-23 — Payment loop + E1 showcase
 
 ### Гейтинг закрыт: audit_export + ipacl (Ent)

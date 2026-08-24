@@ -22,6 +22,21 @@ No self-reference. Never name or announce the style. Pattern: [thing] [action] [
 
 Drop caveman for security warnings, irreversible action confirmations, or multi-step sequences where omitted conjunctions risk misread; resume after.`
 
+// CavemanLiteDirective keeps every safety clause of the full directive but
+// shortens the style rules: same protections, fewer constraints.
+const CavemanLiteDirective = `Reply terse. Drop filler words and pleasantries; keep all technical substance, code blocks, exact numbers and exact error text unchanged. Never drop negations (not/never/no). Preserve the user's language.
+
+Drop terseness for security warnings, irreversible-action confirmations, and multi-step sequences where ambiguity risks misread; resume after.`
+
+// DirectiveFor returns the system directive for a caveman mode preset.
+// Empty/unknown modes map to the legacy full directive.
+func DirectiveFor(mode string) string {
+	if mode == ModeLite {
+		return CavemanLiteDirective
+	}
+	return CavemanDirective
+}
+
 type openAIMessageLike struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
@@ -38,6 +53,12 @@ type contentPart struct {
 // payload has no injectable system prompt; and (body, false, err) on invalid
 // JSON so callers can skip without breaking the request.
 func InjectCavemanDirective(body []byte) ([]byte, bool, error) {
+	return InjectCavemanDirectiveWith(body, CavemanDirective)
+}
+
+// InjectCavemanDirectiveWith injects an explicit directive text (mode presets
+// select between full and lite via DirectiveFor).
+func InjectCavemanDirectiveWith(body []byte, directive string) ([]byte, bool, error) {
 	var payload struct {
 		Messages     []json.RawMessage `json:"messages"`
 		Instructions json.RawMessage   `json:"instructions"`
@@ -54,7 +75,7 @@ func InjectCavemanDirective(body []byte) ([]byte, bool, error) {
 			if err := json.Unmarshal(body, &out); err != nil {
 				return body, false, err
 			}
-			out["instructions"] = s + "\n\n" + CavemanDirective
+			out["instructions"] = s + "\n\n" + directive
 			updated, err := json.Marshal(out)
 			return updated, err == nil, err
 		}
@@ -64,7 +85,7 @@ func InjectCavemanDirective(body []byte) ([]byte, bool, error) {
 			if err := json.Unmarshal(body, &out); err != nil {
 				return body, false, err
 			}
-			out["instructions"] = append(parts, contentPart{Type: "text", Text: CavemanDirective})
+			out["instructions"] = append(parts, contentPart{Type: "text", Text: directive})
 			updated, err := json.Marshal(out)
 			return updated, err == nil, err
 		}
@@ -83,14 +104,14 @@ func InjectCavemanDirective(body []byte) ([]byte, bool, error) {
 			if err := json.Unmarshal(raw, &msg); err == nil && msg.Role == "system" {
 				var text string
 				if json.Unmarshal(msg.Content, &text) == nil {
-					updated, _ := json.Marshal(map[string]any{"role": "system", "content": text + "\n\n" + CavemanDirective})
+					updated, _ := json.Marshal(map[string]any{"role": "system", "content": text + "\n\n" + directive})
 					messages = append(messages, updated)
 					modified = true
 					continue
 				}
 				var parts []contentPart
 				if json.Unmarshal(msg.Content, &parts) == nil {
-					updated, _ := json.Marshal(map[string]any{"role": "system", "content": append(parts, contentPart{Type: "text", Text: CavemanDirective})})
+					updated, _ := json.Marshal(map[string]any{"role": "system", "content": append(parts, contentPart{Type: "text", Text: directive})})
 					messages = append(messages, updated)
 					modified = true
 					continue
@@ -101,7 +122,7 @@ func InjectCavemanDirective(body []byte) ([]byte, bool, error) {
 	}
 	if !modified {
 		// No system message: prepend one so the directive still applies.
-		prepend, _ := json.Marshal(map[string]any{"role": "system", "content": CavemanDirective})
+		prepend, _ := json.Marshal(map[string]any{"role": "system", "content": directive})
 		messages = append([]json.RawMessage{prepend}, messages...)
 		modified = true
 	}

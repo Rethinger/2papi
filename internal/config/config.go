@@ -71,6 +71,12 @@ type Optimization struct {
 	HeadroomReserve int `yaml:"headroom_reserve,omitempty" json:"headroom_reserve,omitempty"`
 	// HeadroomKeep is how many recent turns to keep when pruning. 0 = 8 default.
 	HeadroomKeep int `yaml:"headroom_keep,omitempty" json:"headroom_keep,omitempty"`
+	// Mode presets. Empty string = legacy behavior (standard/full/balanced).
+	// Valid values: rtk_mode light|standard|aggressive|auto,
+	// caveman_mode lite|full|auto, headroom_profile conservative|balanced|aggressive|auto.
+	RTKMode         string `yaml:"rtk_mode,omitempty" json:"rtk_mode,omitempty"`
+	CavemanMode     string `yaml:"caveman_mode,omitempty" json:"caveman_mode,omitempty"`
+	HeadroomProfile string `yaml:"headroom_profile,omitempty" json:"headroom_profile,omitempty"`
 }
 type Server struct {
 	Addr         string `yaml:"addr" json:"addr"`
@@ -278,6 +284,11 @@ func Build(c Config) (*Snapshot, error) {
 	if c.Secret == "" {
 		return nil, errors.New("secret required")
 	}
+	// Optimization mode presets: fail fast on typos so a misconfigured mode
+	// can't silently run as legacy behavior.
+	if err := validateOptimizationModes("global", &c.Optimization); err != nil {
+		return nil, err
+	}
 	if c.Server.Addr == "" {
 		c.Server.Addr = ":8080"
 	}
@@ -424,6 +435,11 @@ func Build(c Config) (*Snapshot, error) {
 		if m.InputCostPerMtok < 0 || m.OutputCostPerMtok < 0 {
 			return nil, fmt.Errorf("model %s has negative pricing", m.Alias)
 		}
+		if m.Optimization != nil {
+			if err := validateOptimizationModes("model "+m.Alias, m.Optimization); err != nil {
+				return nil, err
+			}
+		}
 		knownAccounts := map[string]bool{}
 		for _, an := range m.Accounts {
 			knownAccounts[an] = true
@@ -478,6 +494,11 @@ func Build(c Config) (*Snapshot, error) {
 		}
 		if k.RPM < 0 || k.TPM < 0 || k.MaxConcurrency < 0 || k.BudgetUSD < 0 {
 			return nil, fmt.Errorf("virtual key %s has negative limit", k.Name)
+		}
+		if k.Optimization != nil {
+			if err := validateOptimizationModes("virtual key "+k.Name, k.Optimization); err != nil {
+				return nil, err
+			}
 		}
 		if k.KeyHash != "" {
 			hash, err := hex.DecodeString(k.KeyHash)
@@ -552,3 +573,21 @@ func (s *Snapshot) HashPresented(key string) []byte {
 	return mac.Sum(nil)
 }
 func (s *Snapshot) KeyHashHex(name string) string { return hex.EncodeToString(s.KeyHashes[name]) }
+
+// validateOptimizationModes rejects unknown optimization mode presets so a
+// typo can't silently run as legacy behavior (fail-fast, like license features).
+func validateOptimizationModes(where string, o *Optimization) error {
+	rtk := map[string]bool{"": true, "light": true, "standard": true, "aggressive": true, "auto": true}
+	cav := map[string]bool{"": true, "lite": true, "full": true, "auto": true}
+	hr := map[string]bool{"": true, "conservative": true, "balanced": true, "aggressive": true, "auto": true}
+	if !rtk[o.RTKMode] {
+		return fmt.Errorf("%s: invalid rtk_mode %q", where, o.RTKMode)
+	}
+	if !cav[o.CavemanMode] {
+		return fmt.Errorf("%s: invalid caveman_mode %q", where, o.CavemanMode)
+	}
+	if !hr[o.HeadroomProfile] {
+		return fmt.Errorf("%s: invalid headroom_profile %q", where, o.HeadroomProfile)
+	}
+	return nil
+}

@@ -2,7 +2,14 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
-## 2026-08-24 — Optimization mode presets (виток 1/9)
+## 2026-08-24 — Optimization mode presets (витки 1-2/9)
+
+### Proxy wiring + эхо-заголовки режимов
+- Три блока оптимизаций в `proxy.go` переведены на `Decide*` (каскад + режим); `auto` пока маппится в легаси-дефолт (per-request эвристики — виток 3).
+- Эхо при применении: `X-Gateway-RTK-Mode`, `X-Gateway-Caveman-Mode`, `X-Gateway-Headroom-Profile` — видно, какой режим реально сработал.
+- Fast-path RTK теперь по `params.MinBytes` режима (aggressive 1024Б, light 8192Б).
+- Старые `Should*` остались как тонкие обёртки над Decide* (легаси-API без дрейфа семантики).
+- E2E: aggressive сжимает 2KB tool_result и эхоит режим; lite-директива уходит апстриму; заголовок `light` не трогает малое тело, `false` выключает. Дерево 0 FAIL.
 
 ### Go-ядро: режимы для RTK / Caveman / Headroom
 - `config.Optimization`: `rtk_mode` (light|standard|aggressive|auto), `caveman_mode` (lite|full|auto), `headroom_profile` (conservative|balanced|aggressive|auto); пусто = прежнее поведение. Валидация в `Build()` для global/model/vk — опечатка падает на старте.

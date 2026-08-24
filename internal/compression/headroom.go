@@ -82,94 +82,23 @@ func PruneForHeadroom(body []byte, reserve int, keep int) ([]byte, int, bool) {
 	return out, saved, true
 }
 
-// ShouldRTK decides if RTK compression should run.
+// ShouldRTK decides if RTK compression should run (legacy boolean API —
+// new callers use DecideRTK, which also resolves the mode preset).
 func ShouldRTK(global, model, vk *config.Optimization, header string) bool {
-	if header == "true" {
-		return true
-	}
-	if header == "false" {
-		return false
-	}
-	if vk != nil && vk.RTKCompression {
-		return true
-	}
-	if model != nil && model.RTKCompression {
-		return true
-	}
-	if global != nil && global.RTKCompression {
-		return true
-	}
-	return false
+	return DecideRTK(global, model, vk, header).Run
 }
 
-// ShouldCaveman decides if caveman should run.
+// ShouldCaveman decides if caveman should run (legacy boolean API).
 func ShouldCaveman(global, model, vk *config.Optimization, header string) bool {
-	if header == "true" {
-		return true
-	}
-	if header == "false" {
-		return false
-	}
-	if vk != nil && vk.Caveman {
-		return true
-	}
-	if model != nil && model.Caveman {
-		return true
-	}
-	if global != nil && global.Caveman {
-		return true
-	}
-	return false
+	return DecideCaveman(global, model, vk, header).Run
 }
 
-// EffectiveHeadroom decides if headroom should run based on global/model/vk/header.
+// ShouldHeadroom decides if headroom should run based on global/model/vk/header
+// (legacy API: concrete keep/reserve without the profile layer).
 func ShouldHeadroom(global, model, vk *config.Optimization, header string) (bool, int, int) {
-	// header overrides: X-Gateway-Headroom: true/false
-	if header == "true" {
-		return true, DefaultHeadroomReserve, DefaultHeadroomKeep
-	}
-	if header == "false" {
+	run, _, reserve, keep := DecideHeadroom(global, model, vk, header)
+	if !run {
 		return false, 0, 0
 	}
-	// Priority: vk > model > global
-	if vk != nil {
-		if vk.Headroom {
-			reserve := vk.HeadroomReserve
-			keep := vk.HeadroomKeep
-			if reserve == 0 {
-				reserve = DefaultHeadroomReserve
-			}
-			if keep == 0 {
-				keep = DefaultHeadroomKeep
-			}
-			return true, reserve, keep
-		}
-		// if vk explicitly disabled but global enabled, vk nil means inherit; but if vk present and Headroom false, we fall through to check model/global
-		// To allow per-vk disable, we need to check if vk was set explicitly — we treat non-nil with Headroom false as disabled only if vk was intended to override.
-		// For now, if vk exists and Headroom false, we don't auto-enable from global; header already handled.
-		// We continue to check model/global only if vk.Headroom false and we want inheritance — so we don't return false here.
-	}
-	if model != nil && model.Headroom {
-		reserve := model.HeadroomReserve
-		keep := model.HeadroomKeep
-		if reserve == 0 {
-			reserve = DefaultHeadroomReserve
-		}
-		if keep == 0 {
-			keep = DefaultHeadroomKeep
-		}
-		return true, reserve, keep
-	}
-	if global != nil && global.Headroom {
-		reserve := global.HeadroomReserve
-		keep := global.HeadroomKeep
-		if reserve == 0 {
-			reserve = DefaultHeadroomReserve
-		}
-		if keep == 0 {
-			keep = DefaultHeadroomKeep
-		}
-		return true, reserve, keep
-	}
-	return false, 0, 0
+	return true, reserve, keep
 }

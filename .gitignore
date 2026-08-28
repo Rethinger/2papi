@@ -24,3 +24,6 @@ compose.override.yaml
 Thumbs.db
 .DS_Store
 %APPDATA%/
+
+# local scratch (never push)
+.enola/

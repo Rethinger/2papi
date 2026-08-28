@@ -116,3 +116,21 @@ test('declarative snapshot carries optimization flags from system settings', asy
   const enabled = await compileDeclarativeSnapshot(mockClient({ optimization: { rtk_compression: true, caveman: true, headroom: true, headroom_reserve: 80000, headroom_keep: 4 } }).client);
   assert.deepEqual(enabled.snapshot.optimization, { rtk_compression: true, caveman: true, headroom: true, headroom_reserve: 80000, headroom_keep: 4 });
 });
+
+test('snapshot carries mode presets and squoze; omits unset modes', async () => {
+  const withModes = await compileDeclarativeSnapshot(mockClient({
+    optimization: { rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8, rtk_mode: 'auto', caveman_mode: 'full', headroom_profile: 'aggressive' },
+  }).client);
+  assert.deepEqual(withModes.snapshot.optimization, {
+    rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8,
+    rtk_mode: 'auto', caveman_mode: 'full', headroom_profile: 'aggressive',
+  });
+
+  const squoze = await compileDeclarativeSnapshot(mockClient({
+    optimization: { rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8, squoze: true },
+  }).client);
+  assert.deepEqual(squoze.snapshot.optimization, {
+    rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8, squoze: true,
+  });
+  assert.equal('rtk_mode' in squoze.snapshot.optimization, false);
+});

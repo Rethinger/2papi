@@ -136,9 +136,28 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
         ...(k.org_id && Number(k.org_budget_usd) > 0 ? { org: { id: k.org_id, budget_usd: Number(k.org_budget_usd) } } : {}),
       } };
     })() : {}),
-  })), models, accounts, ...(proxyPool.length > 0 ? { proxies: proxyPool } : {}), routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience, optimization: { rtk_compression: Boolean(optimization.rtk_compression), caveman: Boolean(optimization.caveman), headroom: Boolean(optimization.headroom), headroom_reserve: Number(optimization.headroom_reserve) || 120000, headroom_keep: Number(optimization.headroom_keep) || 8 }, ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}), ...(webhookValue ? { webhook: { enabled: Boolean(webhookValue.enabled), url: typeof webhookValue.url === 'string' ? webhookValue.url : '', secret: typeof webhookValue.secret === 'string' ? webhookValue.secret : '' } } : {}) };
+  })), models, accounts, ...(proxyPool.length > 0 ? { proxies: proxyPool } : {}), routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience, optimization: normalizeOptimization(optimization), ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}), ...(webhookValue ? { webhook: { enabled: Boolean(webhookValue.enabled), url: typeof webhookValue.url === 'string' ? webhookValue.url : '', secret: typeof webhookValue.secret === 'string' ? webhookValue.secret : '' } } : {}) };
   if (snapshot.virtual_keys.length === 0) throw new Error('at least one virtual key required');
   return { snapshot, checksum: sha256Canonical(snapshot), schemaVersion: 2 };
+}
+
+// normalizeOptimization emits the optimization block carried in the
+// config snapshot the gateway polls. Legacy booleans always emit (back-compat
+// with older gateways); mode presets emit only when set — an absent field on
+// the Go side resolves to "" (legacy behavior), keeping old snapshots
+// byte-compatible for unchanged configs.
+export function normalizeOptimization(o: any) {
+  return {
+    rtk_compression: Boolean(o?.rtk_compression),
+    caveman: Boolean(o?.caveman),
+    headroom: Boolean(o?.headroom),
+    headroom_reserve: Number(o?.headroom_reserve) || 120000,
+    headroom_keep: Number(o?.headroom_keep) || 8,
+    ...(typeof o?.rtk_mode === 'string' && o.rtk_mode ? { rtk_mode: o.rtk_mode } : {}),
+    ...(typeof o?.caveman_mode === 'string' && o.caveman_mode ? { caveman_mode: o.caveman_mode } : {}),
+    ...(typeof o?.headroom_profile === 'string' && o.headroom_profile ? { headroom_profile: o.headroom_profile } : {}),
+    ...(o?.squoze === true ? { squoze: true } : {}),
+  };
 }
 
 function validateFallbackChains(models: Array<{ alias: string; fallbacks?: string[] }>) {

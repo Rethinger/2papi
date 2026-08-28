@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { z } from 'zod';
 import { pool, tx } from '@/lib/db';
 import { ok, problem, ApiError } from '@/lib/api';
 import { publishConfigVersion } from '@/lib/redis';
@@ -7,6 +8,8 @@ import {
   AccountSchema,
   ModelPatchSchema,
   ModelSchema,
+  OrganizationPatchSchema,
+  OrganizationSchema,
   ProviderPatchSchema,
   ProviderSchema,
   RoutingSchema,
@@ -20,6 +23,10 @@ import {
   publishLatest,
   storeDraft,
 } from '@/lib/control';
+import { activeEdition, requireFeature, requireOperator } from '@/lib/edition';
+import { assertIpacl, parseCidrs } from '@/lib/ipacl';
+import { getOidcStatus, saveOidcSettings } from '@/lib/sso-routes';
+import { McpServerSchema, McpServerPatchSchema } from '@/lib/control';
 import { sha256Canonical } from '@/lib/canonical-json';
 import { deleteAccountResource, deleteProviderResource } from '@/lib/resource-deletion';
 import { deleteModelRoute, updateProviderModelStrategy } from '@/lib/model-routes';
@@ -58,6 +65,8 @@ async function draftAfter(client: any, action: string, typ: string, id?: string,
 
 export async function GET(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0];
     if (r === 'overview') {
       const [q, metrics] = await Promise.all([
@@ -65,6 +74,29 @@ export async function GET(req: Request, ctx: Ctx) {
         requestMetrics(pool),
       ]);
       return ok({ ...q.rows[0], requests_24h: metrics.requests, success_rate_24h: metrics.success_rate, p95_latency_ms_24h: metrics.p95_latency_ms, tokens_24h: metrics.total_tokens });
+    }
+    // audit-export: NDJSON stream of audit_events (operator tooling).
+    // Enterprise feature (SIEM shipping) — sleeps in OSS like the rest of
+    // the license-gated surface; dashboard's audit-events view stays open.
+    if (r === 'audit-export') {
+      requireFeature('audit_export');
+      const url = new URL(req.url);
+      const params: unknown[] = [];
+      let where = 'TRUE';
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      if (from) { params.push(from); where += ` AND created_at >= $${params.length}`; }
+      if (to) { params.push(to); where += ` AND created_at <= $${params.length}`; }
+      const res = await pool.query(
+        `SELECT id, actor, action, resource_type, resource_id, payload, created_at
+           FROM audit_events WHERE ${where} ORDER BY id ASC LIMIT 10000`,
+        params,
+      );
+      const body = res.rows.map(row => JSON.stringify(row)).join('\n');
+      return new Response(body ? body + '\n' : '', {
+        status: 200,
+        headers: { 'content-type': 'application/x-ndjson; charset=utf-8' },
+      });
     }
     if (r === 'request-events') {
       const requested = Number(new URL(req.url).searchParams.get('limit') ?? 100);
@@ -113,7 +145,7 @@ export async function GET(req: Request, ctx: Ctx) {
           lockout_failures: Number(row.resilience?.lockout_failures ?? 10),
           lockout_duration: row.resilience?.lockout_duration ?? '15m',
         },
-        optimization: { rtk_compression: Boolean(optimizationRow?.value?.rtk_compression), caveman: Boolean(optimizationRow?.value?.caveman), headroom: Boolean(optimizationRow?.value?.headroom), headroom_reserve: Number(optimizationRow?.value?.headroom_reserve) || 120000, headroom_keep: Number(optimizationRow?.value?.headroom_keep) || 8 },
+        optimization: { rtk_compression: Boolean(optimizationRow?.value?.rtk_compression), caveman: Boolean(optimizationRow?.value?.caveman), headroom: Boolean(optimizationRow?.value?.headroom), headroom_reserve: Number(optimizationRow?.value?.headroom_reserve) || 120000, headroom_keep: Number(optimizationRow?.value?.headroom_keep) || 8, ...(optimizationRow?.value?.rtk_mode ? { rtk_mode: String(optimizationRow.value.rtk_mode) } : {}), ...(optimizationRow?.value?.caveman_mode ? { caveman_mode: String(optimizationRow.value.caveman_mode) } : {}), ...(optimizationRow?.value?.headroom_profile ? { headroom_profile: String(optimizationRow.value.headroom_profile) } : {}), ...(optimizationRow?.value?.squoze === true ? { squoze: true } : {}) },
       });
     }
     if (r === 'virtual-keys') return ok((await pool.query(`SELECT vk.id,vk.name,vk.key_prefix,vk.enabled,vk.models,vk.rpm,vk.tpm,vk.max_concurrency,vk.budget_usd,vk.team_id,t.name team_name,vk.created_at,vk.last_used_at,
@@ -128,8 +160,41 @@ export async function GET(req: Request, ctx: Ctx) {
       LEFT JOIN virtual_keys vk ON vk.team_id=t.id AND vk.enabled
       LEFT JOIN key_spend_daily ksd ON ksd.virtual_key_id=vk.id
       GROUP BY t.id ORDER BY t.name`)).rows.map(row => ({ ...row, budget_usd: Number(row.budget_usd), spend_today: Number(row.spend_today), share_usd: Number(row.key_count) > 0 && Number(row.budget_usd) > 0 ? Math.round(Number(row.budget_usd) / Number(row.key_count) * 1e6) / 1e6 : 0 })));
-    if (r === 'settings') return ok((await pool.query('SELECT * FROM system_settings ORDER BY key')).rows);
-    if (r === 'proxy-pool') {
+    if (r === 'organizations') { requireFeature('orgs'); return ok((await pool.query(`SELECT o.*, count(t.id)::int team_count,
+        COALESCE(sum(t.budget_usd) FILTER (WHERE t.budget_usd > 0),0) team_budget_sum
+      FROM organizations o
+      LEFT JOIN teams t ON t.org_id=o.id
+      GROUP BY o.id ORDER BY o.name`)).rows.map(row => ({ ...row, budget_usd: Number(row.budget_usd), team_budget_sum: Number(row.team_budget_sum), budget_remaining_usd: Number(row.budget_usd) > 0 ? Math.max(Number(row.budget_usd) - Number(row.team_budget_sum), 0) : 0 }))); }
+    if (r === 'mcp-servers') return ok((await pool.query(`SELECT m.id, m.name, m.url, m.enabled, m.created_at, m.updated_at,
+        (m.headers_secret_id IS NOT NULL) headers_set
+      FROM mcp_servers m ORDER BY m.name`)).rows);
+    if (r === 'billing') {
+      const balances = (await pool.query(`
+        SELECT t.id, t.name, t.balance_usd, t.budget_usd, t.enabled,
+               count(ct.id)::int tx_count,
+               COALESCE(SUM(ct.delta_usd) FILTER (WHERE ct.delta_usd > 0), 0) credited_usd,
+               COALESCE(-SUM(ct.delta_usd) FILTER (WHERE ct.delta_usd < 0), 0) debited_usd
+        FROM teams t LEFT JOIN credit_transactions ct ON ct.team_id = t.id
+        GROUP BY t.id ORDER BY t.name`)).rows.map(row => ({
+          ...row,
+          balance_usd: Number(row.balance_usd),
+          budget_usd: Number(row.budget_usd),
+          credited_usd: Number(row.credited_usd),
+          debited_usd: Number(row.debited_usd),
+        }));
+      const transactions = (await pool.query(`
+        SELECT ct.id, ct.team_id, t.name team_name, ct.delta_usd, ct.kind, ct.source, ct.external_id, ct.note, ct.created_at
+        FROM credit_transactions ct JOIN teams t ON t.id = ct.team_id
+        ORDER BY ct.created_at DESC LIMIT 50`)).rows;
+      return ok({
+        checkout_url: process.env.PADDLE_CHECKOUT_URL ?? '',
+        configured: Boolean(process.env.PADDLE_WEBHOOK_SECRET),
+        balances,
+        transactions,
+      });
+    }
+    if (r === 'oidc') { requireFeature('sso'); return ok(await getOidcStatus(pool)); }
+    if (r === 'settings') return ok((await pool.query('SELECT * FROM system_settings ORDER BY key')).rows);    if (r === 'proxy-pool') {
       const row = (await pool.query(`SELECT value FROM system_settings WHERE key='proxy_pool'`)).rows[0];
       return ok({ raw: typeof row?.value?.raw === 'string' ? row.value.raw : '' });
     }
@@ -149,6 +214,10 @@ export async function GET(req: Request, ctx: Ctx) {
       const row = (await pool.query(`SELECT value FROM system_settings WHERE key='webhook'`)).rows[0];
       return ok({ enabled: Boolean(row?.value?.enabled), url: typeof row?.value?.url === 'string' ? row.value.url : '', secret: typeof row?.value?.secret === 'string' ? row.value.secret : '' });
     }
+    if (r === 'ipacl') {
+      const row = (await pool.query(`SELECT value FROM system_settings WHERE key='ipacl'`)).rows[0];
+      return ok({ cidrs: Array.isArray(row?.value?.cidrs) ? row.value.cidrs : [] });
+    }
     if (r === 'audit-events') return ok((await pool.query('SELECT * FROM audit_events ORDER BY id DESC LIMIT 200')).rows);
     if (r === 'config-versions') return ok((await pool.query('SELECT version,status,checksum,errors,published_at,created_at,source_version FROM config_versions ORDER BY version DESC LIMIT 100')).rows);
     throw new ApiError(404, 'not_found', `Unknown resource ${r}`);
@@ -157,13 +226,51 @@ export async function GET(req: Request, ctx: Ctx) {
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const body = await json(req);
     if (r === 'providers') return ok(await tx(async c => { const v = ProviderSchema.parse(body); const q = await c.query('INSERT INTO providers (slug,name,adapter,base_url,enabled,metadata) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [v.slug,v.name,v.adapter,v.base_url,v.enabled,JSON.stringify(v.metadata)]); await draftAfter(c,'create','provider',q.rows[0].id,v); return q.rows[0]; }), 201);
     if (r === 'accounts') return ok(await tx(async c => { const v = AccountSchema.parse(body); const sid = v.credential ? await insertSecret(c, 'account_credential', v.credential) : null; const metadata = { ...v.metadata, ...(v.proxy !== undefined ? { proxy: v.proxy } : {}) }; const q = await c.query('INSERT INTO accounts (provider_id,secret_record_id,name,display_name,base_url,enabled,priority,weight,max_concurrency,cost,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *', [v.provider_id,sid,v.name,v.display_name,v.base_url,v.enabled,v.priority,v.weight,v.max_concurrency,v.cost,JSON.stringify(metadata)]); await draftAfter(c,'create','account',q.rows[0].id,{...v,credential: v.credential ? '[redacted]' : undefined, proxy: v.proxy ? '[redacted]' : undefined}); return q.rows[0]; }), 201);
     if (r === 'models') return ok(await tx(async c => { const v = ModelSchema.parse(body); const q = await c.query('INSERT INTO model_aliases (alias,upstream_model,provider_id,routing_strategy,enabled,fallbacks) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [v.alias,v.upstream_model,v.provider_id ?? null,v.routing_strategy,v.enabled,v.fallbacks ?? []]); await c.query('INSERT INTO model_pricing (model_alias_id,input_per_mtok,output_per_mtok) VALUES ($1,$2,$3)', [q.rows[0].id,v.input_per_mtok ?? 0,v.output_per_mtok ?? 0]); if ('accounts' in v && v.accounts) for (let i=0;i<v.accounts.length;i++) await c.query('INSERT INTO model_account_mappings (model_alias_id,account_id,position) VALUES ($1,$2,$3)', [q.rows[0].id,v.accounts[i],i]); await draftAfter(c,'create','model_alias',q.rows[0].id,v); return q.rows[0]; }), 201);
-    if (r === 'routing') return ok(await tx(async c => { const v = RoutingSchema.parse(body); const q = await c.query('INSERT INTO routing_settings (id,strategy,sticky_ttl,max_attempts,resilience) VALUES (true,$1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET strategy=EXCLUDED.strategy, sticky_ttl=EXCLUDED.sticky_ttl, max_attempts=EXCLUDED.max_attempts, resilience=EXCLUDED.resilience RETURNING *', [v.strategy,v.sticky_ttl,v.max_attempts,JSON.stringify(v.resilience)]); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('optimization',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify({ rtk_compression: v.optimization.rtk_compression, caveman: v.optimization.caveman, headroom: v.optimization.headroom, headroom_reserve: v.optimization.headroom_reserve, headroom_keep: v.optimization.headroom_keep })]); await draftAfter(c,'update','routing_settings','singleton',v); return q.rows[0]; }));
-    if (r === 'teams') return ok(await tx(async c => { const v = TeamSchema.parse(body); const q = await c.query('INSERT INTO teams (name,enabled,budget_usd) VALUES ($1,$2,$3) RETURNING *', [v.name,v.enabled,v.budget_usd]); await draftAfter(c,'create','team',q.rows[0].id,v); return q.rows[0]; }), 201);
+    if (r === 'routing') return ok(await tx(async c => { const v = RoutingSchema.parse(body); const q = await c.query('INSERT INTO routing_settings (id,strategy,sticky_ttl,max_attempts,resilience) VALUES (true,$1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET strategy=EXCLUDED.strategy, sticky_ttl=EXCLUDED.sticky_ttl, max_attempts=EXCLUDED.max_attempts, resilience=EXCLUDED.resilience RETURNING *', [v.strategy,v.sticky_ttl,v.max_attempts,JSON.stringify(v.resilience)]); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('optimization',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify({ rtk_compression: v.optimization.rtk_compression, caveman: v.optimization.caveman, headroom: v.optimization.headroom, headroom_reserve: v.optimization.headroom_reserve, headroom_keep: v.optimization.headroom_keep, ...(v.optimization.rtk_mode ? { rtk_mode: v.optimization.rtk_mode } : {}), ...(v.optimization.caveman_mode ? { caveman_mode: v.optimization.caveman_mode } : {}), ...(v.optimization.headroom_profile ? { headroom_profile: v.optimization.headroom_profile } : {}), ...(v.optimization.squoze === true ? { squoze: true } : {}) })]); await draftAfter(c,'update','routing_settings','singleton',v); return q.rows[0]; }));
+    if (r === 'organizations') return ok(await tx(async c => { requireFeature('orgs'); const v = OrganizationSchema.parse(body); let q; try { q = await c.query('INSERT INTO organizations (name,owner_user_id,budget_usd) VALUES ($1,$2,$3) RETURNING *', [v.name, v.owner_user_id ?? null, v.budget_usd]); } catch (e: any) { if (e?.code === '23505') throw new ApiError(409, 'organization_exists', 'An organization with this name already exists'); throw e; } await draftAfter(c,'create','organization',q.rows[0].id,v); return q.rows[0]; }), 201);
+    if (r === 'teams') return ok(await tx(async c => { const v = TeamSchema.parse(body); const hasOrg = Object.prototype.hasOwnProperty.call(v, 'org_id'); const q = await c.query(`INSERT INTO teams (name,enabled,budget_usd${hasOrg ? ',org_id' : ''}) VALUES ($1,$2,$3${hasOrg ? ',$4' : ''}) RETURNING *`, [v.name,v.enabled,v.budget_usd,...(hasOrg ? [v.org_id ?? null] : [])]); await draftAfter(c,'create','team',q.rows[0].id,v); return q.rows[0]; }), 201);
+    if (r === 'mcp-servers') return ok(await tx(async c => {
+      const v = McpServerSchema.parse(body);
+      const headersId = Object.keys(v.headers).length > 0 ? await insertSecret(c, 'mcp_headers', v.headers) : null;
+      let q;
+      try {
+        q = await c.query('INSERT INTO mcp_servers (name,url,enabled,headers_secret_id) VALUES ($1,$2,$3,$4) RETURNING id,name,url,enabled', [v.name, v.url, v.enabled, headersId]);
+      } catch (e: any) {
+        if (e?.code === '23505') throw new ApiError(409, 'mcp_server_exists', 'An MCP server with this name already exists');
+        throw e;
+      }
+      await draftAfter(c, 'create', 'mcp_server', q.rows[0].id, { ...v, headers: Object.keys(v.headers).length ? '[redacted]' : undefined });
+      return q.rows[0];
+    }), 201);
+    if (r === 'billing' && p[1] === 'adjust') return ok(await tx(async c => {
+      const teamId = z.string().uuid().parse((body as any)?.team_id);
+      const delta = z.number().finite().parse((body as any)?.delta_usd);
+      const note = z.string().max(300).parse((body as any)?.note ?? '');
+      if (!Number.isFinite(delta) || Math.abs(delta) < 1e-9 || Math.abs(delta) > 10000) {
+        throw new ApiError(422, 'invalid_amount', 'delta_usd must be a non-zero amount within ±10 000');
+      }
+      const team = await c.query('SELECT id, name, balance_usd FROM teams WHERE id=$1', [teamId]);
+      if (!team.rows[0]) throw new ApiError(404, 'not_found', 'Team not found');
+      // Money path: ledger first (source of truth), then the cached balance,
+      // then the audit trail — all in this transaction.
+      await c.query(
+        `INSERT INTO credit_transactions (team_id, delta_usd, kind, source, external_id, note)
+         VALUES ($1,$2,'adjustment','manual','', $3)`,
+        [teamId, delta, note],
+      );
+      await c.query('UPDATE teams SET balance_usd = balance_usd + $2, updated_at=now() WHERE id=$1', [teamId, delta]);
+      await audit(c, 'adjustment', 'team', teamId, { delta_usd: delta, note });
+      return { team_id: teamId, balance_usd: Number(team.rows[0].balance_usd) + delta };
+    }));
+    if (r === 'oidc') return ok(await saveOidcSettings(pool, body));
     if (r === 'webhook') return ok(await tx(async c => { const v = WebhookSchema.parse(body); await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('webhook',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify(v)]); await draftAfter(c,'update','webhook','singleton',v); return v; }));
+    if (r === 'ipacl') return ok(await tx(async c => { requireFeature('ipacl'); const v = { cidrs: parseCidrs((body as any).cidrs) }; await c.query(`INSERT INTO system_settings (key,value,updated_at) VALUES ('ipacl',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [JSON.stringify(v)]); await draftAfter(c,'update','ipacl','singleton',v); return v; }));
     if (r === 'proxy-pool') return ok(await saveProxyPool(body));
     if (r === 'import') return ok(await tx(async c => { const snapshot = isRecord(body) && 'snapshot' in body ? (body as { snapshot: unknown }).snapshot : body; const result = await importSnapshot(c, snapshot); return result; }), 201);
     if (r === 'virtual-keys') return ok(await tx(async c => { const v = VirtualKeySchema.parse(body); const plaintext = v.plaintext_key ?? `sk-cp-${crypto.randomBytes(24).toString('base64url')}`; const hash = crypto.createHmac('sha256', process.env.GATEWAY_SHARED_SECRET ?? 'dev-secret-change-me').update(plaintext).digest('hex'); const q = await c.query('INSERT INTO virtual_keys (name,key_hash,key_prefix,enabled,models,rpm,tpm,max_concurrency,budget_usd,team_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,name,key_prefix,enabled,models,rpm,tpm,max_concurrency,budget_usd,team_id,created_at', [v.name,hash,plaintext.slice(0,10),v.enabled,v.models,v.rpm,v.tpm,v.max_concurrency,v.budget_usd,v.team_id ?? null]); await draftAfter(c,'create','virtual_key',q.rows[0].id,{...v,plaintext_key:'[redacted]'}); return { ...q.rows[0], plaintext_key: plaintext }; }), 201);
@@ -175,21 +282,43 @@ export async function POST(req: Request, ctx: Ctx) {
 
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const id = p[1]; const body = await json(req);
     if (!id) throw new ApiError(400, 'missing_id', 'Resource id is required');
     if (r === 'providers') return ok(await tx(async c => { const v = ProviderPatchSchema.parse(body); const q = await c.query('UPDATE providers SET name=COALESCE($2,name), adapter=COALESCE($3,adapter), base_url=COALESCE($4,base_url), enabled=COALESCE($5,enabled), metadata=COALESCE($6,metadata), updated_at=now() WHERE id=$1 RETURNING *', [id,v.name,v.adapter,v.base_url,v.enabled,v.metadata && JSON.stringify(v.metadata)]); await draftAfter(c,'update','provider',id,v); return q.rows[0]; }));
     if (r === 'accounts') return ok(await tx(async c => { const v = AccountPatchSchema.parse(body); const sid = v.credential ? await insertSecret(c, 'account_credential', v.credential) : undefined; let metadata = v.metadata; if (v.proxy !== undefined) { const current = (await c.query('SELECT metadata FROM accounts WHERE id=$1', [id])).rows[0]; metadata = { ...(current?.metadata ?? {}), proxy: v.proxy }; } const q = await c.query('UPDATE accounts SET secret_record_id=COALESCE($2,secret_record_id), display_name=COALESCE($3,display_name), base_url=COALESCE($4,base_url), enabled=COALESCE($5,enabled), priority=COALESCE($6,priority), weight=COALESCE($7,weight), max_concurrency=COALESCE($8,max_concurrency), cost=COALESCE($9,cost), metadata=COALESCE($10,metadata), updated_at=now() WHERE id=$1 RETURNING *', [id,sid,v.display_name,v.base_url,v.enabled,v.priority,v.weight,v.max_concurrency,v.cost,metadata && JSON.stringify(metadata)]); await draftAfter(c,'update','account',id,{...v,credential:v.credential?'[redacted]':undefined, proxy: v.proxy !== undefined ? '[redacted]' : undefined}); return q.rows[0]; }));
     if (r === 'models') return ok(await tx(async c => { const v = ModelPatchSchema.parse(body); if (v.routing_strategy) return updateProviderModelStrategy(c, id, v.routing_strategy); const q = await c.query('UPDATE model_aliases SET alias=COALESCE($2,alias), upstream_model=COALESCE($3,upstream_model), enabled=COALESCE($4,enabled), fallbacks=COALESCE($5,fallbacks), updated_at=now() WHERE id=$1 RETURNING *', [id,v.alias,v.upstream_model,v.enabled,v.fallbacks]); if (!q.rows[0]) throw new ApiError(404,'not_found','Model not found'); if (v.input_per_mtok !== undefined || v.output_per_mtok !== undefined) { const current = (await c.query('SELECT input_per_mtok,output_per_mtok FROM model_pricing WHERE model_alias_id=$1', [id])).rows[0]; await c.query(`INSERT INTO model_pricing (model_alias_id,input_per_mtok,output_per_mtok) VALUES ($1,$2,$3)
 ON CONFLICT (model_alias_id) DO UPDATE SET input_per_mtok=EXCLUDED.input_per_mtok, output_per_mtok=EXCLUDED.output_per_mtok, updated_at=now()`, [id, v.input_per_mtok ?? Number(current?.input_per_mtok ?? 0), v.output_per_mtok ?? Number(current?.output_per_mtok ?? 0)]); } if (v.accounts) { await c.query('DELETE FROM model_account_mappings WHERE model_alias_id=$1', [id]); for (let i=0;i<v.accounts.length;i++) await c.query('INSERT INTO model_account_mappings (model_alias_id,account_id,position) VALUES ($1,$2,$3)', [id,v.accounts[i],i]); } await draftAfter(c,'update','model_alias',id,v); return q.rows[0]; }));
-    if (r === 'teams') return ok(await tx(async c => { const v = TeamPatchSchema.parse(body); const q = await c.query('UPDATE teams SET name=COALESCE($2,name), enabled=COALESCE($3,enabled), budget_usd=COALESCE($4,budget_usd), updated_at=now() WHERE id=$1 RETURNING *', [id,v.name,v.enabled,v.budget_usd]); if (!q.rows[0]) throw new ApiError(404,'not_found','Team not found'); await draftAfter(c,'update','team',id,v); return q.rows[0]; }));
+    if (r === 'organizations') return ok(await tx(async c => { requireFeature('orgs'); const v = OrganizationPatchSchema.parse(body); const q = await c.query('UPDATE organizations SET name=COALESCE($2,name), owner_user_id=$3, budget_usd=COALESCE($4,budget_usd), updated_at=now() WHERE id=$1 RETURNING *', [id,v.name,v.owner_user_id,v.budget_usd]); if (!q.rows[0]) throw new ApiError(404,'not_found','Organization not found'); await draftAfter(c,'update','organization',id,v); return q.rows[0]; }));
+    if (r === 'teams') return ok(await tx(async c => { const v = TeamPatchSchema.parse(body); const hasOrg = Object.prototype.hasOwnProperty.call(v, 'org_id'); const q = await c.query(`UPDATE teams SET name=COALESCE($2,name), enabled=COALESCE($3,enabled), budget_usd=COALESCE($4,budget_usd)${hasOrg ? ', org_id=$5' : ''}, updated_at=now() WHERE id=$1 RETURNING *`, [id,v.name,v.enabled,v.budget_usd,...(hasOrg ? [v.org_id ?? null] : [])]); if (!q.rows[0]) throw new ApiError(404,'not_found','Team not found'); await draftAfter(c,'update','team',id,v); return q.rows[0]; }));
+    if (r === 'mcp-servers') return ok(await tx(async c => {
+      const v = McpServerPatchSchema.parse(body);
+      const headersId = v.headers && Object.keys(v.headers).length > 0 ? await insertSecret(c, 'mcp_headers', v.headers) : undefined;
+      const q = await c.query(`UPDATE mcp_servers SET name=COALESCE($2,name), url=COALESCE($3,url), enabled=COALESCE($4,enabled),
+        headers_secret_id=COALESCE($5,headers_secret_id), updated_at=now() WHERE id=$1 RETURNING id,name,url,enabled`,
+      [id, v.name, v.url, v.enabled, headersId ?? null]);
+      if (!q.rows[0]) throw new ApiError(404, 'not_found', 'MCP server not found');
+      await draftAfter(c, 'update', 'mcp_server', id, { ...v, headers: v.headers ? '[redacted]' : undefined });
+      return q.rows[0];
+    }));
     if (r === 'virtual-keys') return ok(await tx(async c => { const v = VirtualKeyPatchSchema.parse(body); const hasTeam = Object.prototype.hasOwnProperty.call(v, 'team_id'); const q = await c.query(`UPDATE virtual_keys SET name=COALESCE($2,name), enabled=COALESCE($3,enabled), models=COALESCE($4,models), rpm=COALESCE($5,rpm), tpm=COALESCE($6,tpm), max_concurrency=COALESCE($7,max_concurrency), budget_usd=COALESCE($8,budget_usd)${hasTeam ? ', team_id=$9' : ''} WHERE id=$1 RETURNING id,name,key_prefix,enabled,models,rpm,tpm,max_concurrency,budget_usd,team_id,created_at`, [id,v.name,v.enabled,v.models,v.rpm,v.tpm,v.max_concurrency,v.budget_usd,...(hasTeam ? [v.team_id ?? null] : [])]); if (!q.rows[0]) throw new ApiError(404,'not_found','Virtual key not found'); await draftAfter(c,'update','virtual_key',id,v); return q.rows[0]; }));
     throw new ApiError(404, 'not_found', `Unknown resource ${r}`);
   } catch (e) { return problem(e); }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   try {
+    await assertIpacl(req);
+    if (activeEdition() !== 'oss') await requireOperator(req, pool);
     const p = await pathOf(ctx); const r = p[0]; const id = p[1]; if (!id) throw new ApiError(400, 'missing_id', 'Resource id is required');
+    if (r === 'mcp-servers') return ok(await tx(async c => {
+      const q = await c.query('DELETE FROM mcp_servers WHERE id=$1 RETURNING id', [id]);
+      if (!q.rows[0]) throw new ApiError(404, 'not_found', 'MCP server not found');
+      await draftAfter(c, 'delete', 'mcp_server', id);
+      return q.rows[0];
+    }));
+    if (r === 'organizations') return ok(await tx(async c => { requireFeature('orgs'); const q = await c.query('DELETE FROM organizations WHERE id=$1 RETURNING id', [id]); if (!q.rows[0]) throw new ApiError(404,'not_found','Organization not found'); await draftAfter(c,'delete','organization',id); return q.rows[0]; }));
     if (r === 'accounts') return ok(await tx(async c => { const result = await deleteAccountResource(c, id); await draftAfter(c, 'delete', 'account', id); return result; }));
     if (r === 'providers') return ok(await tx(async c => { const result = await deleteProviderResource(c, id); await draftAfter(c, 'delete', 'provider', id, { deleted_accounts: result.deleted_accounts }); return result; }));
     if (r === 'models') return ok(await tx(c => deleteModelRoute(c, id)));

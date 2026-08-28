@@ -18,6 +18,11 @@ const EnvSchema = z.object({
   MIN_ACTIVE_GATEWAYS: z.coerce.number().int().nonnegative().default(1),
   GATEWAY_INTERNAL_URL: z.string().url().default('http://127.0.0.1:8081'),
   ALLOW_PRIVATE_UPSTREAMS: boolish,
+  DASHBOARD_PUBLIC_URL: z.string().url().optional(),
+  SESSION_TTL_DAYS: z.coerce.number().positive().optional(),
+  SIGNUP_BONUS_USD: z.coerce.number().min(0).max(10).default(2),
+  VERIFICATION_TOKEN_TTL_HOURS: z.coerce.number().positive().default(24),
+  PADDLE_WEBHOOK_SECRET: z.string().optional(),
 });
 
 const parsedEnv = EnvSchema.parse(process.env);

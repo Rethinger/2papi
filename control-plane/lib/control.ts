@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type { PoolClient } from 'pg';
-import { decryptSecretJson, encryptSecretJson, type EncryptedSecretRecord } from './crypto';
-import { compileDeclarativeSnapshot, credentialDigestForDeclarative, materializeLegacyRuntimeSnapshot, materializeRuntimeSnapshot } from './snapshots';
+import { decryptSecretJson, encryptSecretJson, type EncryptedSecretRecord } from './crypto';import { compileDeclarativeSnapshot, credentialDigestForDeclarative, materializeLegacyRuntimeSnapshot, materializeRuntimeSnapshot } from './snapshots';
 import { sha256Canonical } from './canonical-json';
 import { env } from './env';
 import { ApiError } from './api';
 import { parseProxyList } from './proxylib';
+import type { Queryable } from './db';
 
 // SSRF guard: upstream endpoints must be public http(s). IP literals in
 // private/loopback/link-local ranges are rejected unless
@@ -83,11 +83,39 @@ const ProviderModelSchema = ModelBaseSchema.extend({
   accounts: z.never().optional(),
 });
 export const ModelSchema = z.union([ProviderModelSchema, ManualModelSchema]);
-export const RoutingSchema = z.object({ strategy: z.enum(['balanced','priority','weighted','p2c','least_used','lkgp','reset_aware','fastest','cheapest','quota_drain','adaptive']).default('balanced'), sticky_ttl: z.string().default('1h'), max_attempts: z.number().int().positive().default(2), resilience: z.object({ cooldown: z.string().default('30s'), circuit_failures: z.number().int().positive().default(3), circuit_reset: z.string().default('1m'), lockout_failures: z.number().int().nonnegative().default(10), lockout_duration: z.string().default('15m') }).default({ cooldown: '30s', circuit_failures: 3, circuit_reset: '1m', lockout_failures: 10, lockout_duration: '15m' }), optimization: z.object({ rtk_compression: z.boolean().default(false), caveman: z.boolean().default(false), headroom: z.boolean().default(false), headroom_reserve: z.number().int().positive().default(120000), headroom_keep: z.number().int().positive().default(8) }).default({ rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8 }) });
+export const RoutingSchema = z.object({ strategy: z.enum(['balanced','priority','weighted','p2c','least_used','lkgp','reset_aware','fastest','cheapest','quota_drain','adaptive']).default('balanced'), sticky_ttl: z.string().default('1h'), max_attempts: z.number().int().positive().default(2), resilience: z.object({ cooldown: z.string().default('30s'), circuit_failures: z.number().int().positive().default(3), circuit_reset: z.string().default('1m'), lockout_failures: z.number().int().nonnegative().default(10), lockout_duration: z.string().default('15m') }).default({ cooldown: '30s', circuit_failures: 3, circuit_reset: '1m', lockout_failures: 10, lockout_duration: '15m' }), optimization: z.object({ rtk_compression: z.boolean().default(false), caveman: z.boolean().default(false), headroom: z.boolean().default(false), headroom_reserve: z.number().int().positive().default(120000), headroom_keep: z.number().int().positive().default(8), // Mode presets (vitok 4): omitted = legacy behavior ("" on the Go
+  // side resolves to standard/full/balanced); 'auto' = per-request heuristics.
+  rtk_mode: z.enum(['light', 'standard', 'aggressive', 'auto']).optional(), caveman_mode: z.enum(['lite', 'full', 'auto']).optional(), headroom_profile: z.enum(['conservative', 'balanced', 'aggressive', 'auto']).optional(), // squoze is EXCLUSIVE: it replaces rtk/caveman/headroom entirely.
+  squoze: z.boolean().optional() }).default({ rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8 }).superRefine((o, ctx) => {
+  if (o.squoze && (o.rtk_mode || o.caveman_mode || o.headroom_profile || o.rtk_compression || o.caveman || o.headroom)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'squoze mode is exclusive and cannot be combined with: rtk,caveman,headroom' });
+  }
+}) });
 export const VirtualKeySchema = z.object({ name: z.string().min(1), plaintext_key: z.string().min(8).optional(), enabled: z.boolean().default(true), models: z.array(z.string()).default([]), rpm: z.number().int().positive().default(60), tpm: z.number().int().nonnegative().default(0), max_concurrency: z.number().int().nonnegative().default(0), budget_usd: z.number().nonnegative().default(0), team_id: z.string().uuid().optional().nullable() });
-export const TeamSchema = z.object({ name: z.string().min(1), enabled: z.boolean().default(true), budget_usd: z.number().nonnegative().default(0) });
+export const TeamSchema = z.object({ name: z.string().min(1), enabled: z.boolean().default(true), budget_usd: z.number().nonnegative().default(0), org_id: z.string().uuid().optional().nullable() });
 export const WebhookSchema = z.object({ enabled: z.boolean().default(false), url: z.string().url().or(z.literal('')).default(''), secret: z.string().default('') });
-export const TeamPatchSchema = z.object({ name: z.string().min(1).optional(), enabled: z.boolean().optional(), budget_usd: z.number().nonnegative().optional() });
+export const TeamPatchSchema = z.object({ name: z.string().min(1).optional(), enabled: z.boolean().optional(), budget_usd: z.number().nonnegative().optional(), org_id: z.string().uuid().nullable().optional() });
+
+// Enterprise (migration 015/016): organizations above teams; org budget
+// caps every team budget under it (see internal/policy + snapshots).
+export const OrganizationSchema = z.object({ name: z.string().min(1), owner_user_id: z.string().uuid().optional().nullable(), budget_usd: z.number().nonnegative().default(0) });
+export const OrganizationPatchSchema = z.object({ name: z.string().min(1).optional(), owner_user_id: z.string().uuid().nullable().optional(), budget_usd: z.number().nonnegative().optional() });
+
+// MCP gateway servers (OSS; file config is the other source — this is the
+// dashboard path). Headers carry upstream credentials and are stored
+// encrypted via secret_records.
+export const McpServerSchema = z.object({
+  name: z.string().min(1).max(100),
+  url: httpUrl(),
+  enabled: z.boolean().default(true),
+  headers: z.record(z.string(), z.string()).default({}),
+});
+export const McpServerPatchSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  url: httpUrl().optional(),
+  enabled: z.boolean().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+});
 
 // Zod 4 applies defaults inside `.partial()`. PATCH schemas must therefore be
 // explicit: omitted properties have to remain omitted or a narrow update can
@@ -142,7 +170,7 @@ export async function insertSecret(client: PoolClient, purpose: string, credenti
   return r.rows[0].id as string;
 }
 
-export async function audit(client: PoolClient, action: string, resourceType: string, resourceId?: string, payload: unknown = {}) {
+export async function audit(client: Queryable, action: string, resourceType: string, resourceId?: string, payload: unknown = {}) {
   await client.query('INSERT INTO audit_events (action, resource_type, resource_id, payload) VALUES ($1,$2,$3,$4)', [action, resourceType, resourceId ?? null, JSON.stringify(payload)]);
 }
 

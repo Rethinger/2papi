@@ -25,17 +25,37 @@ jobs:
   control-plane-test:
     name: Control-plane tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: papi_control_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/papi_control_test
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/papi_control_test
+      ALLOW_PRIVATE_UPSTREAMS: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: control-plane/package-lock.json
       - name: Install
         working-directory: control-plane
-        run: npm ci 2>/dev/null || npm install
-      - name: Unit tests (skip integration w/o DB)
+        run: npm ci
+      - name: Full test suite
         working-directory: control-plane
-        run: node --import tsx --test --test-concurrency=1 tests/account-form.test.ts tests/canonical-json.test.ts tests/claude-oauth.test.ts tests/codex-auth.test.ts tests/codex-auth-routes.test.ts tests/codex-ui.test.ts tests/encryption.test.ts tests/i18n.test.ts tests/internal-auth.test.ts tests/migration-atomicity.test.ts tests/model-card.test.ts tests/model-metadata.test.ts tests/proxylib.test.ts tests/quota.test.ts tests/snapshot.test.ts tests/validation.test.ts tests/view-router.test.ts
+        run: npm test
 
   docker:
     name: Docker build

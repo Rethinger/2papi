@@ -27,7 +27,13 @@ async function seedBase(c: any) {
 test.before(async () => {
   if (!url) return;
   await pool!.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE; CREATE SCHEMA ${schema};`);
-  await pool!.query((await sql('001_schema.sql')).replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
+  // Full forward migration set inside an isolated schema: compile paths
+  // (storeDraft) require every table the current snapshot compiler joins.
+  const dir = path.join(process.cwd(), 'migrations');
+  for (const name of (await fs.readdir(dir)).filter(name => name.endsWith('.sql')).sort()) {
+    const body = await fs.readFile(path.join(dir, name), 'utf8');
+    await pool!.query(body.replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', ''));
+  }
 });
 
 test('snapshot security migrations reconstruct history and keep snapshots credential-free', options, async () => {

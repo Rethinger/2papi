@@ -52,6 +52,14 @@ func (r *Router) Plan(modelAlias, aff string) ([]config.Account, config.Model) {
 		r.state.Release(a.Name)
 		c = append(c, a)
 	}
+	// Per-source weights (шаг 5) override account-level ordering weight
+	// within this alias — candidates are value copies, the snapshot stays
+	// untouched.
+	for i := range c {
+		if w, ok := m.WeightFor(c[i].Name); ok {
+			c[i].Weight = w
+		}
+	}
 	if len(c) == 0 {
 		return nil, m
 	}

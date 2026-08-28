@@ -614,6 +614,7 @@ func waitEvent(t *testing.T, rec *pipeCaptureRecorder) telemetry.Event {
 func TestLatencyHeaders(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
+		time.Sleep(30 * time.Millisecond) // measurable upstream wait
 		fmt.Fprint(w, "data: hi\n\n")
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -636,6 +637,12 @@ func TestLatencyHeaders(t *testing.T) {
 	}
 	if overhead < 0 || upstream < 0 {
 		t.Fatalf("negative latency headers overhead=%d upstream=%d", overhead, upstream)
+	}
+	if upstream < 25 {
+		t.Fatalf("upstream sleep should be reflected in Upstream-MS: %d", upstream)
+	}
+	if overhead >= upstream {
+		t.Fatalf("overhead must exclude upstream wait (Ferro semantics): overhead=%d upstream=%d", overhead, upstream)
 	}
 }
 

@@ -79,6 +79,37 @@ test('routing schema carries the optimization flags', () => {
   assert.equal(onlyCaveman.optimization.headroom, false);
 });
 
+test('routing schema accepts mode presets and auto, rejects garbage', () => {
+  const modes = RoutingSchema.parse({ optimization: { rtk_mode: 'auto', caveman_mode: 'lite', headroom_profile: 'conservative' } });
+  assert.equal(modes.optimization.rtk_mode, 'auto');
+  assert.equal(modes.optimization.caveman_mode, 'lite');
+  assert.equal(modes.optimization.headroom_profile, 'conservative');
+  // Defaults stay absent (legacy semantics on the gateway side).
+  assert.equal(modes.optimization.squoze, undefined);
+  const fixed = RoutingSchema.parse({ optimization: { rtk_mode: 'aggressive', caveman_mode: 'full', headroom_profile: 'balanced' } });
+  assert.equal(fixed.optimization.rtk_mode, 'aggressive');
+  assert.equal(fixed.optimization.caveman_mode, 'full');
+  assert.equal(fixed.optimization.headroom_profile, 'balanced');
+  for (const bad of [{ rtk_mode: 'turbo' }, { caveman_mode: 'loud' }, { headroom_profile: 'yolo' }]) {
+    assert.throws(() => RoutingSchema.parse({ optimization: bad }), `garbage ${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test('squoze is exclusive in routing schema', () => {
+  const solo = RoutingSchema.parse({ optimization: { squoze: true } });
+  assert.equal(solo.optimization.squoze, true);
+  for (const combo of [
+    { squoze: true, rtk_mode: 'auto' },
+    { squoze: true, caveman_mode: 'lite' },
+    { squoze: true, headroom_profile: 'balanced' },
+    { squoze: true, rtk_compression: true },
+    { squoze: true, caveman: true },
+    { squoze: true, headroom: true },
+  ]) {
+    assert.throws(() => RoutingSchema.parse({ optimization: combo }), `combo ${JSON.stringify(combo)} must be rejected`);
+  }
+});
+
 test('SSRF guard accepts public endpoints and rejects private IP literals', () => {
   for (const good of ['https://api.openai.com', 'http://fake-upstream:9001', 'https://claude.ai', 'https://8.8.8.8/v1']) {
     assert.equal(isPublicHttpUrl(good), true, `${good} should be allowed`);

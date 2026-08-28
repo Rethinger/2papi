@@ -30,7 +30,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/papi_control
       TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/papi_control_test
       REDIS_URL: redis://redis:6379
-      CONTROL_PLANE_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+      CONTROL_PLANE_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
       INTERNAL_SERVICE_TOKEN: dev-internal-service-token
       GATEWAY_SHARED_SECRET: dev-secret-change-me
       ALLOW_INSECURE_DEV_DEFAULTS: "true"
@@ -77,6 +77,28 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+
+  gateway-bench:
+    profiles: ["bench"]
+    build: .
+    command: ["-config", "/app/config/bench.yaml"]
+    environment:
+      GATEWAY_ID: gateway-bench
+      LITE_STORE_PATH: /tmp/lite-bench.json
+    volumes: ["./config/bench.yaml:/app/config/bench.yaml:ro"]
+    depends_on:
+      - fake-upstream
+
+  bench-runner:
+    profiles: ["bench"]
+    image: node:22-alpine
+    working_dir: /bench
+    volumes: ["./test:/bench"]
+    environment:
+      GATEWAY_URL: http://gateway-bench:8080
+    command: node bench.mjs
+    depends_on:
+      - gateway-bench
 
 volumes:
   papi-postgres:

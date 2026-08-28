@@ -171,3 +171,85 @@ func TestTPMWindowRefillsAndDeferredCommit(t *testing.T) {
 		t.Fatalf("150 committed tokens should exhaust the 100 TPM window: %+v", result)
 	}
 }
+
+
+func TestOrgBudgetCapsTeamBudget(t *testing.T) {
+	auth := New(testSnapshot(t))
+	org := &config.Org{ID: "org-1", BudgetUSD: 0.5}
+	team := &config.Team{ID: "team-org", BudgetUSD: 1.0, Org: org}
+	vk := config.VirtualKey{Name: "org-k1", RPM: 0, Team: team}
+
+	if result := auth.Begin(vk); !result.Allowed || result.TeamBudgetRemainingUSD != 0.5 {
+		t.Fatalf("team budget should be capped by the org budget: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0.4, true)
+	if result := auth.Begin(vk); !result.Allowed {
+		t.Fatalf("spend under the org cap should pass: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0.2, true)
+	result := auth.Begin(vk)
+	if result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("org cap must block at its own limit, not the team's: %+v", result)
+	}
+}
+
+func TestOrgBudgetBoundsUnlimitedTeam(t *testing.T) {
+	auth := New(testSnapshot(t))
+	org := &config.Org{ID: "org-2", BudgetUSD: 0.3}
+	// Team budget 0 (= unlimited): the org cap still applies.
+	team := &config.Team{ID: "team-unl", BudgetUSD: 0, Org: org}
+	vk := config.VirtualKey{Name: "unl-k1", RPM: 0, Team: team}
+
+	if result := auth.Begin(vk); !result.Allowed || result.TeamBudgetRemainingUSD != 0.3 {
+		t.Fatalf("org cap must bound an unlimited team: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0.3, true)
+	if result := auth.Begin(vk); result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("unlimited team must stop at the org cap: %+v", result)
+	}
+}
+
+func TestOrgWithoutBudgetLeavesTeamUnlimited(t *testing.T) {
+	auth := New(testSnapshot(t))
+	org := &config.Org{ID: "org-3", BudgetUSD: 0}
+	team := &config.Team{ID: "team-free", BudgetUSD: 0, Org: org}
+	vk := config.VirtualKey{Name: "free-k1", RPM: 0, Team: team}
+
+	result := auth.Begin(vk)
+	if !result.Allowed || result.TeamBudgetRemainingUSD != 0 {
+		t.Fatalf("org with no budget must not cap the team: %+v", result)
+	}
+	auth.Finalize(vk, 0, 5.0, true)
+	if result := auth.Begin(vk); !result.Allowed {
+		t.Fatalf("no budgets configured -> never blocks: %+v", result)
+	}
+}
+
+
+func TestBalanceCapsTeamBudget(t *testing.T) {
+	auth := New(testSnapshot(t))
+	// Unlimited daily budget, finite prepaid balance.
+	vk := config.VirtualKey{Name: "bal-1", RPM: 0, Team: &config.Team{ID: "t-bal", BudgetUSD: 0, BalanceUSD: 3}}
+	if result := auth.Begin(vk); !result.Allowed || result.TeamBudgetRemainingUSD != 3 {
+		t.Fatalf("balance should cap an unlimited team: %+v", result)
+	}
+	auth.Finalize(vk, 0, 2.5, true)
+	if result := auth.Begin(vk); !result.Allowed || result.TeamBudgetRemainingUSD != 0.5 {
+		t.Fatalf("under-balance spend still passes: %+v", result)
+	}
+	auth.Finalize(vk, 0, 1.0, true)
+	if result := auth.Begin(vk); result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("spend past the balance must block: %+v", result)
+	}
+
+	// Balance lower than the daily budget wins (owner formula min()).
+	vk2 := config.VirtualKey{Name: "bal-2", RPM: 0, Team: &config.Team{ID: "t-bal2", BudgetUSD: 10, BalanceUSD: 3}}
+	if result := auth.Begin(vk2); !result.Allowed || result.TeamBudgetRemainingUSD != 3 {
+		t.Fatalf("min(budget, balance) expected: %+v", result)
+	}
+	// Daily budget lower than balance stays decisive.
+	vk3 := config.VirtualKey{Name: "bal-3", RPM: 0, Team: &config.Team{ID: "t-bal3", BudgetUSD: 2, BalanceUSD: 50}}
+	if result := auth.Begin(vk3); !result.Allowed || result.TeamBudgetRemainingUSD != 2 {
+		t.Fatalf("budget below balance must stay enforced: %+v", result)
+	}
+}

@@ -37,6 +37,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
      ORDER BY ma.alias,a.priority,a.name`,
   );
   const routingR = await client.query('SELECT * FROM routing_settings WHERE id=true');
+  const mcpR = await client.query(`SELECT m.name, m.url, m.enabled FROM mcp_servers m WHERE m.enabled ORDER BY m.name`);
   const settingsR = await client.query(`SELECT key, value FROM system_settings WHERE key IN ('optimization','webhook','proxy_pool')`);
   const settingsByKey = new Map(settingsR.rows.map((row: any) => [row.key, row.value]));
   const optimization = settingsByKey.get('optimization') ?? { rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8 };
@@ -45,8 +46,11 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   const proxyPool = typeof proxyPoolValue?.raw === 'string' && proxyPoolValue.raw.trim()
     ? parseProxyList(proxyPoolValue.raw).entries.map(normalizeProxy)
     : [];
-  const keysR = await client.query(`SELECT vk.*, t.id team_id, t.budget_usd team_budget_usd
-    FROM virtual_keys vk LEFT JOIN teams t ON t.id=vk.team_id WHERE vk.enabled ORDER BY vk.name`);
+  const keysR = await client.query(`SELECT vk.*, t.id team_id, t.budget_usd team_budget_usd, t.balance_usd team_balance_usd, o.id org_id, o.budget_usd org_budget_usd
+    FROM virtual_keys vk
+    LEFT JOIN teams t ON t.id=vk.team_id
+    LEFT JOIN organizations o ON o.id=t.org_id
+    WHERE vk.enabled ORDER BY vk.name`);
   const teamKeyCountsR = await client.query(`SELECT team_id, count(*)::int key_count
     FROM virtual_keys WHERE enabled=true AND team_id IS NOT NULL GROUP BY team_id`);
   const teamKeyCounts = new Map(teamKeyCountsR.rows.map((row: any) => [row.team_id, Number(row.key_count)]));
@@ -65,6 +69,23 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   }));
   const byAlias = new Map<string, string[]>();
   for (const m of mapsR.rows) byAlias.set(m.alias, [...(byAlias.get(m.alias) ?? []), m.account_name]);
+  // sources[] (шаг 5): per-account overrides ride on the model entry only
+  // when at least one mapping actually overrides something — empty stays
+  // legacy 1:1.
+  const sourcesByAlias = new Map<string, any[]>();
+  for (const m of mapsR.rows) {
+    const hasOverride = Boolean(m.upstream_model_override) || Number(m.weight) > 0 || Number(m.input_cost_per_mtok) > 0 || Number(m.output_cost_per_mtok) > 0;
+    if (!hasOverride) continue;
+    const list = sourcesByAlias.get(m.alias) ?? [];
+    list.push({
+      account: m.account_name,
+      ...(m.upstream_model_override ? { upstream_model: m.upstream_model_override } : {}),
+      ...(Number(m.weight) > 0 ? { weight: Number(m.weight) } : {}),
+      ...(Number(m.input_cost_per_mtok) > 0 ? { input_cost_per_mtok: Number(m.input_cost_per_mtok) } : {}),
+      ...(Number(m.output_cost_per_mtok) > 0 ? { output_cost_per_mtok: Number(m.output_cost_per_mtok) } : {}),
+    });
+    sourcesByAlias.set(m.alias, list);
+  }
   const providerByAlias = new Map<string, string[]>();
   for (const m of providerPoolsR.rows) providerByAlias.set(m.alias, [...(providerByAlias.get(m.alias) ?? []), m.account_name]);
   const models = modelsR.rows.map((m: any) => {
@@ -78,8 +99,12 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
       ...(Array.isArray(m.fallbacks) && m.fallbacks.length > 0 ? { fallbacks: m.fallbacks } : {}),
       ...(Number(m.input_per_mtok) > 0 ? { input_cost_per_mtok: Number(m.input_per_mtok) } : {}),
       ...(Number(m.output_per_mtok) > 0 ? { output_cost_per_mtok: Number(m.output_per_mtok) } : {}),
+      ...(sourcesByAlias.get(m.alias)?.length ? { sources: sourcesByAlias.get(m.alias) } : {}),
     };
   });
+  // MCP servers ride declaratively WITHOUT credentials — headers are
+  // injected during runtime materialization (same split as account creds).
+  const mcpServers = mcpR.rows.map((m: any) => ({ name: m.name, url: m.url, enabled: true }));
   validateFallbackChains(models);
   const routing = routingR.rows[0] ?? { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: { cooldown: '30s', circuit_failures: 3, circuit_reset: '1m', lockout_failures: 10, lockout_duration: '15m' } };
   const resilience = {
@@ -98,13 +123,41 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
     ...(Number(k.tpm) > 0 ? { tpm: Number(k.tpm) } : {}),
     ...(Number(k.max_concurrency) > 0 ? { max_concurrency: Number(k.max_concurrency) } : {}),
     ...(Number(k.budget_usd) > 0 ? { budget_usd: Number(k.budget_usd) } : {}),
-    ...(k.team_id && Number(k.team_budget_usd) > 0 ? (() => {
+    ...(k.team_id && (Number(k.team_budget_usd) > 0 || Number(k.org_budget_usd) > 0 || Number(k.team_balance_usd) > 0) ? (() => {
       const share = Number(k.team_budget_usd) / (teamKeyCounts.get(k.team_id) ?? 1);
-      return { team: { id: k.team_id, budget_usd: Number(k.team_budget_usd), ...(share > 0 ? { share_usd: Math.round(share * 1e6) / 1e6 } : {}) } };
+      return { team: {
+        id: k.team_id,
+        budget_usd: Number(k.team_budget_usd),
+        ...(share > 0 ? { share_usd: Math.round(share * 1e6) / 1e6 } : {}),
+        // Prepaid balance (шаг 6) caps the effective team budget in policy.
+        ...(Number(k.team_balance_usd) > 0 ? { balance_usd: Number(k.team_balance_usd) } : {}),
+        // Org budget caps every team under it (enforced in internal/policy);
+        // emitted only when the org actually has one.
+        ...(k.org_id && Number(k.org_budget_usd) > 0 ? { org: { id: k.org_id, budget_usd: Number(k.org_budget_usd) } } : {}),
+      } };
     })() : {}),
-  })), models, accounts, ...(proxyPool.length > 0 ? { proxies: proxyPool } : {}), routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience, optimization: { rtk_compression: Boolean(optimization.rtk_compression), caveman: Boolean(optimization.caveman), headroom: Boolean(optimization.headroom), headroom_reserve: Number(optimization.headroom_reserve) || 120000, headroom_keep: Number(optimization.headroom_keep) || 8 }, ...(webhookValue ? { webhook: { enabled: Boolean(webhookValue.enabled), url: typeof webhookValue.url === 'string' ? webhookValue.url : '', secret: typeof webhookValue.secret === 'string' ? webhookValue.secret : '' } } : {}) };
+  })), models, accounts, ...(proxyPool.length > 0 ? { proxies: proxyPool } : {}), routing: { strategy: routing.strategy, sticky_ttl: routing.sticky_ttl, max_attempts: routing.max_attempts }, resilience, optimization: normalizeOptimization(optimization), ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}), ...(webhookValue ? { webhook: { enabled: Boolean(webhookValue.enabled), url: typeof webhookValue.url === 'string' ? webhookValue.url : '', secret: typeof webhookValue.secret === 'string' ? webhookValue.secret : '' } } : {}) };
   if (snapshot.virtual_keys.length === 0) throw new Error('at least one virtual key required');
   return { snapshot, checksum: sha256Canonical(snapshot), schemaVersion: 2 };
+}
+
+// normalizeOptimization emits the optimization block carried in the
+// config snapshot the gateway polls. Legacy booleans always emit (back-compat
+// with older gateways); mode presets emit only when set — an absent field on
+// the Go side resolves to "" (legacy behavior), keeping old snapshots
+// byte-compatible for unchanged configs.
+export function normalizeOptimization(o: any) {
+  return {
+    rtk_compression: Boolean(o?.rtk_compression),
+    caveman: Boolean(o?.caveman),
+    headroom: Boolean(o?.headroom),
+    headroom_reserve: Number(o?.headroom_reserve) || 120000,
+    headroom_keep: Number(o?.headroom_keep) || 8,
+    ...(typeof o?.rtk_mode === 'string' && o.rtk_mode ? { rtk_mode: o.rtk_mode } : {}),
+    ...(typeof o?.caveman_mode === 'string' && o.caveman_mode ? { caveman_mode: o.caveman_mode } : {}),
+    ...(typeof o?.headroom_profile === 'string' && o.headroom_profile ? { headroom_profile: o.headroom_profile } : {}),
+    ...(o?.squoze === true ? { squoze: true } : {}),
+  };
 }
 
 function validateFallbackChains(models: Array<{ alias: string; fallbacks?: string[] }>) {
@@ -142,7 +195,18 @@ export async function materializeRuntimeSnapshot(client: PoolClient, declarative
     const kind = current.credential.kind ?? (a.adapter === 'openai-codex' ? 'oauth' : 'api_key');
     return { ...a, credential_revision: current.revision, credential: { ...current.credential, kind, revision: current.revision } };
   });
-  return { ...declarative, version: 2, secret: env.GATEWAY_SHARED_SECRET, accounts };
+  // MCP headers are credentials too: decrypted only at runtime materialization.
+  const mcpRows = await client.query(`
+    SELECT m.name, m.url, m.enabled, sr.key_version, sr.data_key_nonce, sr.data_key_ciphertext, sr.data_key_tag,
+           sr.secret_nonce, sr.secret_ciphertext, sr.secret_tag
+    FROM mcp_servers m LEFT JOIN secret_records sr ON sr.id = m.headers_secret_id
+    WHERE m.enabled ORDER BY m.name`);
+  const mcp_servers = mcpRows.rows.map((row: any) => ({
+    name: row.name,
+    url: row.url,
+    ...(row.secret_nonce ? { headers: decryptSecretJson<Record<string, string>>(rowToEncrypted(row)) } : {}),
+  }));
+  return { ...declarative, version: 2, secret: env.GATEWAY_SHARED_SECRET, accounts, ...(mcp_servers.length > 0 ? { mcp_servers } : {}) };
 }
 
 export async function materializeLegacyRuntimeSnapshot(client: PoolClient, declarative: any): Promise<RuntimeSnapshot> {

@@ -35,6 +35,7 @@ import (
 	"github.com/Rethinger/2papi/internal/resilience"
 	"github.com/Rethinger/2papi/internal/router"
 	"github.com/Rethinger/2papi/internal/telemetry"
+	"github.com/Rethinger/squoze"
 )
 
 const defaultResponseBodyLimit = 16 << 20
@@ -184,50 +185,125 @@ func (p *Proxy) Moderations(w http.ResponseWriter, r *http.Request, meta protoco
 	p.Endpoint(w, r, adapter.EndpointModerations, meta, body)
 }
 
+// squozeEngine backs the experimental exclusive squoze mode. One instance
+// per process: its decision memo must persist across requests for cache
+// stability (same original bytes → same compressed bytes).
+var squozeEngine = squoze.NewEngine(squoze.DefaultMemoCapacity)
+
 func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapter.Endpoint, meta protocol.EndpointMetadata, body []byte) {
 	started := time.Now()
 
 	// 1. Optimization toggles: RTK / Caveman / Headroom — global / per-model / per-key / header (9Router parity)
-	// Effective optimization merges global → model → vk → header.
+	// Effective optimization merges global → model → vk → header; each decision
+	// also resolves a mode preset (light/standard/aggressive/.../auto). Mode
+	// "auto" is refined against the request right before execution (auto.go).
 	optVKName := telemetry.VirtualKeyFromContext(r.Context())
 	optVK := p.Snap.VirtualKeysByName[optVKName]
 	optModelCfg := p.Snap.ModelsByAlias[meta.Model]
+
+	// Experimental EXCLUSIVE mode: when squoze is enabled anywhere in the
+	// cascade (global/model/vk), it is the ONLY body optimizer for this
+	// request; rtk/caveman/headroom are skipped entirely (Build() already
+	// rejects configs that combine them).
+	var squozeActive bool
+	{
+		g, m, v := &p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization
+		if (g != nil && g.Squoze) || (m != nil && m.Squoze) || (v != nil && v.Squoze) {
+			out, res := squozeEngine.Apply(body)
+			body = out
+			squozeActive = true
+			w.Header().Set("X-Gateway-Squoze", strconv.FormatBool(res.BlocksSqueezed > 0))
+			w.Header().Set("X-Gateway-Squoze-Format", res.Format.String())
+			if res.SavedBytes > 0 {
+				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(res.SavedBytes))
+				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(res.SavedBytes/4))
+			}
+		}
+	}
+
 	// Headroom first: prune old history to reserve output tokens (saves context overflow)
-	if ok, reserve, keep := compression.ShouldHeadroom(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Headroom")); ok {
+	if run, profile, reserve, keep := compression.DecideHeadroom(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Headroom")); run && !squozeActive {
 		// header reserve override: X-Gateway-Headroom-Reserve: 4000
 		if v := r.Header.Get("X-Gateway-Headroom-Reserve"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
 				reserve = n
 			}
 		}
-		if pruned, saved, wasPruned := compression.PruneForHeadroom(body, reserve, keep); wasPruned {
-			body = pruned
-			w.Header().Set("X-Gateway-Headroom", "true")
-			w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved*4))
-			w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved))
+		if profile == compression.ModeAuto {
+			// Auto resolves against the request itself; below half the reserve
+			// it no-ops entirely — long cache-friendly epochs between prunes.
+			if ok, resolved := compression.AutoHeadroomProfile(compression.EstimateTokens(body), reserve); !ok {
+				run = false
+			} else {
+				profile = resolved
+				pp := compression.HeadroomProfileParams(resolved, 0, 0)
+				reserve, keep = pp.Reserve, pp.Keep
+			}
 		}
-	}
-
-	// RTK compression: fast-path skip if body too small (saves unmarshal)
-	rtkHeader := r.Header.Get("X-Gateway-Compress")
-	if rtkHeader == "" {
-		rtkHeader = r.Header.Get("X-Gateway-Compression")
-	}
-	if compression.ShouldRTK(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, rtkHeader) {
-		if len(body) >= 2048 { // fast path: avoid unmarshal for tiny payloads
-			if compressed, saved, wasCompressed := compression.CompressToolResults(body); wasCompressed {
-				body = compressed
-				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved))
-				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved/4))
+		if run {
+			if pruned, saved, wasPruned := compression.PruneForHeadroom(body, reserve, keep); wasPruned {
+				body = pruned
+				w.Header().Set("X-Gateway-Headroom", "true")
+				w.Header().Set("X-Gateway-Headroom-Profile", profile)
+				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved*4))
+				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved))
 			}
 		}
 	}
 
+	// RTK compression: fast-path skip if body too small (saves unmarshal).
+	rtkHeader := r.Header.Get("X-Gateway-Compress")
+	if rtkHeader == "" {
+		rtkHeader = r.Header.Get("X-Gateway-Compression")
+	}
+	if d := compression.DecideRTK(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, rtkHeader); d.Run && !squozeActive {
+		mode := d.Mode
+		if mode == "" {
+			mode = compression.ModeStandard
+		}
+		var compressed []byte
+		var saved int
+		var wasCompressed bool
+		if mode == compression.ModeAuto {
+			compressed, saved, wasCompressed = compression.CompressToolResultsAuto(body)
+			w.Header().Set("X-Gateway-RTK-Mode", "auto")
+		} else {
+			params := compression.RTKParamsFor(mode)
+			if len(body) >= params.MinBytes { // fast path: avoid unmarshal for tiny payloads
+				compressed, saved, wasCompressed = compression.CompressToolResultsWith(body, params)
+				w.Header().Set("X-Gateway-RTK-Mode", mode)
+			}
+		}
+		if wasCompressed {
+			body = compressed
+			w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved))
+			w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved/4))
+		}
+	}
+
 	// Caveman: terse system directive (skip if already injected)
-	if compression.ShouldCaveman(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Caveman")) {
-		if updated, ok, err := compression.InjectCavemanDirective(body); err == nil && ok {
+	if d := compression.DecideCaveman(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Caveman")); d.Run && !squozeActive {
+		mode := d.Mode
+		directive := compression.CavemanDirective
+		switch {
+		case mode == "" || mode == compression.ModeFull:
+			mode = compression.ModeFull
+		case mode == compression.ModeLite:
+			directive = compression.CavemanLiteDirective
+		case mode == compression.ModeAuto:
+			// Agentic traffic (tools anywhere in the body) earns the full
+			// terse directive; plain chat gets the gentler lite variant.
+			directive = compression.AutoCavemanDirective(body)
+			if directive == compression.CavemanLiteDirective {
+				mode = compression.ModeLite
+			} else {
+				mode = compression.ModeFull
+			}
+		}
+		if updated, ok, err := compression.InjectCavemanDirectiveWith(body, directive); err == nil && ok {
 			body = updated
 			w.Header().Set("X-Gateway-Caveman", "true")
+			w.Header().Set("X-Gateway-Caveman-Mode", mode)
 		}
 	}
 
@@ -362,13 +438,13 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 				p.State.ResetLockout(acct.Name)
 				p.Router.CommitAffinity(aff, acct.Name)
 				p.Router.CommitLKGP(meta.Model, acct.Name)
-				event.UpstreamModel = model.UpstreamModel
+				event.UpstreamModel = model.UpstreamFor(acct.Name)
 				event.UpstreamTTFBMS = upstreamMS
 				event.FinalStatus = status
 				event.Success = status >= 200 && status < 300
 				usage = attemptUsage
 				committed = attemptCommitted
-				succeededModel = model
+				succeededModel = model.ResolvedFor(acct.Name)
 
 				// Store in cache on success
 				if wantCache && p.Cache != nil && cacheKey != "" && len(respBytes) > 0 {
@@ -490,6 +566,9 @@ func attemptOutcome(status int, committed bool, requestErr error) string {
 }
 
 func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.Endpoint, acct config.Account, model config.Model, body []byte, attempt int, stream bool, overheadStart, attemptStart time.Time) (status int, committed bool, cool time.Duration, usage tokenUsage, respBytes []byte, upstreamMS int64) {
+	// Per-source override (шаг 5): this attempt's upstream model and pricing
+	// come from the source bound to the account, when present.
+	model = model.ResolvedFor(acct.Name)
 	ad, ok := p.Registry.Get(acct.Adapter)
 	if !ok {
 		return 0, false, p.Snap.Cooldown, tokenUsage{}, nil, 0
@@ -588,6 +667,12 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.End
 			out = protocol.NewOpenAISSEToAnthropicReader(result.Body, requested)
 			result.Header.Set("Content-Type", "text/event-stream")
 		}
+	} else if stream && model.UpstreamModel != "" && model.UpstreamModel != model.Alias {
+		// OpenAI-format streaming: normalize the upstream model id to the
+		// public alias per chunk (non-streaming is handled by the pipe path).
+		if rc, ok := out.(io.ReadCloser); ok {
+			out = protocol.NewSSEModelRewriteReader(rc, model.UpstreamModel, model.Alias)
+		}
 	}
 	if p.Snap.Server.Gzip && !stream && len(respBytes) >= 1024 && acceptsGzip(r.Header) {
 		respBytes = compressGzipBody(respBytes)
@@ -606,7 +691,13 @@ func (p *Proxy) try(w http.ResponseWriter, r *http.Request, endpoint adapter.End
 	}
 	w.Header().Set("X-Gateway-Route", acct.Name)
 	w.Header().Set("X-Gateway-Attempts", fmt.Sprint(attempt))
-	w.Header().Set("X-Gateway-Overhead-MS", strconv.FormatInt(time.Since(overheadStart).Milliseconds(), 10))
+	// Pure gateway cost = elapsed since request start minus the time the
+	// upstream spent producing response headers (Ferro-compatible semantics).
+	overhead := time.Since(overheadStart).Milliseconds() - upstreamMS
+	if overhead < 0 {
+		overhead = 0
+	}
+	w.Header().Set("X-Gateway-Overhead-MS", strconv.FormatInt(overhead, 10))
 	w.Header().Set("X-Gateway-Upstream-MS", strconv.FormatInt(upstreamMS, 10))
 	if used := proxyUse.Used(); used != "" {
 		w.Header().Set("X-Gateway-Proxy", used)

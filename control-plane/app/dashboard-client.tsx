@@ -5,6 +5,7 @@ import {
   CheckCircleFillIcon,
   CopyIcon,
   CpuIcon,
+  CreditCardIcon,
   DatabaseIcon,
   GearIcon,
   GitBranchIcon,
@@ -45,6 +46,8 @@ import { ModelDiscoveryModal } from './components/model-discovery-modal';
 import { ModelCard, type ProviderStrategy } from './components/model-card';
 import { accountDefaultsForProvider, type AccountDraft } from './account-form';
 import { pathForView, viewFromPath, type View } from './view-router';
+import { BillingView } from './billing-view';
+import { McpServersView } from './mcp-view';
 
 type RequestAttemptRow = {
   account: string;
@@ -86,6 +89,8 @@ type ResourceMap = {
   webhook: any;
   trends: any[];
   proxyPool: { raw?: string } | null;
+  billing: { checkout_url?: string; configured?: boolean; balances: any[]; transactions: any[] } | null;
+  mcpServers: any[];
 };
 
 type UiError = { detail: string; fallback: MessageKey } | null;
@@ -106,6 +111,8 @@ const emptyData: ResourceMap = {
   webhook: { enabled: false, url: '', secret: '' },
   trends: [],
   proxyPool: null,
+  billing: null,
+  mcpServers: [],
 };
 
 const nav = [
@@ -115,6 +122,8 @@ const nav = [
   ['models', 'nav.models', GitBranchIcon],
   ['keys', 'nav.keys', KeyIcon],
   ['teams', 'nav.teams', OrganizationIcon],
+  ['billing', 'nav.billing', CreditCardIcon],
+  ['mcp', 'nav.mcp', StackIcon],
   ['audit', 'nav.audit', HistoryIcon],
 ] as const satisfies ReadonlyArray<readonly [View, MessageKey, typeof HomeIcon]>;
 
@@ -310,11 +319,11 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
     if (!silent) setLoading(true);
     try {
       if (silent) {
-        const [overview, accounts, models, requests, teams] = await Promise.all(LIVE_PATHS.map(path => api(path)));
-        setData(previous => ({ ...previous, overview, accounts, models, requests, teams }));
+        const [overview, accounts, models, requests, teams, billing, mcpServers] = await Promise.all(LIVE_PATHS.map(path => api(path)).concat([api('billing'), api('mcp-servers')]));
+        setData(previous => ({ ...previous, overview, accounts, models, requests, teams, billing, mcpServers }));
         setLastUpdated(new Date());
       } else {
-        const [overview, providers, accounts, models, keys, teams, versions, audit, requests, routing, webhook, trends, proxyPool] = await Promise.all([
+        const [overview, providers, accounts, models, keys, teams, versions, audit, requests, routing, webhook, trends, proxyPool, billing, mcpServers] = await Promise.all([
           api('overview'),
           api('providers'),
           api('accounts'),
@@ -328,8 +337,10 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
           api('webhook'),
           api('request-trends?days=14'),
           api('proxy-pool'),
+          api('billing'),
+          api('mcp-servers'),
         ]);
-        setData({ overview, providers, accounts, models, keys, teams, versions, audit, requests, routing, webhook, trends, proxyPool });
+        setData({ overview, providers, accounts, models, keys, teams, versions, audit, requests, routing, webhook, trends, proxyPool, billing, mcpServers });
         setLastUpdated(new Date());
       }
     } catch (cause) {
@@ -1341,6 +1352,24 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
               {!data.teams.length && <Empty title={t('teams.emptyTitle')} body={t('teams.emptyBody')} onClick={() => setModal('team')} />}
             </div>
           </ResourcePage>
+        )}
+
+        {view === 'billing' && (
+          <BillingView
+            billing={data.billing}
+            locale={locale}
+            t={t as unknown as (key: string, vars?: Record<string, unknown>) => string}
+            onAdjusted={() => void load({ silent: true })}
+          />
+        )}
+
+        {view === 'mcp' && (
+          <McpServersView
+            mcpServers={data.mcpServers}
+            locale={locale}
+            t={t as unknown as (key: string, vars?: Record<string, unknown>) => string}
+            onDone={() => void load({ silent: true })}
+          />
         )}
 
         {view === 'audit' && (

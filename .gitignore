@@ -10,8 +10,8 @@ control-plane/tsconfig.build.tsbuildinfo
 
 # build artifacts
 bin/
-gateway
-2papi
+/gateway
+/2papi
 dist/
 *.exe
 

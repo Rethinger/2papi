@@ -2,6 +2,21 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — G3: OpenTelemetry GenAI traces (OTLP)
+
+- `internal/telemetry/otel.go`: когда задан `OTEL_EXPORTER_OTLP_ENDPOINT`
+  (или `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), каждый запрос гейтвея дублиру-
+  ется span'ом с минимальным набором GenAI-атрибутов: gen_ai.operation.name,
+  gen_ai.request/response.model, gen_ai.usage.input/output_tokens,
+  http.response.status_code + 2papi.virtual_key/gateway_id/cache.
+  `OTEL_SDK_DISABLED=true` выключает; без эндпоинта — ноль накладных расходов.
+- cmd/gateway: `attachTelemetry` во всех трёх режимах (control-plane, lite,
+  file-fallback) — оборачивает AsyncRecorder или работает standalone (spans
+  без обычной телеметрии); shutdown флашит батчер до закрытия экспортёра.
+- Зависимости: otel/sdk v1.31 (go 1.22), otlptracehttp; go.mod/go.sum.
+- Тесты: env-логика, disabled = nil-обёртка, реальная экспортная цепочка
+  через httptest-коллектор (span доходит + base-recorder форвардится).
+
 ## 2026-09-02 — G5: guardrails (PII + prompt-injection)
 
 - `internal/guardrails`: regex-PII (email/phone/card/API key) + консервативные

@@ -121,10 +121,13 @@ func main() {
 		gw := server.NewRuntimeServer(snap, st)
 		gw.Version = version
 		recorder := telemetry.NewAsyncRecorder(cp, telemetry.AsyncOptions{})
-		gw.SetTelemetry(recorder)
+		otelShutdown := attachTelemetry(gw, recorder)
 		defer func() {
 			flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
+			if err := otelShutdown(flushCtx); err != nil {
+				log.Printf("otel flush failed: %v", err)
+			}
 			if err := recorder.Close(flushCtx); err != nil {
 				log.Printf("telemetry flush failed: %v", err)
 			}
@@ -178,6 +181,7 @@ func main() {
 		st := resilience.New()
 		gw := server.NewRuntimeServer(snap, st)
 		gw.Version = version
+		attachTelemetry(gw, nil)
 		installCodexAdapter(gw, nil, newSnapshotRefreshTrigger())
 		installAnthropicAdapter(gw, nil, newSnapshotRefreshTrigger())
 		rt := gw.Runtime()
@@ -215,6 +219,7 @@ func main() {
 	st := resilience.New()
 	gw := server.NewRuntimeServer(snap, st)
 	gw.Version = version
+	attachTelemetry(gw, nil)
 	store.OnUpdate(func(newSnap *config.Snapshot) { gw.Adopt(newSnap) })
 	installCodexAdapter(gw, nil, newSnapshotRefreshTrigger())
 	installAnthropicAdapter(gw, nil, newSnapshotRefreshTrigger())
@@ -250,6 +255,24 @@ func main() {
 	if err := serveGateway(ctx, srv, internalSrv); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// attachTelemetry wires the (optional) OTel GenAI recorder in front of base
+// and installs it on the runtime server. base may be nil (lite mode: spans
+// only). Returns the OTel shutdown func (no-op when OTel is not configured).
+func attachTelemetry(gw *server.Server, base telemetry.Recorder) func(context.Context) error {
+	rec := base
+	shutdown := func(context.Context) error { return nil }
+	if orec, sd, err := telemetry.NewOTelRecorder(base, "2papi-gateway"); err != nil {
+		log.Printf("otel init failed (spans disabled): %v", err)
+	} else if orec != nil {
+		rec = orec
+		shutdown = sd
+	}
+	if rec != nil {
+		gw.SetTelemetry(rec)
+	}
+	return shutdown
 }
 
 // startMDNS advertises hostname on the given port over mDNS.

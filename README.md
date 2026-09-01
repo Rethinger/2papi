@@ -101,6 +101,7 @@ curl http://localhost:8080/v1/mcp/my-tools \
 - Virtual API keys with constant-time keyed-HMAC comparison, model allowlists, and RPM token buckets.
 - Sticky affinity from `X-Gateway-Session`, `metadata.gateway_session`, or stable user/model fallback.
 - Account cooldowns, circuit breakers, concurrency caps, and route diagnostic headers.
+- **OpenTelemetry GenAI traces** (optional): set `OTEL_EXPORTER_OTLP_ENDPOINT` and each request emits a span with `gen_ai.*` attributes (model, tokens, status). No endpoint = zero OTel code on the hot path.
 - Enterprise (license-gated): OIDC single sign-on for the dashboard, organizations above teams with org-budget caps, audit export (NDJSON). Cloud edition adds self-serve signup with email verification, a signup credit grant, and prepaid balance enforcement (`min(team budget, balance)`).
 
 ## Optimization modes (token savers)

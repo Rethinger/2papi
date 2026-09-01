@@ -20,6 +20,7 @@ func TestRuntimeSnapshotV2FixtureChecksumMatchesRawBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	raw = bytes.TrimSuffix(raw, []byte("\n"))
 	sum := sha256.Sum256(raw)
 	if got, want := hex.EncodeToString(sum[:]), string(bytes.TrimSpace(expected)); got != want {

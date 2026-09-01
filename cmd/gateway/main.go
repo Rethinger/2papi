@@ -41,6 +41,15 @@ var supportedSnapshotSchemas = []int{1, 2}
 
 const supportedEnvelopeVersion = 2
 
+// defaultHostname is the mDNS/hosts name advertised by `init`/`advert`.
+const defaultHostname = "2papi.local"
+
+// AdvertMDNS publishes the gateway over mDNS/Bonjour (used by `2papi advert`
+// and `--mdns`); the actual publisher lives in internal/mdns.
+func AdvertMDNS(hostname string, port int) (*mdns.Publisher, error) {
+	return mdns.NewPublisher(hostname, port, "2papi-gateway")
+}
+
 func main() {
 	// Subcommand: 2papi version
 	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "-version" || os.Args[1] == "--version") {
@@ -205,7 +214,7 @@ func main() {
 	snap := store.Snapshot()
 	st := resilience.New()
 	gw := server.NewRuntimeServer(snap, st)
-		gw.Version = version
+	gw.Version = version
 	store.OnUpdate(func(newSnap *config.Snapshot) { gw.Adopt(newSnap) })
 	installCodexAdapter(gw, nil, newSnapshotRefreshTrigger())
 	installAnthropicAdapter(gw, nil, newSnapshotRefreshTrigger())

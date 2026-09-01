@@ -221,89 +221,107 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 		}
 	}
 
-	// Headroom first: prune old history to reserve output tokens (saves context overflow)
-	if run, profile, reserve, keep := compression.DecideHeadroom(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Headroom")); run && !squozeActive {
-		// header reserve override: X-Gateway-Headroom-Reserve: 4000
-		if v := r.Header.Get("X-Gateway-Headroom-Reserve"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				reserve = n
-			}
-		}
-		if profile == compression.ModeAuto {
-			// Auto resolves against the request itself; below half the reserve
-			// it no-ops entirely — long cache-friendly epochs between prunes.
-			if ok, resolved := compression.AutoHeadroomProfile(compression.EstimateTokens(body), reserve); !ok {
-				run = false
-			} else {
-				profile = resolved
-				pp := compression.HeadroomProfileParams(resolved, 0, 0)
-				reserve, keep = pp.Reserve, pp.Keep
-			}
-		}
-		if run {
-			if pruned, saved, wasPruned := compression.PruneForHeadroom(body, reserve, keep); wasPruned {
-				body = pruned
-				w.Header().Set("X-Gateway-Headroom", "true")
-				w.Header().Set("X-Gateway-Headroom-Profile", profile)
-				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved*4))
-				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved))
-			}
-		}
-	}
+	// Single-pass body optimization (vitok 7/9): headroom pruning, RTK
+	// compression and caveman injection are resolved together and applied in
+	// ONE JSON parse/marshal over the request body. Squoze stays the
+	// exclusive alternative (applied above).
+	headroomProfileName := ""
+	if !squozeActive {
+		opt := compression.OptimizeOptions{}
 
-	// RTK compression: fast-path skip if body too small (saves unmarshal).
-	rtkHeader := r.Header.Get("X-Gateway-Compress")
-	if rtkHeader == "" {
-		rtkHeader = r.Header.Get("X-Gateway-Compression")
-	}
-	if d := compression.DecideRTK(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, rtkHeader); d.Run && !squozeActive {
-		mode := d.Mode
-		if mode == "" {
-			mode = compression.ModeStandard
-		}
-		var compressed []byte
-		var saved int
-		var wasCompressed bool
-		if mode == compression.ModeAuto {
-			compressed, saved, wasCompressed = compression.CompressToolResultsAuto(body)
-			w.Header().Set("X-Gateway-RTK-Mode", "auto")
-		} else {
-			params := compression.RTKParamsFor(mode)
-			if len(body) >= params.MinBytes { // fast path: avoid unmarshal for tiny payloads
-				compressed, saved, wasCompressed = compression.CompressToolResultsWith(body, params)
-				w.Header().Set("X-Gateway-RTK-Mode", mode)
+		// Headroom: prune old history to reserve output tokens.
+		if run, profile, reserve, keep := compression.DecideHeadroom(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Headroom")); run {
+			headroomProfileName = profile
+			// header reserve override: X-Gateway-Headroom-Reserve: 4000
+			if v := r.Header.Get("X-Gateway-Headroom-Reserve"); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					reserve = n
+				}
+			}
+			if profile == compression.ModeAuto {
+				// Auto resolves against the request itself; below half the
+				// reserve it no-ops entirely — long cache-friendly epochs
+				// between prunes.
+				if ok, resolved := compression.AutoHeadroomProfile(compression.EstimateTokens(body), reserve); !ok {
+					run = false
+				} else {
+					profile = resolved
+					pp := compression.HeadroomProfileParams(resolved, 0, 0)
+					reserve, keep = pp.Reserve, pp.Keep
+				}
+			}
+			if run {
+				opt.Headroom = true
+				opt.HeadroomReserve = reserve
+				opt.HeadroomKeep = keep
 			}
 		}
-		if wasCompressed {
-			body = compressed
-			w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(saved))
-			w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(saved/4))
-		}
-	}
 
-	// Caveman: terse system directive (skip if already injected)
-	if d := compression.DecideCaveman(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Caveman")); d.Run && !squozeActive {
-		mode := d.Mode
-		directive := compression.CavemanDirective
-		switch {
-		case mode == "" || mode == compression.ModeFull:
-			mode = compression.ModeFull
-		case mode == compression.ModeLite:
-			directive = compression.CavemanLiteDirective
-		case mode == compression.ModeAuto:
-			// Agentic traffic (tools anywhere in the body) earns the full
-			// terse directive; plain chat gets the gentler lite variant.
-			directive = compression.AutoCavemanDirective(body)
-			if directive == compression.CavemanLiteDirective {
-				mode = compression.ModeLite
+		// RTK compression: fast-path skip if body too small (saves unmarshal).
+		rtkHeader := r.Header.Get("X-Gateway-Compress")
+		if rtkHeader == "" {
+			rtkHeader = r.Header.Get("X-Gateway-Compression")
+		}
+		if d := compression.DecideRTK(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, rtkHeader); d.Run {
+			mode := d.Mode
+			if mode == "" {
+				mode = compression.ModeStandard
+			}
+			if mode == compression.ModeAuto {
+				opt.RTK, opt.RTKAuto = true, true
+				w.Header().Set("X-Gateway-RTK-Mode", "auto")
 			} else {
-				mode = compression.ModeFull
+				params := compression.RTKParamsFor(mode)
+				// legacy echo semantics: mode is echoed only past the
+				// min-bytes fast path
+				if len(body) >= params.MinBytes {
+					w.Header().Set("X-Gateway-RTK-Mode", mode)
+				}
+				opt.RTK = true
+				opt.RTKParams = params
 			}
 		}
-		if updated, ok, err := compression.InjectCavemanDirectiveWith(body, directive); err == nil && ok {
-			body = updated
+
+		// Caveman: terse system directive (skip if already injected)
+		if d := compression.DecideCaveman(&p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization, r.Header.Get("X-Gateway-Caveman")); d.Run {
+			mode := d.Mode
+			directive := compression.DirectiveFor(mode)
+			if mode == compression.ModeAuto {
+				// Agentic traffic (tools anywhere in the body) earns the
+				// full terse directive; plain chat gets the gentler lite
+				// variant.
+				directive = compression.AutoCavemanDirective(body)
+				if directive == compression.CavemanLiteDirective {
+					mode = compression.ModeLite
+				} else {
+					mode = compression.ModeFull
+				}
+			}
+			opt.Caveman = true
+			opt.CavemanDirective = directive
+			opt.CavemanMode = mode
+		}
+
+		out, res := compression.OptimizeRequest(body, opt)
+		if res.Changed {
+			body = out
+		}
+		// Echo headers per actual effect (legacy semantics).
+		if res.HeadroomPruned {
+			w.Header().Set("X-Gateway-Headroom", "true")
+			if headroomProfileName != "" {
+				w.Header().Set("X-Gateway-Headroom-Profile", headroomProfileName)
+			}
+			w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(res.HeadroomSavedTokens*4))
+			w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(res.HeadroomSavedTokens))
+		}
+		if res.RTKSavedBytes > 0 {
+			w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(res.RTKSavedBytes))
+			w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(res.RTKSavedBytes/4))
+		}
+		if res.CavemanInjected {
 			w.Header().Set("X-Gateway-Caveman", "true")
-			w.Header().Set("X-Gateway-Caveman-Mode", mode)
+			w.Header().Set("X-Gateway-Caveman-Mode", res.CavemanMode)
 		}
 	}
 

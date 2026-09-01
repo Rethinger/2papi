@@ -2,6 +2,22 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — Optimization single-pass pipeline (виток 7/9)
+
+- `internal/compression.OptimizeRequest` объединяет headroom-обрезку, RTK и
+  caveman в ОДИН JSON parse/marshal на тело запроса (было: 3 отдельных
+  unmarshal+marshal в proxy.Endpoint).
+- Семантика байт-в-байт прежняя (headroom → RTK → caveman; тулчейн-фолбэк
+  столбцов: голые messages проходят нетронутыми, когда трогает только
+  caveman); idempotency-маркер RTK и cache-guard-решения squoze не задеты.
+- Эхо-заголовки (X-Gateway-RTK/Caveman/Headroom-*) — по фактическому эффекту,
+  как в легаси; RTK-mode за fast-path MinBytes не эхоится (тест остаётся
+  зелёным).
+- Fix (заодно): cmd/gateway не компилировался — `RunTUI`/`RunInit`/
+  `AdvertMDNS`/`defaultHostname` были вызваны, но не определены нигде
+  (README-команды `2papi tui|init|advert`). Реализованы: TUI-меню на
+  internal/tui, init (mDNS/hosts), checksum-тест снапшота устойчив к CRLF.
+
 ## 2026-09-02 — Optimization mode presets (виток 5/9: дашборд)
 
 ### Селекты режимов в дашборде (виток 4 доведён до UI)

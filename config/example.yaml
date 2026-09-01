@@ -178,3 +178,14 @@ optimization:
   headroom: false         # Headroom: прунит старые tool_result когда контекст > reserve
   headroom_reserve: 120000
   headroom_keep: 8
+# Guardrails (G5): regex-PII + prompt-injection эвристики над запросами.
+# modes: off | log (аудит, трафик идёт) | redact (маскирует PII) | block (403 guardrail_blocked).
+# Пресеты PII включаются все разом, когда mode задан (email/phone/card/api_key можно гасить по отдельности).
+# guardrails:
+#   mode: log
+#   pii:
+#     email: true
+#     phone: true
+#     card: true
+#     api_key: true
+#   injection: true

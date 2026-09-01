@@ -28,6 +28,7 @@ import (
 	"github.com/Rethinger/2papi/internal/cache"
 	"github.com/Rethinger/2papi/internal/compression"
 	"github.com/Rethinger/2papi/internal/config"
+	"github.com/Rethinger/2papi/internal/guardrails"
 	"github.com/Rethinger/2papi/internal/plugin"
 	"github.com/Rethinger/2papi/internal/policy"
 	"github.com/Rethinger/2papi/internal/protocol"
@@ -124,6 +125,25 @@ func Error(w http.ResponseWriter, code int, msg string) {
 
 func (p *Proxy) Error(w http.ResponseWriter, code int, msg string) { Error(w, code, msg) }
 
+// guardrailsConfig adapts the config block to the guardrails package, keeping
+// zero-valued toggles unset so package-level defaults apply.
+func guardrailsConfig(gr config.GuardrailsConfig) guardrails.Config {
+	c := guardrails.Config{Mode: gr.Mode, Injection: gr.Injection != nil && *gr.Injection}
+	if gr.PII.Email != nil {
+		c.PII.Email = *gr.PII.Email
+	}
+	if gr.PII.Phone != nil {
+		c.PII.Phone = *gr.PII.Phone
+	}
+	if gr.PII.Card != nil {
+		c.PII.Card = *gr.PII.Card
+	}
+	if gr.PII.APIKey != nil {
+		c.PII.APIKey = *gr.PII.APIKey
+	}
+	return c
+}
+
 // notify delivers an alert webhook asynchronously (best-effort, signed with
 // HMAC-SHA256 when a secret is configured).
 func (p *Proxy) notify(event string, payload map[string]any) {
@@ -200,6 +220,52 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 	optVKName := telemetry.VirtualKeyFromContext(r.Context())
 	optVK := p.Snap.VirtualKeysByName[optVKName]
 	optModelCfg := p.Snap.ModelsByAlias[meta.Model]
+
+	// Guardrails (G5): PII regexes + prompt-injection heuristics on the
+	// ORIGINAL body (before squoze/optimization can hide content). Modes:
+	// log = pass + audit, redact = mask PII in user/system, block = 403.
+	if gr := guardrailsConfig(p.Snap.Guardrails); gr.Enabled() {
+		if findings := guardrails.Check(body, gr); len(findings) > 0 {
+			blocked := gr.Mode == "block"
+			if gr.Mode == "redact" {
+				if redacted, _ := guardrails.Redact(body, gr); len(redacted) > 0 {
+					body = redacted
+				}
+			}
+			outcome := "guardrail_log"
+			status := http.StatusOK
+			if blocked {
+				status = http.StatusForbidden
+				outcome = "guardrail_blocked"
+				Error(w, status, "guardrail_blocked")
+			} else if gr.Mode == "redact" {
+				outcome = "guardrail_redacted"
+			}
+			if p.Telemetry != nil {
+				p.Telemetry.Record(telemetry.Event{
+					RequestID:     r.Header.Get("X-Request-ID"),
+					OccurredAt:    started.UTC(),
+					Endpoint:      r.URL.Path,
+					PublicModel:   meta.Model,
+					VirtualKey:    telemetry.VirtualKeyFromContext(r.Context()),
+					Streaming:     meta.Stream,
+					ConfigVersion: p.ConfigVersion,
+					FinalStatus:   status,
+					Success:       !blocked,
+					Attempts: []telemetry.Attempt{{
+						Account: "guardrails",
+						Adapter: "guardrails",
+						Alias:   guardrails.KindString(findings),
+						Status:  status,
+						Outcome: outcome,
+					}},
+				})
+			}
+			if blocked {
+				return
+			}
+		}
+	}
 
 	// Experimental EXCLUSIVE mode: when squoze is enabled anywhere in the
 	// cascade (global/model/vk), it is the ONLY body optimizer for this

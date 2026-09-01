@@ -2,6 +2,21 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — G5: guardrails (PII + prompt-injection)
+
+- `internal/guardrails`: regex-PII (email/phone/card/API key) + консервативные
+  prompt-injection эвристики (полные фразы, не слова — eval на false
+  positives в guardrails_test.go).
+- `config.guardrails.mode`: `off` | `log` (аудит, трафик идёт) | `redact`
+  (маскирует PII в user/system) | `block` (403 `guardrail_blocked`);
+  `pii.*` и `injection` — опциональные тумблеры.
+- Proxy: проверка на ОРИГИНАЛЬНОМ теле (до squoze/оптимизаций); findings →
+  attempts телеметрии (outcome guardrail_blocked/redacted/log, alias = kinds).
+- Каталог ошибок: `guardrail_blocked`; example.yaml — закомментированный блок.
+- Тесты: пакет guardrails (детект фраз, no-false-positives eval, PII-редэкция,
+  структура JSON сохраняется, off = no-op) + proxy (block 403 без апстрима,
+  redact маскирует до апстрима, log пропускает).
+
 ## 2026-09-02 — G4 + виток 9: per-model exact cache + LRU
 
 - `config.Model.cache`: `off` | `exact` (пусто = наследуется, off по умолчанию).

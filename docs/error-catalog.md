@@ -13,6 +13,7 @@ legacy paths.
 | 400 | `model required` | No model in request |
 | 401 | `unauthorized` | Missing/unknown virtual key |
 | 403 | `model not allowed` | Key allowlist excludes the alias |
+| 403 | `guardrail_blocked` | Guardrails in `block` mode found PII or a prompt-injection phrase |
 | 404 | `unknown model` / `unknown mcp server` | Alias or MCP server not in snapshot |
 | 405 | `method not allowed` | Wrong verb |
 | 429 | `rate_limited` | RPM/TPM token bucket empty |

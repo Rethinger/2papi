@@ -36,6 +36,26 @@ type Config struct {
 	// MCPServers exposes upstream Model Context Protocol endpoints through
 	// the gateway (/v1/mcp/<name>) behind virtual-key auth.
 	MCPServers []McpServer `yaml:"mcp_servers,omitempty" json:"mcp_servers,omitempty"`
+	// Guardrails enables request-content checking (G5): PII regexes and
+	// prompt-injection heuristics in off|log|redact|block mode.
+	Guardrails GuardrailsConfig `yaml:"guardrails,omitempty" json:"guardrails,omitempty"`
+}
+
+// GuardrailsConfig mirrors internal/guardrails.Config.
+type GuardrailsConfig struct {
+	// Mode: "" | "off" | "log" | "redact" | "block".
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// PII toggles; empty = all PII detectors on when Mode is set.
+	PII GuardrailsPII `yaml:"pii,omitempty" json:"pii,omitempty"`
+	// Injection enables prompt-injection heuristics (zero = inherit/off).
+	Injection *bool `yaml:"injection,omitempty" json:"injection,omitempty"`
+}
+
+type GuardrailsPII struct {
+	Email  *bool `yaml:"email,omitempty" json:"email,omitempty"`
+	Phone  *bool `yaml:"phone,omitempty" json:"phone,omitempty"`
+	Card   *bool `yaml:"card,omitempty" json:"card,omitempty"`
+	APIKey *bool `yaml:"api_key,omitempty" json:"api_key,omitempty"`
 }
 
 // PluginConfig declares a gateway plugin: HTTP sidecar endpoint or in-process
@@ -562,6 +582,13 @@ func Build(c Config) (*Snapshot, error) {
 	}
 	if len(s.VirtualKeys) == 0 {
 		return nil, errors.New("at least one virtual key required")
+	}
+	if c.Guardrails.Mode != "" {
+		switch c.Guardrails.Mode {
+		case "off", "log", "redact", "block":
+		default:
+			return nil, fmt.Errorf("guardrails mode must be off|log|redact|block, got %q", c.Guardrails.Mode)
+		}
 	}
 	return s, nil
 }

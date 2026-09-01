@@ -178,7 +178,9 @@ const DATA = {
         { name: 'README Optimization-секция + полный QA (виток 6)', status: 'done',
           evidence: 'README раздел Optimization modes; go test ./... + npm test + tsc зелёные (2026-09-02)' },
         { name: 'Бенчмарки overhead по режимам (виток 8)', status: 'pending',
-          evidence: 'замеры was→became по режимам на test/bench.mjs; сейчас только общий overhead' },
+          evidence: 'замеры was→became по режимам на test/bench.mjs; нужен Docker-стенд' },
+        { name: 'Cache: per-model exact + TTL + LRU (виток 9/G4)', status: 'done',
+          evidence: 'config.Model.cache off|exact + cache_ttl; LRU-эвикция в internal/cache (540e174); governor B3 — отдельный дизайн' },
       ],
     },
     {

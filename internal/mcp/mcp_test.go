@@ -152,3 +152,138 @@ func TestBudgetAppliesToToolCalls(t *testing.T) {
 		t.Fatalf("exhausted budget must block tool calls with 429, got %d", res.Code)
 	}
 }
+
+func toolsListResponse(names ...string) []byte {
+	tools := make([]string, 0, len(names))
+	for _, n := range names {
+		tools = append(tools, `{"name":`+strings.ReplaceAll(`"`+n+`"`, "\"", `\"`)+`}`)
+	}
+	return []byte(`{"jsonrpc":"2.0","id":1,"result":{"tools":[` + strings.Join(tools, ",") + `]}}`)
+}
+
+func lastOutcome(rec *recordingRecorder) string {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.events) == 0 {
+		return ""
+	}
+	last := rec.events[len(rec.events)-1]
+	if len(last.Attempts) == 0 {
+		return ""
+	}
+	return last.Attempts[0].Outcome
+}
+
+func newPinGateway(t *testing.T, upstreamURL string, pin bool) *Gateway {
+	t.Helper()
+	snap := testSnapshot(t,
+		[]config.VirtualKey{{Name: "k1", Key: "sk-mcp-test-key"}},
+		[]config.McpServer{{Name: "tools", URL: upstreamURL, PinTools: pin}})
+	gw := &Gateway{Snapshot: func() *config.Snapshot { return snap }, Auth: policy.New(snap)}
+	return gw
+}
+
+func TestToolPinningAuditsChanges(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 3 {
+			_, _ = w.Write(toolsListResponse("gamma"))
+			return
+		}
+		_, _ = w.Write(toolsListResponse("alpha", "beta"))
+	}))
+	defer upstream.Close()
+
+	toolsList := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+	rec := &recordingRecorder{}
+	gw := newPinGateway(t, upstream.URL, false)
+	gw.Telemetry = rec
+
+	// 1. First listing pins the surface (audit mcp_tools_registered).
+	res := httptest.NewRecorder()
+	gw.Serve(res, postMCP("tools", "sk-mcp-test-key", toolsList), "tools")
+	if res.Code != http.StatusOK {
+		t.Fatalf("first listing must pass through, got %d", res.Code)
+	}
+	if got := string(res.Body.Bytes()); got != string(toolsListResponse("alpha", "beta")) {
+		t.Fatalf("first listing must forward verbatim, got %q", got)
+	}
+	if got := lastOutcome(rec); got != "mcp_tools_registered" {
+		t.Fatalf("registration outcome expected, got %q", got)
+	}
+
+	// 2. Unchanged listing — forwarded, no new audit event.
+	res = httptest.NewRecorder()
+	gw.Serve(res, postMCP("tools", "sk-mcp-test-key", toolsList), "tools")
+	if got := lastOutcome(rec); got != "" {
+		t.Fatalf("unchanged listing must not be audited, got %q", got)
+	}
+
+	// 3. Pin mode OFF: the change is detected + audited but still forwarded.
+	res = httptest.NewRecorder()
+	gw.Serve(res, postMCP("tools", "sk-mcp-test-key", toolsList), "tools")
+	if res.Code != http.StatusOK {
+		t.Fatalf("unpinned change must pass through, got %d", res.Code)
+	}
+	if got := string(res.Body.Bytes()); got != string(toolsListResponse("gamma")) {
+		t.Fatalf("unpinned change must forward verbatim, got %q", got)
+	}
+	if got := lastOutcome(rec); got != "mcp_tools_changed" {
+		t.Fatalf("changed surface must be audited, got %q", got)
+	}
+}
+
+func TestToolPinningBlocksChanges(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		switch calls {
+		case 1, 2:
+			_, _ = w.Write(toolsListResponse("alpha", "beta"))
+		default:
+			_, _ = w.Write(toolsListResponse("gamma"))
+		}
+	}))
+	defer upstream.Close()
+
+	toolsList := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+	rec := &recordingRecorder{}
+	gw := newPinGateway(t, upstream.URL, true)
+	gw.Telemetry = rec
+
+	// 1-2. Pin registers and stabilizes.
+	res := httptest.NewRecorder()
+	gw.Serve(res, postMCP("tools", "sk-mcp-test-key", toolsList), "tools")
+	if res.Code != http.StatusOK {
+		t.Fatalf("initial listing must pass, got %d", res.Code)
+	}
+	res = httptest.NewRecorder()
+	gw.Serve(res, postMCP("tools", "sk-mcp-test-key", toolsList), "tools")
+	if res.Code != http.StatusOK {
+		t.Fatalf("unchanged listing must pass, got %d", res.Code)
+	}
+
+	// 3. Rug-pull: the changed surface is BLOCKED with 409 + audit.
+	res = httptest.NewRecorder()
+	gw.Serve(res, postMCP("tools", "sk-mcp-test-key", toolsList), "tools")
+	if res.Code != http.StatusConflict {
+		t.Fatalf("pin violation must return 409, got %d", res.Code)
+	}
+	if got := lastOutcome(rec); got != "mcp_tools_blocked" {
+		t.Fatalf("blocked surface must be audited, got %q", got)
+	}
+	if !strings.Contains(res.Body.String(), "tool pinning") {
+		t.Fatalf("blocked response should explain the pin, got %q", res.Body.String())
+	}
+
+	// 4. After the block the new surface is pinned: unchanged listing passes
+	//    again (no perpetual wedge).
+	res = httptest.NewRecorder()
+	gw.Serve(res, postMCP("tools", "sk-mcp-test-key", toolsList), "tools")
+	if res.Code != http.StatusOK {
+		t.Fatalf("re-pinned surface must pass, got %d", res.Code)
+	}
+}

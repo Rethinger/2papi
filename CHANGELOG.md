@@ -2,6 +2,18 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — G2: MCP tool pinning (rug-pull detection)
+
+- `config.McpServer.pin_tools`: первый ответ `tools/list` на сервер пинится
+  (sha256 + имена инструментов); при изменении поверхности: audit-событие
+  всегда (`mcp_tools_registered`/`_changed`/`_blocked` в attempts телеметрии),
+  а при `pin_tools: true` изменённый листинг БЛОКИРУЕТСЯ (409
+  «mcp tools list changed…»). Новая поверхность принимается после блока —
+  без вечного закупа.
+- `internal/mcp`: buffering только для tools/list (остальное — passthrough
+  без буферизации); переписывание Content-Length при буферизации исключено.
+- Тесты: `TestToolPinningAuditsChanges`, `TestToolPinningBlocksChanges`.
+
 ## 2026-09-02 — G1: virtual-key budget_duration (месячное окно сброса)
 
 - `config.VirtualKey.budget_duration`: `day` (default) | `month` — окно

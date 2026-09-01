@@ -138,6 +138,11 @@ type McpServer struct {
 	URL     string            `yaml:"url" json:"url"`
 	Enabled *bool             `yaml:"enabled,omitempty" json:"enabled,omitempty"` // omitted = enabled
 	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	// PinTools (G2) enables rug-pull detection for the tool surface: the
+	// first tools/list response is pinned (hash + tool names) and any later
+	// change is BLOCKED with 409 (otherwise it is only audited). The gateway
+	// always records a telemetry outcome (mcp_tools_registered/changed/blocked).
+	PinTools bool `yaml:"pin_tools,omitempty" json:"pin_tools,omitempty"`
 }
 
 // IsEnabled reports whether the server accepts traffic; file configs may

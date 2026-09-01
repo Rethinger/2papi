@@ -349,8 +349,16 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 		}
 	}()
 
-	// 2. TTL Response Cache check (for non-streaming requests with cache opt-in)
-	wantCache := !meta.Stream && r.Header.Get("X-Gateway-Output-Format") != "anthropic" && (r.Header.Get("X-Gateway-Cache") == "true" || r.Header.Get("X-Gateway-Cache-TTL") != "")
+	// 2. TTL Response Cache check (for non-streaming requests with cache opt-in,
+	// or per-model `cache: exact` — G4)
+	wantCache := false
+	if !meta.Stream && r.Header.Get("X-Gateway-Output-Format") != "anthropic" {
+		cacheHeader := r.Header.Get("X-Gateway-Cache")
+		wantCache = cacheHeader == "true" || r.Header.Get("X-Gateway-Cache-TTL") != ""
+		if optModelCfg.Cache == "exact" && cacheHeader != "false" {
+			wantCache = true
+		}
+	}
 	var cacheKey string
 	if wantCache && p.Cache != nil {
 		cacheKey = p.Cache.KeyFor(meta.Model, body)
@@ -467,6 +475,11 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 				// Store in cache on success
 				if wantCache && p.Cache != nil && cacheKey != "" && len(respBytes) > 0 {
 					ttl := 5 * time.Minute
+					if optModelCfg.CacheTTL != "" {
+						if parsed, err := time.ParseDuration(optModelCfg.CacheTTL); err == nil && parsed > 0 {
+							ttl = parsed
+						}
+					}
 					if ttlStr := r.Header.Get("X-Gateway-Cache-TTL"); ttlStr != "" {
 						if parsed, err := time.ParseDuration(ttlStr); err == nil && parsed > 0 {
 							ttl = parsed

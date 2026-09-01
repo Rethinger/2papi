@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -26,9 +27,14 @@ type Entry struct {
 }
 
 type TTLResponseCache struct {
-	mu          sync.RWMutex
-	entries     map[string]Entry
-	maxSize     int
+	mu      sync.RWMutex
+	entries map[string]Entry
+	maxSize int
+	// lru orders entries most-recently-used → least-recently-used (front →
+	// back); lruIdx maps keys to their list elements for O(1) touch/evict.
+	// Eviction always drops the LRU entry (vitok 9: response-cache LRU).
+	lru         *list.List
+	lruIdx      map[string]*list.Element
 	exactHits   uint64
 	similarHits uint64
 	misses      uint64
@@ -44,6 +50,8 @@ func NewTTLResponseCache(maxSize int) *TTLResponseCache {
 	c := &TTLResponseCache{
 		entries: map[string]Entry{},
 		maxSize: maxSize,
+		lru:     list.New(),
+		lruIdx:  map[string]*list.Element{},
 	}
 	return c
 }
@@ -82,10 +90,19 @@ func (c *TTLResponseCache) Get(key string) (Entry, bool) {
 	if time.Now().After(entry.ExpiresAt) {
 		c.mu.Lock()
 		delete(c.entries, key)
+		if e, ok := c.lruIdx[key]; ok {
+			c.lru.Remove(e)
+			delete(c.lruIdx, key)
+		}
 		c.mu.Unlock()
 		c.noteMiss()
 		return Entry{}, false
 	}
+	c.mu.Lock()
+	if e, ok := c.lruIdx[key]; ok {
+		c.lru.MoveToFront(e)
+	}
+	c.mu.Unlock()
 	c.noteHit(false)
 	return entry, true
 }
@@ -161,14 +178,22 @@ func (c *TTLResponseCache) SetWithRequest(key string, body []byte, header map[st
 		for k, v := range c.entries {
 			if now.After(v.ExpiresAt) {
 				delete(c.entries, k)
+				if e, ok := c.lruIdx[k]; ok {
+					c.lru.Remove(e)
+					delete(c.lruIdx, k)
+				}
 			}
 		}
-		// If still full, drop oldest arbitrary entry
-		if len(c.entries) >= c.maxSize {
-			for k := range c.entries {
-				delete(c.entries, k)
+		// If still full, drop LRU entries until under capacity.
+		for len(c.entries) >= c.maxSize {
+			back := c.lru.Back()
+			if back == nil {
 				break
 			}
+			k := back.Value.(string)
+			delete(c.entries, k)
+			c.lru.Remove(back)
+			delete(c.lruIdx, k)
 		}
 	}
 
@@ -188,6 +213,11 @@ func (c *TTLResponseCache) SetWithRequest(key string, body []byte, header map[st
 		entry.PromptCacheMissTokens = cacheMiss
 	}
 	c.entries[key] = entry
+	if e, ok := c.lruIdx[key]; ok {
+		c.lru.MoveToFront(e)
+	} else {
+		c.lruIdx[key] = c.lru.PushFront(key)
+	}
 }
 
 func (c *TTLResponseCache) Size() int {
@@ -206,6 +236,8 @@ func (c *TTLResponseCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = map[string]Entry{}
+	c.lru = list.New()
+	c.lruIdx = map[string]*list.Element{}
 }
 
 // SaveToFile persists cache to disk (best-effort, for restart).
@@ -242,10 +274,13 @@ func (c *TTLResponseCache) LoadFromFile(path string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now()
+	c.lru = list.New()
+	c.lruIdx = map[string]*list.Element{}
 	for k, v := range m {
 		if now.Before(v.ExpiresAt) {
 			if len(c.entries) < c.maxSize {
 				c.entries[k] = v
+				c.lruIdx[k] = c.lru.PushFront(k)
 			}
 		}
 	}

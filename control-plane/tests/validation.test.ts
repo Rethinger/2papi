@@ -26,10 +26,14 @@ test('management schemas accept valid payloads', () => {
   assert.throws(() => VirtualKeySchema.parse({ name: 'bad', plaintext_key: 'sk-gateway-bad', budget_duration: 'week' }));
   assert.equal(VirtualKeyPatchSchema.parse({ budget_duration: 'month' }).budget_duration, 'month');
 
-  const parsedModel = ModelSchema.parse({ alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', accounts: ['00000000-0000-0000-0000-000000000000'], fallbacks: ['gpt-fallback'], input_per_mtok: 0.15, output_per_mtok: 0.60 });
+  const parsedModel = ModelSchema.parse({ alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', accounts: ['00000000-0000-0000-0000-000000000000'], fallbacks: ['gpt-fallback'], input_per_mtok: 0.15, output_per_mtok: 0.60, cache: 'exact', cache_ttl: '10m' });
   assert.deepEqual(parsedModel.fallbacks, ['gpt-fallback']);
   assert.equal(parsedModel.input_per_mtok, 0.15);
   assert.equal(parsedModel.output_per_mtok, 0.60);
+  assert.equal(parsedModel.cache, 'exact');
+  assert.equal(parsedModel.cache_ttl, '10m');
+  assert.throws(() => ModelSchema.parse({ alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', accounts: ['00000000-0000-0000-0000-000000000000'], cache: 'semantic' }));
+  assert.throws(() => ModelPatchSchema.parse({ cache_ttl: 12345 }));
 });
 
 test('account proxy field accepts any format and rejects invalid lists', () => {

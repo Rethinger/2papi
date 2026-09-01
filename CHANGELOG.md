@@ -2,6 +2,22 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — G4 + виток 9: per-model exact cache + LRU
+
+- `config.Model.cache`: `off` | `exact` (пусто = наследуется, off по умолчанию).
+  Модель с `cache: exact` кэширует non-streaming ответы БЕЗ opt-in-заголовка
+  (exact-match по канонизированному телу); `X-Gateway-Cache: false` выключает
+  даже для exact-модели; `cache_ttl` (Go duration) перебивает дефолтные 5m.
+- `internal/cache`: настоящая LRU-эвикция (container/list; front = MRU,
+  touch в Get, evict с back) вместо произвольного удаления (виток 9);
+  LoadFromFile перестраивает порядок; Clear сбрасывает и его.
+- Control-plane: миграция 020, zod (Model/Patch), CRUD моделей (INSERT/UPDATE),
+  GET через `ma.*`, эмиссия cache/cache_ttl в снапшот.
+- Тесты: proxy `TestPerModelExactCacheEnabledWithoutHeader` (MISS→HIT без
+  заголовка, bypass через `cache:false`), cache `TestLRUEvictsLeastRecentlyUsed`
+  / `TestLRUTouchOnGetKeepsHotEntry` / `TestExpiredEntriesArePurgedOnGetAndLRUDropped`,
+  validation (cache off|exact, мусор отклоняется).
+
 ## 2026-09-02 — G2: MCP tool pinning (rug-pull detection)
 
 - `config.McpServer.pin_tools`: первый ответ `tools/list` на сервер пинится

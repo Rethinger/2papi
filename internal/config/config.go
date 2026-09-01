@@ -163,6 +163,12 @@ type Model struct {
 	InputCostPerMtok  float64       `yaml:"input_cost_per_mtok,omitempty" json:"input_cost_per_mtok,omitempty"`
 	OutputCostPerMtok float64       `yaml:"output_cost_per_mtok,omitempty" json:"output_cost_per_mtok,omitempty"`
 	Optimization      *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
+	// Cache (G4) enables the per-model exact-match response cache:
+	// "" = inherit (off unless the client sends X-Gateway-Cache: true),
+	// "exact" = non-streaming responses are cached with no opt-in header.
+	// CacheTTL overrides the default 5m window (Go duration string).
+	Cache    string `yaml:"cache,omitempty" json:"cache,omitempty"`
+	CacheTTL string `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
 	// Sources (шаг 5 хребта): per-account overrides for multi-provider
 	// aliases — one public name served by different providers with their own
 	// upstream model names, weights and prices. Empty = legacy 1:1 behavior.
@@ -502,6 +508,14 @@ func Build(c Config) (*Snapshot, error) {
 		}
 		if cycleErr := modelFallbackCycle(c.Models, m.Alias, map[string]bool{}); cycleErr != "" {
 			return nil, fmt.Errorf("model fallback cycle involving %s", cycleErr)
+		}
+		if m.Cache != "" && m.Cache != "off" && m.Cache != "exact" {
+			return nil, fmt.Errorf("model %s cache must be off|exact|empty, got %q", m.Alias, m.Cache)
+		}
+		if m.CacheTTL != "" {
+			if d, err := time.ParseDuration(m.CacheTTL); err != nil || d <= 0 {
+				return nil, fmt.Errorf("model %s cache_ttl must be a positive Go duration", m.Alias)
+			}
 		}
 	}
 	for _, k := range c.VirtualKeys {

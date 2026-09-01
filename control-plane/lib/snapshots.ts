@@ -99,6 +99,8 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
       ...(Array.isArray(m.fallbacks) && m.fallbacks.length > 0 ? { fallbacks: m.fallbacks } : {}),
       ...(Number(m.input_per_mtok) > 0 ? { input_cost_per_mtok: Number(m.input_per_mtok) } : {}),
       ...(Number(m.output_per_mtok) > 0 ? { output_cost_per_mtok: Number(m.output_per_mtok) } : {}),
+      ...(m.cache ? { cache: m.cache } : {}),
+      ...(m.cache_ttl ? { cache_ttl: m.cache_ttl } : {}),
       ...(sourcesByAlias.get(m.alias)?.length ? { sources: sourcesByAlias.get(m.alias) } : {}),
     };
   });

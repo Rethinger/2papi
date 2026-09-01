@@ -63,7 +63,7 @@ footer{margin-top:26px;color:var(--sub);font-size:11.5px;line-height:1.7}
 // bump DATA.updated. The page renders itself from this object.
 // ============================================================
 const DATA = {
-  updated: '2026-08-14 (день)',
+  updated: '2026-09-02',
   phases: [
     {
       id: 'panel',
@@ -158,10 +158,46 @@ const DATA = {
           evidence: 'migration 010; X-Gateway-Team-Budget-Remaining; 429 budget_exceeded; UI Teams' },
         { name: 'Fair-share ключевые пулы (per-key доля внутри команды)', status: 'done',
           evidence: 'team.share_usd = budget/keys в снапшоте; enforcement в policy; колонка Fair share в UI; unit+integration тесты' },
-        { name: 'MCP/A2A гейтвей (LiteLLM-паттерн)', status: 'pending',
-          evidence: 'требует MCP-клиент + relay tool_use; большой объём' },
+        { name: 'MCP/A2A гейтвей (LiteLLM-паттерн)', status: 'done',
+          evidence: 'internal/mcp POST /v1/mcp/<server> JSON-RPC passthrough (бюджеты/RPM/concurrency на tool-calls); контроль-плейн CRUD: миграция 018 mcp_servers, шапки envelope-шифруются, view дашборда (2c6a4fd/6c2a6fd/tests mcp-crud)' },
         { name: 'Встроенные платежи', status: 'deferred',
           evidence: 'ToS-риск upstream подписок; только под публичный запуск по явному решению' },
+      ],
+    },
+    {
+      id: 'p4',
+      name: 'P4 · Optimization modes (token savers)',
+      scope: 'Пресеты режимов, single-pass пайплайн, дашборд, бенчмарки',
+      items: [
+        { name: 'Режимы RTK/Caveman/Headroom + auto-эвристики (витки 1-4)', status: 'done',
+          evidence: 'internal/compression modes/auto; routing schema + snapshot emission (c3579ed); echo-заголовки X-Gateway-*-Mode' },
+        { name: 'Дашборд: селекты режимов + squoze + i18n (виток 5)', status: 'done',
+          evidence: 'dashboard-client.tsx OptimizationFields + мутация mutateOptimization; ключи en/ru (475a654)' },
+        { name: 'Single-pass пайплайн по телу (виток 7)', status: 'done',
+          evidence: 'compression.OptimizeRequest — один parse/marshal на headroom+RTK+caveman; байт-семантика прежняя (023efcd)' },
+        { name: 'README Optimization-секция + полный QA (виток 6)', status: 'done',
+          evidence: 'README раздел Optimization modes; go test ./... + npm test + tsc зелёные (2026-09-02)' },
+        { name: 'Бенчмарки overhead по режимам (виток 8)', status: 'pending',
+          evidence: 'замеры was→became по режимам на test/bench.mjs; сейчас только общий overhead' },
+      ],
+    },
+    {
+      id: 'p5',
+      name: 'P5 · Build-хребет (OSS/Ent/Cloud)',
+      scope: 'Лицензия, метрики, orgs, SSO, sources[], signup, аудит',
+      items: [
+        { name: 'License-key сервис Ed25519 (ent/cloud)', status: 'done',
+          evidence: 'internal/license + edition-gate; миграции 011-014; 32078bb' },
+        { name: 'Prometheus /metrics + audit export', status: 'done',
+          evidence: 'metricsHandler в server.go; audit/export NDJSON с гейтом audit_export (276d5cc/330e601)' },
+        { name: 'Organizations + org-бюджеты', status: 'done',
+          evidence: 'миграции 015/016; policy effectiveTeamBudget кап орги (be7195b)' },
+        { name: 'SSO/OIDC для дашборда', status: 'done',
+          evidence: 'internal oidc.js + роуты /api/auth/oidc; гейт sso (76ba9ea)' },
+        { name: 'sources[] multi-provider alias', status: 'done',
+          evidence: 'config.Model.Sources + снапшот; роутинг/телеметрия per-source' },
+        { name: 'Signup/кредиты/баланс (Cloud)', status: 'done',
+          evidence: 'cloud-auth + signup bonus + policy min(budget,balance) (шаг 6/7 закрыт)' },
       ],
     },
   ],

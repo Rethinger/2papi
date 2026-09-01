@@ -7,6 +7,8 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - papi-postgres:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d papi_control"]
       interval: 2s

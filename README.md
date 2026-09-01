@@ -76,8 +76,7 @@ Design system and widget console are in [`open-design/`](open-design/) — hand-
 - `/healthz`, `/readyz`, `/v1/models`, `/v1/chat/completions`.
 - Generic OpenAI-compatible upstream proxy with public model alias rewriting.
 - Claude accounts: Anthropic API key, claude.ai OAuth token, or browser cookies (`sessionKey` from claude.ai) — dedicated "Add Claude account" entry in the dashboard.
-- Token-saver optimizations like 9Router, toggled from the dashboard **or per-model/per-key**: RTK compression of large tool results (saves 20-40% input tokens), Caveman mode (terse replies, saves up to 65% output tokens), and **Headroom** (auto-prune old tool history when context nears limit). All also opt-in per request via `X-Gateway-Compress` / `X-Gateway-Caveman` / `X-Gateway-Headroom` (`X-Gateway-Headroom-Reserve` to tune).
-- **Reasoning models note**: reasoning-capable upstreams (DeepSeek R/V-series, o-series, Claude extended thinking) spend your `max_tokens` on hidden `reasoning_content` *before* any visible content — a small limit yields an empty answer with `finish_reason:"length"`. Budget ≥512–2000 tokens for such aliases, and prefer per-key/per-model Caveman to tame verbose thinking.
+- Token-saver optimizations like 9Router, toggled from the dashboard **or per-model/per-key**: RTK compression of large tool results (saves 20-40% input tokens), Caveman mode (terse replies, saves up to 65% output tokens), and **Headroom** (auto-prune old tool history when context nears limit). All also opt-in per request via `X-Gateway-Compress` / `X-Gateway-Caveman` / `X-Gateway-Headroom` (`X-Gateway-Headroom-Reserve` to tune). Mode presets and the single-pass pipeline are documented in [Optimization modes](#optimization-modes-token-savers).
 - SSE and JSON response streaming without full response buffering.
 - **MCP gateway** (`POST /v1/mcp/<name>`): expose upstream Model Context Protocol servers behind virtual-key auth — budgets, RPM and concurrency apply to tool calls, every call lands in request logs. Configure in your config file:
 
@@ -103,6 +102,54 @@ curl http://localhost:8080/v1/mcp/my-tools \
 - Sticky affinity from `X-Gateway-Session`, `metadata.gateway_session`, or stable user/model fallback.
 - Account cooldowns, circuit breakers, concurrency caps, and route diagnostic headers.
 - Enterprise (license-gated): OIDC single sign-on for the dashboard, organizations above teams with org-budget caps, audit export (NDJSON). Cloud edition adds self-serve signup with email verification, a signup credit grant, and prepaid balance enforcement (`min(team budget, balance)`).
+
+## Optimization modes (token savers)
+
+The three token savers run as a **single JSON pass** over every request body
+(headroom → RTK → caveman), preserving provider prompt caches wherever
+possible (RTK is idempotent by marker; tools/system rows are never touched).
+When **Squoze** is enabled it is the *exclusive* request optimizer — RTK,
+Caveman and Headroom are skipped for that request (configs mixing squoze with
+the others are rejected at startup).
+
+Toggles are global → per-model → per-virtual-key → per-request header, and
+each level carries a **mode preset** (empty = legacy behavior):
+
+| Optimizer | Mode field | Presets | Effect |
+|---|---|---|---|
+| RTK | `rtk_mode` | `light` · `standard` · `aggressive` · `auto` | compress large tool/user results (−20–40% input) |
+| Caveman | `caveman_mode` | `lite` · `full` · `auto` | terse system directive (−up to 65% output) |
+| Headroom | `headroom_profile` | `conservative` · `balanced` · `aggressive` · `auto` | prune old history near context limit |
+| Squoze | `squoze` | `true`/`false` (exclusive) | content-routed elision of machine output |
+
+`auto` is resolved per request: RTK per block size (light/standard/aggressive),
+Caveman by traffic shape (agentic → full, chat → lite), Headroom by estimated
+context pressure (below half the reserve → no-op, cache-friendly epochs).
+
+```yaml
+optimization:
+  rtk_compression: true
+  rtk_mode: auto
+  caveman: true
+  caveman_mode: full
+  headroom: true
+  headroom_profile: aggressive
+  headroom_reserve: 120000
+  headroom_keep: 8
+```
+
+Per request, the same knobs work through headers, with names instead of
+true/false: `X-Gateway-Compress: aggressive`, `X-Gateway-Caveman: lite`,
+`X-Gateway-Headroom: auto`, plus `X-Gateway-Headroom-Reserve` to tune.
+Responses echo what actually ran via `X-Gateway-RTK-Mode`,
+`X-Gateway-Caveman-Mode`, `X-Gateway-Headroom-Profile`, `X-Gateway-Squoze`
+and `X-Gateway-Saved-Bytes` / `X-Gateway-Saved-Tokens`.
+
+**Reasoning models note**: reasoning-capable upstreams (DeepSeek R/V-series,
+o-series, Claude extended thinking) spend your `max_tokens` on hidden
+`reasoning_content` *before* any visible content — a small limit yields an
+empty answer with `finish_reason:"length"`. Budget ≥512–2000 tokens for such
+aliases, and prefer per-key/per-model Caveman to tame verbose thinking.
 
 ## Docker-first development
 

@@ -2,6 +2,21 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — Optimization docs + QA (виток 6/9)
+
+- README: раздел **Optimization modes (token savers)** — таблица режимов
+  RTK/Caveman/Headroom + squoze, семантика auto, yaml-пример, header-эквива-
+  ленты и эхо-заголовки (X-Gateway-*-Mode, Saved-Bytes/Tokens).
+- docs/UNFINISHED.md — карта обновлена: витки 1–7 закрыты, G6/G7 закрыты
+  (уже были в коде), compose-порт postgres сделан, cmd/gateway починен
+  (не компилировался), задокументирован squoze root-пакет (CI-риск).
+- compose.yaml: postgres публикует 127.0.0.1:5432 — интеграционные тесты на
+  хосте больше не требуют временного контейнера.
+- plan/roadmap.html: обновлён (MCP done, фазы P4 Optimization modes и
+  P5 Build-хребет, дата 2026-09-02).
+- QA-прогон: go test ./... ✅, go vet ./... ✅, npm test 135/215 (80 скипов без
+  TEST_DATABASE_URL) ✅, tsc --noEmit ✅, next build ✅.
+
 ## 2026-09-02 — Optimization single-pass pipeline (виток 7/9)
 
 - `internal/compression.OptimizeRequest` объединяет headroom-обрезку, RTK и

@@ -2,6 +2,23 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — Optimization mode presets (виток 5/9: дашборд)
+
+### Селекты режимов в дашборде (виток 4 доведён до UI)
+- Settings → Optimization и модалка Routing: селекты `rtk_mode`
+  (auto/light/standard/aggressive), `caveman_mode` (auto/lite/full),
+  `headroom_profile` (auto/conservative/balanced/aggressive) — «Auto» первой
+  опцией, disabled при выключенном тумблере; тумблер **Squoze** (эксклюзивный
+  режим: включает — сбрасывает RTK/Caveman/Headroom и наоборот).
+- Быстрые тумблеры на вкладке Settings сохраняют режимы при переключении
+  (mutateOptimization: булевы + пресеты одной мутацией `/routing`).
+- i18n: ключи en/ru для режимов (mode.auto/light/standard/aggressive/
+  lite/full/conservative/balanced) + подписи squoze.
+- Виток 4 (routing schema + snapshot emission, c3579ed) — ретро-запись:
+  `optimization` в routing_settings принимает и эмитит rtk_mode/caveman_mode/
+  headroom_profile/squoze; zod-валидация (validation.test.ts: режимы,
+  эксклюзивность squoze).
+
 ## 2026-08-24 — Optimization mode presets (виток 3/9: умный авто)
 
 ### Авто-эвристики (`auto.go`)

@@ -226,6 +226,96 @@ function Modal({ title, children, onClose, t }: {
   );
 }
 
+type OptimizationDraft = {
+  rtk_compression: boolean;
+  caveman: boolean;
+  headroom: boolean;
+  squoze: boolean;
+  rtk_mode: string;
+  caveman_mode: string;
+  headroom_profile: string;
+  headroom_reserve: number;
+  headroom_keep: number;
+};
+
+function draftFromRouting(routing: any): OptimizationDraft {
+  const optimization = routing?.optimization ?? {};
+  return {
+    rtk_compression: Boolean(optimization.rtk_compression),
+    caveman: Boolean(optimization.caveman),
+    headroom: Boolean(optimization.headroom),
+    squoze: Boolean(optimization.squoze),
+    rtk_mode: typeof optimization.rtk_mode === 'string' ? optimization.rtk_mode : 'auto',
+    caveman_mode: typeof optimization.caveman_mode === 'string' ? optimization.caveman_mode : 'auto',
+    headroom_profile: typeof optimization.headroom_profile === 'string' ? optimization.headroom_profile : 'auto',
+    headroom_reserve: Number(optimization.headroom_reserve) || 120000,
+    headroom_keep: Number(optimization.headroom_keep) || 8,
+  };
+}
+
+const rtkModes = ['auto', 'light', 'standard', 'aggressive'];
+const cavemanModes = ['auto', 'lite', 'full'];
+const headroomProfiles = ['auto', 'conservative', 'balanced', 'aggressive'];
+
+function ModeSelect({ label, name, value, disabled, options, onChange, t }: {
+  label: string;
+  name: string;
+  value: string;
+  disabled: boolean;
+  options: string[];
+  onChange: (value: string) => void;
+  t: Translator;
+}) {
+  return (
+    <label className="field"><span>{label}</span>
+      <select name={name} value={value} disabled={disabled} onChange={event => onChange(event.target.value)}>
+        {options.map(option => <option key={option} value={option}>{t(`mode.${option}` as MessageKey)}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// Controlled optimization section used by the routing modal: checkbox toggles
+// drive the mode selects (disabled while the toggle is off), squoze is
+// exclusive and resets RTK/Caveman/Headroom, and hidden inputs mirror the
+// state so submitRouting's FormData reads the same values.
+function OptimizationFields({ defaults, t }: { defaults: any; t: Translator }) {
+  const [optimization, setOptimization] = useState<OptimizationDraft>(() => draftFromRouting(defaults));
+  const set = (patch: Partial<OptimizationDraft>) => {
+    setOptimization(prev => {
+      const next = { ...prev, ...patch };
+      if (patch.squoze === true) {
+        next.rtk_compression = false;
+        next.caveman = false;
+        next.headroom = false;
+      }
+      if ((patch.rtk_compression || patch.caveman || patch.headroom) === true) {
+        next.squoze = false;
+      }
+      return next;
+    });
+  };
+  return (
+    <>
+      <input type="hidden" name="rtk_compression" value={optimization.rtk_compression ? 'on' : 'off'} />
+      <input type="hidden" name="caveman" value={optimization.caveman ? 'on' : 'off'} />
+      <input type="hidden" name="headroom" value={optimization.headroom ? 'on' : 'off'} />
+      <input type="hidden" name="squoze" value={optimization.squoze ? 'on' : 'off'} />
+      <label className="check-row"><input type="checkbox" checked={optimization.rtk_compression} onChange={event => set({ rtk_compression: event.target.checked })} /><span>{t('form.rtkCompression')}</span><small>{t('form.rtkCompressionHint')}</small></label>
+      <ModeSelect label={t('form.rtkMode')} name="rtk_mode" value={optimization.rtk_mode} disabled={!optimization.rtk_compression} options={rtkModes} onChange={rtk_mode => set({ rtk_mode })} t={t} />
+      <label className="check-row"><input type="checkbox" checked={optimization.caveman} onChange={event => set({ caveman: event.target.checked })} /><span>{t('form.caveman')}</span><small>{t('form.cavemanHint')}</small></label>
+      <ModeSelect label={t('form.cavemanMode')} name="caveman_mode" value={optimization.caveman_mode} disabled={!optimization.caveman} options={cavemanModes} onChange={caveman_mode => set({ caveman_mode })} t={t} />
+      <label className="check-row"><input type="checkbox" checked={optimization.headroom} onChange={event => set({ headroom: event.target.checked })} /><span>{t('form.headroom')}</span><small>{t('form.headroomHint')}</small></label>
+      <ModeSelect label={t('form.headroomProfile')} name="headroom_profile" value={optimization.headroom_profile} disabled={!optimization.headroom} options={headroomProfiles} onChange={headroom_profile => set({ headroom_profile })} t={t} />
+      <div className="form-row">
+        <label className="field"><span>{t('form.headroomReserve')}</span><input type="number" name="headroom_reserve" value={optimization.headroom_reserve} disabled={!optimization.headroom} onChange={event => set({ headroom_reserve: Number(event.target.value) || 0 })} /></label>
+        <label className="field"><span>{t('form.headroomKeep')}</span><input type="number" name="headroom_keep" value={optimization.headroom_keep} disabled={!optimization.headroom} onChange={event => set({ headroom_keep: Number(event.target.value) || 0 })} /></label>
+      </div>
+      <label className="check-row"><input type="checkbox" checked={optimization.squoze} onChange={event => set({ squoze: event.target.checked })} /><span>{t('form.squoze')}</span><small>{t('form.squozeHint')}</small></label>
+    </>
+  );
+}
+
 function modelAccountCount(count: number, locale: Locale, t: Translator) {
   if (locale === 'ru') {
     const last = count % 10;
@@ -710,6 +800,10 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
   function submitRouting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const rtkOn = form.get('rtk_compression') === 'on';
+    const cavemanOn = form.get('caveman') === 'on';
+    const headroomOn = form.get('headroom') === 'on';
+    const squozeOn = form.get('squoze') === 'on';
     mutate(() => api('routing', {
       method: 'POST',
       body: JSON.stringify({
@@ -723,13 +817,53 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
           lockout_failures: Number(form.get('lockout_failures') || 10),
           lockout_duration: form.get('lockout_duration'),
         },
-        optimization: { rtk_compression: form.get('rtk_compression') === 'on', caveman: form.get('caveman') === 'on', headroom: form.get('headroom') === 'on', headroom_reserve: Number(form.get('headroom_reserve') || 120000), headroom_keep: Number(form.get('headroom_keep') || 8) },
+        optimization: {
+          rtk_compression: rtkOn,
+          caveman: cavemanOn,
+          headroom: headroomOn,
+          squoze: squozeOn,
+          headroom_reserve: Number(form.get('headroom_reserve') || 120000),
+          headroom_keep: Number(form.get('headroom_keep') || 8),
+          ...(rtkOn && form.get('rtk_mode') ? { rtk_mode: String(form.get('rtk_mode')) } : {}),
+          ...(cavemanOn && form.get('caveman_mode') ? { caveman_mode: String(form.get('caveman_mode')) } : {}),
+          ...(headroomOn && form.get('headroom_profile') ? { headroom_profile: String(form.get('headroom_profile')) } : {}),
+        },
       }),
     }));
   }
 
-  function toggleOptimization(flag: 'rtk_compression' | 'caveman' | 'headroom') {
-    const enabled = !(data.routing?.optimization?.[flag] ?? false);
+  // mutateOptimization persists a partial optimization patch: booleans and
+  // mode presets, preserving everything else from the live routing settings.
+  // Enabling RTK/Caveman/Headroom clears squoze (exclusive) and vice versa.
+  function mutateOptimization(patch: {
+    rtk_compression?: boolean;
+    caveman?: boolean;
+    headroom?: boolean;
+    squoze?: boolean;
+    rtk_mode?: string;
+    caveman_mode?: string;
+    headroom_profile?: string;
+  }) {
+    const current = data.routing?.optimization ?? {};
+    const next = {
+      rtk_compression: patch.rtk_compression ?? Boolean(current.rtk_compression),
+      caveman: patch.caveman ?? Boolean(current.caveman),
+      headroom: patch.headroom ?? Boolean(current.headroom),
+      squoze: patch.squoze ?? Boolean(current.squoze),
+      rtk_mode: typeof patch.rtk_mode === 'string' ? patch.rtk_mode : (typeof current.rtk_mode === 'string' ? current.rtk_mode : 'auto'),
+      caveman_mode: typeof patch.caveman_mode === 'string' ? patch.caveman_mode : (typeof current.caveman_mode === 'string' ? current.caveman_mode : 'auto'),
+      headroom_profile: typeof patch.headroom_profile === 'string' ? patch.headroom_profile : (typeof current.headroom_profile === 'string' ? current.headroom_profile : 'auto'),
+      headroom_reserve: Number(current.headroom_reserve) || 120000,
+      headroom_keep: Number(current.headroom_keep) || 8,
+    } as any;
+    if (patch.squoze === true) {
+      next.rtk_compression = false;
+      next.caveman = false;
+      next.headroom = false;
+    }
+    if (patch.rtk_compression === true || patch.caveman === true || patch.headroom === true) {
+      next.squoze = false;
+    }
     mutate(() => api('routing', {
       method: 'POST',
       body: JSON.stringify({
@@ -744,11 +878,15 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
           lockout_duration: data.routing?.resilience?.lockout_duration ?? '15m',
         },
         optimization: {
-          rtk_compression: flag === 'rtk_compression' ? enabled : Boolean(data.routing?.optimization?.rtk_compression),
-          caveman: flag === 'caveman' ? enabled : Boolean(data.routing?.optimization?.caveman),
-          headroom: flag === 'headroom' ? enabled : Boolean(data.routing?.optimization?.headroom),
-          headroom_reserve: Number(data.routing?.optimization?.headroom_reserve) || 120000,
-          headroom_keep: Number(data.routing?.optimization?.headroom_keep) || 8,
+          rtk_compression: next.rtk_compression,
+          caveman: next.caveman,
+          headroom: next.headroom,
+          squoze: next.squoze,
+          rtk_mode: next.rtk_mode,
+          caveman_mode: next.caveman_mode,
+          headroom_profile: next.headroom_profile,
+          headroom_reserve: next.headroom_reserve,
+          headroom_keep: next.headroom_keep,
         },
       }),
     }));
@@ -1408,10 +1546,23 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
               <article className="panel"><ServerIcon size={24} /><h3>{t('settings.fallback.title')}</h3><p>{t('settings.fallback.description')}</p><Status>{t('settings.fallback.status')}</Status></article>
               <article className="panel"><ZapIcon size={24} /><h3>{t('settings.optimization.title')}</h3><p>{t('settings.optimization.description')}</p>
                 <div className="panel-rows">
-                  <div className="panel-actions"><div><b>{t('settings.optimization.rtkTitle')}</b><small>{t('settings.optimization.rtkDescription')}</small></div><button className="secondary" onClick={() => toggleOptimization('rtk_compression')}>{t(data.routing?.optimization?.rtk_compression ? 'action.optimization.off' : 'action.optimization.on')}</button></div>
-                  <div className="panel-actions"><div><b>{t('settings.optimization.headroomTitle')}</b><small>{t('settings.optimization.headroomDescription')}</small></div><button className="secondary" onClick={() => toggleOptimization('headroom')}>{t(data.routing?.optimization?.headroom ? 'action.optimization.off' : 'action.optimization.on')}</button></div>
-                  <div className="panel-actions"><div><b>{t('settings.optimization.cavemanTitle')}</b><small>{t('settings.optimization.cavemanDescription')}</small></div><button className="secondary" onClick={() => toggleOptimization('caveman')}>{t(data.routing?.optimization?.caveman ? 'action.optimization.off' : 'action.optimization.on')}</button></div>
-                  <Status good={data.routing?.optimization?.rtk_compression || data.routing?.optimization?.caveman || data.routing?.optimization?.headroom}>{t(data.routing?.optimization?.rtk_compression || data.routing?.optimization?.caveman || data.routing?.optimization?.headroom ? 'settings.optimization.status.on' : 'settings.optimization.status.off')}</Status>
+                  <div className="panel-actions"><div><b>{t('settings.optimization.rtkTitle')}</b><small>{t('settings.optimization.rtkDescription')}</small></div><button className="secondary" onClick={() => mutateOptimization({ rtk_compression: !Boolean(data.routing?.optimization?.rtk_compression) })}>{t(data.routing?.optimization?.rtk_compression ? 'action.optimization.off' : 'action.optimization.on')}</button>
+                    <select aria-label={t('form.rtkMode')} value={typeof data.routing?.optimization?.rtk_mode === 'string' ? data.routing.optimization.rtk_mode : 'auto'} disabled={!data.routing?.optimization?.rtk_compression} onChange={event => mutateOptimization({ rtk_mode: event.target.value })}>
+                      {rtkModes.map(option => <option key={option} value={option}>{t(`mode.${option}` as MessageKey)}</option>)}
+                    </select>
+                  </div>
+                  <div className="panel-actions"><div><b>{t('settings.optimization.cavemanTitle')}</b><small>{t('settings.optimization.cavemanDescription')}</small></div><button className="secondary" onClick={() => mutateOptimization({ caveman: !Boolean(data.routing?.optimization?.caveman) })}>{t(data.routing?.optimization?.caveman ? 'action.optimization.off' : 'action.optimization.on')}</button>
+                    <select aria-label={t('form.cavemanMode')} value={typeof data.routing?.optimization?.caveman_mode === 'string' ? data.routing.optimization.caveman_mode : 'auto'} disabled={!data.routing?.optimization?.caveman} onChange={event => mutateOptimization({ caveman_mode: event.target.value })}>
+                      {cavemanModes.map(option => <option key={option} value={option}>{t(`mode.${option}` as MessageKey)}</option>)}
+                    </select>
+                  </div>
+                  <div className="panel-actions"><div><b>{t('settings.optimization.headroomTitle')}</b><small>{t('settings.optimization.headroomDescription')}</small></div><button className="secondary" onClick={() => mutateOptimization({ headroom: !Boolean(data.routing?.optimization?.headroom) })}>{t(data.routing?.optimization?.headroom ? 'action.optimization.off' : 'action.optimization.on')}</button>
+                    <select aria-label={t('form.headroomProfile')} value={typeof data.routing?.optimization?.headroom_profile === 'string' ? data.routing.optimization.headroom_profile : 'auto'} disabled={!data.routing?.optimization?.headroom} onChange={event => mutateOptimization({ headroom_profile: event.target.value })}>
+                      {headroomProfiles.map(option => <option key={option} value={option}>{t(`mode.${option}` as MessageKey)}</option>)}
+                    </select>
+                  </div>
+                  <div className="panel-actions"><div><b>{t('form.squoze')}</b><small>{t('form.squozeHint')}</small></div><button className="secondary" onClick={() => mutateOptimization({ squoze: !Boolean(data.routing?.optimization?.squoze) })}>{t(data.routing?.optimization?.squoze ? 'action.optimization.off' : 'action.optimization.on')}</button></div>
+                  <Status good={data.routing?.optimization?.rtk_compression || data.routing?.optimization?.caveman || data.routing?.optimization?.headroom || data.routing?.optimization?.squoze}>{t(data.routing?.optimization?.rtk_compression || data.routing?.optimization?.caveman || data.routing?.optimization?.headroom || data.routing?.optimization?.squoze ? 'settings.optimization.status.on' : 'settings.optimization.status.off')}</Status>
                 </div>
               </article>
               <article className="panel webhook-panel"><PulseIcon size={24} /><h3>{t('settings.webhook.title')}</h3><p>{t('settings.webhook.description')}</p>
@@ -1675,11 +1826,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
               <Field label={t('form.lockoutDuration')} name="lockout_duration" defaultValue={data.routing?.resilience?.lockout_duration ?? '15m'} />
             </div>
             <fieldset><legend>{t('settings.optimization.title')}</legend>
-              <label className="check-row"><input type="checkbox" name="rtk_compression" defaultChecked={data.routing?.optimization?.rtk_compression ?? false} /><span>{t('form.rtkCompression')}</span><small>{t('form.rtkCompressionHint')}</small></label>
-              <label className="check-row"><input type="checkbox" name="caveman" defaultChecked={data.routing?.optimization?.caveman ?? false} /><span>{t('form.caveman')}</span><small>{t('form.cavemanHint')}</small></label>
-              <label className="check-row"><input type="checkbox" name="headroom" defaultChecked={data.routing?.optimization?.headroom ?? false} /><span>{t('form.headroom')}</span><small>{t('form.headroomHint')}</small></label>
-              <label className="field"><span>{t('form.headroomReserve')}</span><input type="number" name="headroom_reserve" defaultValue={data.routing?.optimization?.headroom_reserve ?? 120000} /></label>
-              <label className="field"><span>{t('form.headroomKeep')}</span><input type="number" name="headroom_keep" defaultValue={data.routing?.optimization?.headroom_keep ?? 8} /></label>
+              <OptimizationFields defaults={data.routing?.optimization} t={t} />
             </fieldset>
             <FormActions pending={isPending} t={t} />
           </form>

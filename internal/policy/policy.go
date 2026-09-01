@@ -109,6 +109,16 @@ type BeginResult struct {
 	TeamBudgetRemainingUSD float64
 }
 
+// budgetWindow returns the ledger key for a key-level spend window: the
+// calendar day ("2006-01-02") or the month ("2006-01") when the key declares
+// budget_duration=month (G1). Team/personal budgets stay daily.
+func budgetWindow(duration string, now time.Time) string {
+	if duration == "month" {
+		return now.UTC().Format("2006-01")
+	}
+	return now.UTC().Format("2006-01-02")
+}
+
 // effectiveTeamBudget returns the enforced team budget for a key: the
 // team's own daily budget, capped by its organization's budget (Enterprise,
 // migration 015/016) and by the prepaid credit balance (Cloud, шаг 6).
@@ -193,8 +203,8 @@ func (a *Auth) Begin(vk config.VirtualKey) BeginResult {
 		b.mu.Unlock()
 	}
 	if vk.BudgetUSD > 0 {
-		day := now.UTC().Format("2006-01-02")
-		spent := sh.spendFor(vk.Name, day)
+		window := budgetWindow(vk.BudgetDuration, now)
+		spent := sh.spendFor(vk.Name, window)
 		result.BudgetUSD = vk.BudgetUSD
 		result.BudgetRemainingUSD = vk.BudgetUSD - spent
 		if spent >= vk.BudgetUSD {
@@ -215,8 +225,8 @@ func (a *Auth) Begin(vk config.VirtualKey) BeginResult {
 		}
 	}
 	if vk.Team != nil && vk.Team.ShareUSD > 0 {
-		day := now.UTC().Format("2006-01-02")
-		spent := sh.spendFor(vk.Name, day)
+		window := budgetWindow(vk.BudgetDuration, now)
+		spent := sh.spendFor(vk.Name, window)
 		if spent >= vk.Team.ShareUSD {
 			result.Allowed = false
 			result.Reason = "budget_exceeded"
@@ -268,9 +278,9 @@ func (a *Auth) Finalize(vk config.VirtualKey, tokens int64, costUSD float64, com
 		b.mu.Unlock()
 	}
 	if (vk.BudgetUSD > 0 || (vk.Team != nil && vk.Team.ShareUSD > 0)) && costUSD > 0 {
-		day := now.UTC().Format("2006-01-02")
-		spent := sh.spendFor(vk.Name, day)
-		sh.spend[vk.Name] = &daySpend{day: day, spent: spent + costUSD}
+		window := budgetWindow(vk.BudgetDuration, now)
+		spent := sh.spendFor(vk.Name, window)
+		sh.spend[vk.Name] = &daySpend{day: window, spent: spent + costUSD}
 	}
 	if effectiveTeamBudget(vk) > 0 && costUSD > 0 {
 		day := now.UTC().Format("2006-01-02")

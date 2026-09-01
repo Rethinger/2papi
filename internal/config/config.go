@@ -92,15 +92,19 @@ type Server struct {
 	Gzip bool `yaml:"gzip,omitempty" json:"gzip,omitempty"`
 }
 type VirtualKey struct {
-	Name           string        `yaml:"name" json:"name"`
-	ID             string        `yaml:"id,omitempty" json:"id,omitempty"`
-	Key            string        `yaml:"key,omitempty" json:"key,omitempty"`
-	KeyHash        string        `yaml:"key_hash,omitempty" json:"key_hash,omitempty"`
-	Models         []string      `yaml:"models" json:"models"`
-	RPM            int           `yaml:"rpm" json:"rpm"`
-	TPM            int           `yaml:"tpm,omitempty" json:"tpm,omitempty"`
-	MaxConcurrency int           `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
-	BudgetUSD      float64       `yaml:"budget_usd,omitempty" json:"budget_usd,omitempty"` // daily, 0 = unlimited
+	Name           string   `yaml:"name" json:"name"`
+	ID             string   `yaml:"id,omitempty" json:"id,omitempty"`
+	Key            string   `yaml:"key,omitempty" json:"key,omitempty"`
+	KeyHash        string   `yaml:"key_hash,omitempty" json:"key_hash,omitempty"`
+	Models         []string `yaml:"models" json:"models"`
+	RPM            int      `yaml:"rpm" json:"rpm"`
+	TPM            int      `yaml:"tpm,omitempty" json:"tpm,omitempty"`
+	MaxConcurrency int      `yaml:"max_concurrency,omitempty" json:"max_concurrency,omitempty"`
+	BudgetUSD      float64  `yaml:"budget_usd,omitempty" json:"budget_usd,omitempty"` // daily by default, 0 = unlimited
+	// BudgetDuration is the reset window for BudgetUSD: "" | "day" (default)
+	// | "month". A monthly window keeps the same allowance but resets at the
+	// first of the month (G1 gap — Cloud self-serve blocker).
+	BudgetDuration string        `yaml:"budget_duration,omitempty" json:"budget_duration,omitempty"`
 	Team           *Team         `yaml:"team,omitempty" json:"team,omitempty"`
 	Optimization   *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
 	hash           []byte
@@ -501,6 +505,9 @@ func Build(c Config) (*Snapshot, error) {
 		}
 		if k.RPM < 0 || k.TPM < 0 || k.MaxConcurrency < 0 || k.BudgetUSD < 0 {
 			return nil, fmt.Errorf("virtual key %s has negative limit", k.Name)
+		}
+		if k.BudgetDuration != "" && k.BudgetDuration != "day" && k.BudgetDuration != "month" {
+			return nil, fmt.Errorf("virtual key %s budget_duration must be day|month, got %q", k.Name, k.BudgetDuration)
 		}
 		if k.Optimization != nil {
 			if err := validateOptimizationModes("virtual key "+k.Name, k.Optimization); err != nil {

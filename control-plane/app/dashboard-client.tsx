@@ -642,6 +642,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
             tpm: Number(form.get('tpm') || 0),
             max_concurrency: Number(form.get('max_concurrency') || 0),
             budget_usd: Number(form.get('budget_usd') || 0),
+            budget_duration: String(form.get('budget_duration') || 'day'),
             team_id: form.get('team_id') || null,
             enabled: true,
           }),
@@ -1722,6 +1723,12 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
               <Field label={t('form.concurrency')} name="max_concurrency" type="number" defaultValue="0" />
               <Field label={t('form.budgetUsd')} name="budget_usd" type="number" step="any" defaultValue="0" />
             </div>
+            <label>{t('form.budgetDuration')}
+              <select name="budget_duration" defaultValue="day">
+                <option value="day">{t('mode.day')}</option>
+                <option value="month">{t('mode.month')}</option>
+              </select>
+            </label>
             <label>{t('form.team')}<select name="team_id" defaultValue=""><option value="">{t('form.teamNone')}</option>{data.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
             <fieldset><legend>{t('form.allowedModels')}</legend>{data.models.map(model => <label className="check-row" key={model.id}><input type="checkbox" name="models" value={model.alias} /><span>{model.alias}</span><small>{model.upstream_model}</small></label>)}</fieldset>
             <FormActions pending={isPending} t={t} />

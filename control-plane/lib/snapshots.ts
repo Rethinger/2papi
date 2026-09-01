@@ -123,6 +123,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
     ...(Number(k.tpm) > 0 ? { tpm: Number(k.tpm) } : {}),
     ...(Number(k.max_concurrency) > 0 ? { max_concurrency: Number(k.max_concurrency) } : {}),
     ...(Number(k.budget_usd) > 0 ? { budget_usd: Number(k.budget_usd) } : {}),
+    ...(k.budget_duration && k.budget_duration !== 'day' ? { budget_duration: k.budget_duration } : {}),
     ...(k.team_id && (Number(k.team_budget_usd) > 0 || Number(k.org_budget_usd) > 0 || Number(k.team_balance_usd) > 0) ? (() => {
       const share = Number(k.team_budget_usd) / (teamKeyCounts.get(k.team_id) ?? 1);
       return { team: {

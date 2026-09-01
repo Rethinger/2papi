@@ -3,6 +3,7 @@ package policy
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Rethinger/2papi/internal/config"
 )
@@ -172,7 +173,6 @@ func TestTPMWindowRefillsAndDeferredCommit(t *testing.T) {
 	}
 }
 
-
 func TestOrgBudgetCapsTeamBudget(t *testing.T) {
 	auth := New(testSnapshot(t))
 	org := &config.Org{ID: "org-1", BudgetUSD: 0.5}
@@ -225,6 +225,37 @@ func TestOrgWithoutBudgetLeavesTeamUnlimited(t *testing.T) {
 	}
 }
 
+func TestBudgetMonthlyWindowResetsByMonth(t *testing.T) {
+	auth := New(testSnapshot(t))
+	vk := config.VirtualKey{Name: "month-k", RPM: 0, BudgetUSD: 1.0, BudgetDuration: "month"}
+
+	if result := auth.Begin(vk); !result.Allowed || result.BudgetRemainingUSD != 1.0 {
+		t.Fatalf("fresh monthly budget should be full: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0.6, true)
+	if result := auth.Begin(vk); !result.Allowed {
+		t.Fatalf("partial month spend should still allow: %+v", result)
+	}
+	auth.Finalize(vk, 0, 0.5, true)
+	if result := auth.Begin(vk); result.Allowed || result.Reason != "budget_exceeded" {
+		t.Fatalf("spend past the monthly budget must block: %+v", result)
+	}
+
+	// Same month still reflects the spend (the shard key is by now, but we
+	// can verify the daySpend window logic directly): the recorded entry
+	// must use the month key, not the day key.
+	sh := auth.shardFor(vk.Name)
+	sh.mu.Lock()
+	entry := sh.spend[vk.Name]
+	sh.mu.Unlock()
+	if entry == nil || entry.day != nowMonthKey() {
+		t.Fatalf("monthly spend recorded under the wrong window: %+v", entry)
+	}
+}
+
+func nowMonthKey() string {
+	return time.Now().UTC().Format("2006-01")
+}
 
 func TestBalanceCapsTeamBudget(t *testing.T) {
 	auth := New(testSnapshot(t))

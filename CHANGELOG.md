@@ -2,6 +2,16 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## 2026-09-02 — G1: virtual-key budget_duration (месячное окно сброса)
+
+- `config.VirtualKey.budget_duration`: `day` (default) | `month` — окно
+  сброса `budget_usd` (и fair-share) в policy: календарный день или месяц
+  (`budgetWindow` в policy.go). Валидация в Build: иное значение падает.
+- Control-plane: миграция 019, zod (VirtualKey/Patch), CRUD INSERT/UPDATE/GET
+  (route.ts), эмиссия в снапшот (только `!= day`), select «Окно сброса
+  бюджета» в модалке ключа + i18n en/ru.
+- Тесты: policy `TestBudgetMonthlyWindowResetsByMonth`, validation budget_duration.
+
 ## 2026-09-02 — Optimization docs + QA (виток 6/9)
 
 - README: раздел **Optimization modes (token savers)** — таблица режимов

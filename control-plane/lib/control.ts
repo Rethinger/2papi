@@ -91,7 +91,7 @@ export const RoutingSchema = z.object({ strategy: z.enum(['balanced','priority',
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'squoze mode is exclusive and cannot be combined with: rtk,caveman,headroom' });
   }
 }) });
-export const VirtualKeySchema = z.object({ name: z.string().min(1), plaintext_key: z.string().min(8).optional(), enabled: z.boolean().default(true), models: z.array(z.string()).default([]), rpm: z.number().int().positive().default(60), tpm: z.number().int().nonnegative().default(0), max_concurrency: z.number().int().nonnegative().default(0), budget_usd: z.number().nonnegative().default(0), team_id: z.string().uuid().optional().nullable() });
+export const VirtualKeySchema = z.object({ name: z.string().min(1), plaintext_key: z.string().min(8).optional(), enabled: z.boolean().default(true), models: z.array(z.string()).default([]), rpm: z.number().int().positive().default(60), tpm: z.number().int().nonnegative().default(0), max_concurrency: z.number().int().nonnegative().default(0), budget_usd: z.number().nonnegative().default(0), budget_duration: z.enum(['day', 'month']).optional(), team_id: z.string().uuid().optional().nullable() });
 export const TeamSchema = z.object({ name: z.string().min(1), enabled: z.boolean().default(true), budget_usd: z.number().nonnegative().default(0), org_id: z.string().uuid().optional().nullable() });
 export const WebhookSchema = z.object({ enabled: z.boolean().default(false), url: z.string().url().or(z.literal('')).default(''), secret: z.string().default('') });
 export const TeamPatchSchema = z.object({ name: z.string().min(1).optional(), enabled: z.boolean().optional(), budget_usd: z.number().nonnegative().optional(), org_id: z.string().uuid().nullable().optional() });
@@ -157,6 +157,7 @@ export const VirtualKeyPatchSchema = z.object({
   tpm: z.number().int().nonnegative().optional(),
   max_concurrency: z.number().int().nonnegative().optional(),
   budget_usd: z.number().nonnegative().optional(),
+  budget_duration: z.enum(['day', 'month']).optional(),
   team_id: z.string().uuid().optional().nullable(),
 });
 

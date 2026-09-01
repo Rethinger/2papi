@@ -22,6 +22,9 @@ test('management schemas accept valid payloads', () => {
   assert.equal(parsedVk.tpm, 5000);
   assert.equal(parsedVk.max_concurrency, 4);
   assert.equal(parsedVk.budget_usd, 12.5);
+  assert.equal(VirtualKeySchema.parse({ name: 'month', plaintext_key: 'sk-gateway-month', budget_usd: 50, budget_duration: 'month' }).budget_duration, 'month');
+  assert.throws(() => VirtualKeySchema.parse({ name: 'bad', plaintext_key: 'sk-gateway-bad', budget_duration: 'week' }));
+  assert.equal(VirtualKeyPatchSchema.parse({ budget_duration: 'month' }).budget_duration, 'month');
 
   const parsedModel = ModelSchema.parse({ alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', accounts: ['00000000-0000-0000-0000-000000000000'], fallbacks: ['gpt-fallback'], input_per_mtok: 0.15, output_per_mtok: 0.60 });
   assert.deepEqual(parsedModel.fallbacks, ['gpt-fallback']);

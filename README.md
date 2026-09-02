@@ -146,6 +146,14 @@ Responses echo what actually ran via `X-Gateway-RTK-Mode`,
 `X-Gateway-Caveman-Mode`, `X-Gateway-Headroom-Profile`, `X-Gateway-Squoze`
 and `X-Gateway-Saved-Bytes` / `X-Gateway-Saved-Tokens`.
 
+**Cost of these passes.** They trade gateway CPU for upstream tokens, and the
+cost scales with body size rather than request rate: measured against a
+fake-upstream at 20 concurrent, RTK adds ~12ms on a 97 KiB body and ~110ms on
+633 KiB, while the gateway's own overhead without optimizers stays at ~0.1ms.
+Headroom is the exception — on large bodies it raises throughput above baseline,
+because pruning shrinks what the upstream has to read. Per-mode numbers, payload
+profiles and methodology: [docs/benchmarks.md](docs/benchmarks.md).
+
 **Reasoning models note**: reasoning-capable upstreams (DeepSeek R/V-series,
 o-series, Claude extended thinking) spend your `max_tokens` on hidden
 `reasoning_content` *before* any visible content — a small limit yields an

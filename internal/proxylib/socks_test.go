@@ -239,13 +239,18 @@ func dialEcho(t *testing.T, e Entry, target string) {
 	}
 }
 
+// These exercise the SOCKS5 handshake (no-auth and user/pass), not DNS, so the
+// target is "localhost": socks5 resolves the target locally, and a public
+// hostname would make the handshake tests depend on external DNS. That matters
+// most for the wrong-password case below, where a DNS failure would satisfy the
+// "connection refused" assertion without the proxy ever rejecting the auth.
 func TestDialSOCKS5NoAuth(t *testing.T) {
 	srv := startSOCKS5(t, nil)
 	e, err := ParseEntry("socks5://" + srv.addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dialEcho(t, e, "example.com:443")
+	dialEcho(t, e, "localhost:443")
 }
 
 func TestDialSOCKS5Auth(t *testing.T) {
@@ -254,7 +259,7 @@ func TestDialSOCKS5Auth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dialEcho(t, e, "example.com:443")
+	dialEcho(t, e, "localhost:443")
 
 	bad, err := ParseEntry("socks5://user:wrong@" + srv.addr)
 	if err != nil {
@@ -262,7 +267,7 @@ func TestDialSOCKS5Auth(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if conn, err := bad.DialContext(ctx, "tcp", "example.com:443"); err == nil {
+	if conn, err := bad.DialContext(ctx, "tcp", "localhost:443"); err == nil {
 		conn.Close()
 		t.Fatal("wrong credentials should fail")
 	}

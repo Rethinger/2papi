@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { pool as defaultPool, type Queryable } from './db';
+import { pool as defaultPool, txOn, type Queryable } from './db';
 import { problem, ApiError } from './api';
 import { env } from './env';
 import { requireHosted } from './edition';
@@ -98,20 +98,19 @@ export async function verifyCore(req: Request, deps: CloudAuthDeps = cloudAuthDe
     }
 
     const bonus = env.SIGNUP_BONUS_USD;
-    await db.query('BEGIN');
-    try {
-      await db.query('UPDATE users SET email_verified_at=now(), updated_at=now() WHERE id=$1', [row.user_id]);
-      await db.query('DELETE FROM email_verification_tokens WHERE user_id=$1', [row.user_id]);
+    await txOn(db, async client => {
+      await client.query('UPDATE users SET email_verified_at=now(), updated_at=now() WHERE id=$1', [row.user_id]);
+      await client.query('DELETE FROM email_verification_tokens WHERE user_id=$1', [row.user_id]);
 
-      const team = (await db.query(
+      const team = (await client.query(
         `INSERT INTO teams (name, enabled, budget_usd, balance_usd) VALUES ($1, true, 0, $2) RETURNING id`,
         [row.email, bonus],
       )).rows[0];
-      await db.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1,$2,'owner')`, [team.id, row.user_id]);
+      await client.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1,$2,'owner')`, [team.id, row.user_id]);
       if (bonus > 0) {
         // Idempotent by UNIQUE(source, external_id): a retried verification
         // can never double-grant.
-        await db.query(
+        await client.query(
           `INSERT INTO credit_transactions (team_id, delta_usd, kind, source, external_id)
            VALUES ($1,$2,'bonus','signup_bonus',$3)`,
           [team.id, bonus, row.user_id],
@@ -119,16 +118,12 @@ export async function verifyCore(req: Request, deps: CloudAuthDeps = cloudAuthDe
       }
       const plaintext = `sk-cp-${crypto.randomBytes(24).toString('base64url')}`;
       const keyHash = crypto.createHmac('sha256', process.env.GATEWAY_SHARED_SECRET ?? 'dev-secret-change-me').update(plaintext).digest('hex');
-      await db.query(
+      await client.query(
         `INSERT INTO virtual_keys (name,key_hash,key_prefix,enabled,models,rpm,team_id,budget_usd)
          VALUES ('default',$1,'sk-cp',true,'{}',60,$2,0)`,
         [keyHash, team.id],
       );
-      await db.query('COMMIT');
-    } catch (err) {
-      await db.query('ROLLBACK');
-      throw err;
-    }
+    });
     return Response.json({ data: { ok: true } });
   } catch (e) {
     return problem(e);

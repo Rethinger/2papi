@@ -21,3 +21,11 @@ models:
   - alias: bench-model
     upstream_model: gpt-bench
     accounts: [fake-primary]
+  # Squoze has no request header (it is config-exclusive with rtk/caveman/
+  # headroom), so the mode matrix reaches it through a second alias on the
+  # same gateway process.
+  - alias: bench-squoze
+    upstream_model: gpt-bench
+    accounts: [fake-primary]
+    optimization:
+      squoze: true

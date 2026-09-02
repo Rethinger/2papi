@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { pool as defaultPool, type Queryable } from './db';
+import { pool as defaultPool, txOn, type Queryable } from './db';
 import { problem, ApiError } from './api';
 import { env } from './env';
 import { requireHosted } from './edition';
@@ -77,24 +77,20 @@ export async function paddleWebhookCore(req: Request, deps: WebhookDeps = webhoo
     const delta = Number(event.data.total) / 100;
     if (!(delta > 0)) throw new ApiError(422, 'invalid_amount', `Total ${event.data.total} is not a positive amount`);
 
-    await db.query('BEGIN');
-    try {
-      const inserted = await db.query(
+    const credited = await txOn(db, async client => {
+      const inserted = await client.query(
         `INSERT INTO credit_transactions (team_id, delta_usd, kind, source, external_id, note)
          VALUES ($1,$2,'topup','paddle',$3,$4)
          ON CONFLICT (source, external_id) WHERE external_id <> '' DO NOTHING RETURNING id`,
         [teamId, delta, event.data.id, `paddle transaction ${event.data.id}`],
       );
       if (inserted.rows[0]) {
-        await db.query('UPDATE teams SET balance_usd = balance_usd + $2, updated_at=now() WHERE id=$1', [teamId, delta]);
-        await audit(db, 'topup', 'team', teamId, { source: 'paddle', external_id: event.data.id, delta_usd: delta });
+        await client.query('UPDATE teams SET balance_usd = balance_usd + $2, updated_at=now() WHERE id=$1', [teamId, delta]);
+        await audit(client, 'topup', 'team', teamId, { source: 'paddle', external_id: event.data.id, delta_usd: delta });
       }
-      await db.query('COMMIT');
-      return Response.json({ data: { ok: true, credited: Boolean(inserted.rows[0]), delta_usd: delta } });
-    } catch (err) {
-      await db.query('ROLLBACK');
-      throw err;
-    }
+      return Boolean(inserted.rows[0]);
+    });
+    return Response.json({ data: { ok: true, credited, delta_usd: delta } });
   } catch (e) {
     return problem(e);
   }

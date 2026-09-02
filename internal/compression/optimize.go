@@ -74,9 +74,24 @@ func OptimizeRequest(body []byte, o OptimizeOptions) ([]byte, OptimizeResult) {
 		return body, res
 	}
 
-	// Fast path: RTK skips tiny bodies without parsing (unchanged behavior).
-	if !o.Headroom && !o.Caveman && o.RTK && len(body) < MinCompressBytes {
-		return body, res
+	// Fast path: skip the parse when no enabled pass can possibly fire. Each
+	// pass has an O(1) precondition on the raw bytes — RTK needs a body at
+	// least MinCompressBytes, headroom needs the estimate to reach the reserve,
+	// caveman can always inject — and both size gates are re-checked below, so
+	// a body failing all of them would parse, walk, and return unchanged. That
+	// parse is the whole cost: an explicit headroom profile on a 97 KiB body
+	// spent ~8.8ms reaching a no-op, while `headroom auto` (which resolves
+	// against the same estimate before setting the flag) spent 0.02ms.
+	if !o.Caveman {
+		rtkPossible := o.RTK && len(body) >= MinCompressBytes
+		headroomPossible := false
+		if o.Headroom {
+			_, reserve := o.headroomParams()
+			headroomPossible = estimatedTokens(body) >= reserve
+		}
+		if !rtkPossible && !headroomPossible {
+			return body, res
+		}
 	}
 
 	var root map[string]json.RawMessage

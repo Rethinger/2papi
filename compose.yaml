@@ -102,6 +102,22 @@ services:
     depends_on:
       - gateway-bench
 
+  # Виток 8: optimization-mode matrix (baseline vs each mode, per payload size).
+  bench-matrix:
+    profiles: ["bench"]
+    image: node:22-alpine
+    working_dir: /bench
+    volumes: ["./test:/bench"]
+    environment:
+      GATEWAY_URL: http://gateway-bench:8080
+      BENCH_MATRIX: "1"
+      BENCH_MATRIX_CONC: "20"
+      BENCH_DURATION_MS: "6000"
+      BENCH_PAYLOADS: "small,large,huge"
+    command: node bench.mjs
+    depends_on:
+      - gateway-bench
+
 volumes:
   papi-postgres:
   papi-redis:

@@ -3,12 +3,10 @@ module github.com/Rethinger/2papi
 go 1.22
 
 require (
-	github.com/Rethinger/squoze v0.1.1
+	github.com/Rethinger/squoze v0.1.2
 	golang.org/x/net v0.33.0
 	gopkg.in/yaml.v3 v3.0.1
 )
-
-replace github.com/Rethinger/squoze => ../squoze
 
 require (
 	github.com/grandcat/zeroconf v1.0.0

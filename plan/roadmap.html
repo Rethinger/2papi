@@ -177,8 +177,8 @@ const DATA = {
           evidence: 'compression.OptimizeRequest — один parse/marshal на headroom+RTK+caveman; байт-семантика прежняя (023efcd)' },
         { name: 'README Optimization-секция + полный QA (виток 6)', status: 'done',
           evidence: 'README раздел Optimization modes; go test ./... + npm test + tsc зелёные (2026-09-02)' },
-        { name: 'Бенчмарки overhead по режимам (виток 8)', status: 'pending',
-          evidence: 'замеры was→became по режимам на test/bench.mjs; нужен Docker-стенд' },
+        { name: 'Бенчмарки overhead по режимам (виток 8)', status: 'done',
+          evidence: 'матрица 14 режимов × 3 профиля payload на Docker-стенде; числа и выводы в docs/benchmarks.md; починен headroom fast-path; commit a5d7a0f' },
         { name: 'Cache: per-model exact + TTL + LRU (виток 9/G4)', status: 'done',
           evidence: 'config.Model.cache off|exact + cache_ttl; LRU-эвикция в internal/cache (540e174); governor B3 — отдельный дизайн' },
       ],
@@ -186,7 +186,7 @@ const DATA = {
     {
       id: 'p5',
       name: 'P5 · Build-хребет (OSS/Ent/Cloud)',
-      scope: 'Лицензия, метрики, orgs, SSO, sources[], signup, аудит',
+      scope: 'Лицензия, метрики, orgs, SSO, sources[], signup, аудит, CI/CD релизы',
       items: [
         { name: 'License-key сервис Ed25519 (ent/cloud)', status: 'done',
           evidence: 'internal/license + edition-gate; миграции 011-014; 32078bb' },
@@ -200,6 +200,8 @@ const DATA = {
           evidence: 'config.Model.Sources + снапшот; роутинг/телеметрия per-source' },
         { name: 'Signup/кредиты/баланс (Cloud)', status: 'done',
           evidence: 'cloud-auth + signup bonus + policy min(budget,balance) (шаг 6/7 закрыт)' },
+        { name: 'CI/CD автоматизация релизов и первый релиз v0.3.0', status: 'done',
+          evidence: 'goreleaser + CI на теги v*; prebuilt бинарники для linux/darwin/windows; install.sh/ps1 без Go; релиз v0.3.0 опубликован (97a75d2, 7f6df06, a95fc6d, e12cd1e)' },
       ],
     },
   ],

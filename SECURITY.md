@@ -10,8 +10,10 @@ backport to older tags.
 
 **Do not open a public issue for security reports.**
 
-Email **security@2papi.dev** (or open a GitHub private security advisory via
-*Security → Report a vulnerability*). You will get an acknowledgement within
+Use GitHub private vulnerability reporting: *Security → Report a vulnerability*
+on [github.com/Rethinger/2papi](https://github.com/Rethinger/2papi/security/advisories/new).
+It is enabled on this repo, so the report reaches the maintainers privately and
+you get a thread to discuss the fix in. You will get an acknowledgement within
 72 hours and a fix timeline within 7 days. Please include:
 
 - affected version / commit;

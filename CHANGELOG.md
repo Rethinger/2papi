@@ -2,6 +2,44 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## v0.3.0 — 2026-09-02
+
+First release built and published by CI. 77 commits since `v0.2.0`
+(2026-08-20) — that tag predates everything below, which is why it was not
+backfilled as a release.
+
+Highlights, each detailed in the dated entries that follow:
+
+- **Token savers** — RTK compression, Caveman terse mode and Headroom context
+  pruning as configurable modes with a request → virtual-key → model → global
+  cascade, smart `auto` heuristics, echo headers, a dashboard UI, and a
+  single-pass body pipeline. Measured per-mode overhead and payload profiles are
+  in [docs/benchmarks.md](docs/benchmarks.md).
+- **Guardrails** (G5) — PII regex plus prompt-injection heuristics in
+  `log | redact | block` modes.
+- **Response cache** (G4) — per-model exact cache with TTL and LRU eviction.
+- **OpenTelemetry** (G3) — GenAI spans exported over OTLP.
+- **MCP gateway** (G2) — tool-surface pinning with audit and optional block.
+- **Budgets** (G1) — per-key `budget_duration` with day/month reset windows.
+- **Operator API and control plane** — bearer-JWT programmatic access, per-IP
+  rate limiting on signup/login/verify, tenant-facing billing, MCP management
+  view, `/status` endpoint, and enterprise IP allowlisting.
+- **Embedded [squoze](https://github.com/Rethinger/squoze)** as an experimental
+  exclusive compression mode, consumed as a published module (v0.1.2) rather than
+  a local `replace` directive.
+
+### Release engineering
+
+- CI now triggers on `v*` tags. The `release` job was gated on
+  `refs/tags/v*` while the workflow only listened on `branches: [master]`, so a
+  tag push started no workflow and the job was unreachable — which is why
+  `v0.2.0` never produced a release.
+- `.goreleaser.yaml` no longer uses deprecated properties (`archives.builds`,
+  `archives.format_overrides.format`), so `goreleaser check` passes; CI pins
+  goreleaser to `latest` and a v3 would otherwise have broken releases.
+- `install.sh` / `install.ps1` no longer fall back to a `v0.1.0` tag that never
+  existed; they explain the situation and point at `go install` or Docker.
+
 ## 2026-09-02 — G3: OpenTelemetry GenAI traces (OTLP)
 
 - `internal/telemetry/otel.go`: когда задан `OTEL_EXPORTER_OTLP_ENDPOINT`

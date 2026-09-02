@@ -1,48 +1,65 @@
-# Release v0.2.0
+# Releasing 2papi
 
-**2papi — lightweight multi-account AI gateway.** Faster than LiteLLM (p95 ~3-5ms vs 15-40ms), single ~11MB binary, no Docker required to run.
+Releases are cut by pushing a `v*` tag. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+runs goreleaser on that tag and publishes archives + `checksums.txt` to GitHub
+Releases. Latest: [releases/latest](https://github.com/Rethinger/2papi/releases/latest).
 
-## What's inside
-
-- **8 provider families**: free/no-auth (`opencode`, `felo`, `qoder`), OAuth subscription (`cursor`, `copilot`, `kimi`), plus `deepseek`, `claude` (api/oauth/cookie), `codex`, `gemini` and any OpenAI-compatible upstream.
-- **Token savers** (9Router-style): RTK (command-aware: git/test/grep), Caveman, Headroom — per-model/per-key, opt-in by `X-Gateway-*` headers.
-- **DeepSeek-aware**: thinking-toggling, `reasoning_content` CoT compression (effort-aware), fast-TTF SSE (first content never blocked by CoT).
-- **Quota dashboard**: `internal/quota` tracker + `GET /api/quota` and `GET /api/control/v1/quota` — combined % bar + per-provider breakdown (contract in `open-design/console/dashboard-plan.md`).
-- **Subscription-CLI headers** (claude-code / codex) — quota burns like the official CLI.
-- **2papi.local** over mDNS (Bonjour, pure Go) or `/etc/hosts`; `2papi tui/init/advert`.
-- **Plugins** (ds-h-like, pragmatic): in-proc hooks + HTTP sidecars, 10ms TTF budget, `plugins:` in config, `GET /api/plugins`.
-- **Lite mode**: single binary, embedded dashboard (`go:embed`), file-backed store — no Postgres/Redis.
-- **Performance**: 16-way sharded policy Auth (~10ns key pick, Bifrost-style), RWMutex resilience, atomic request-ID, zero-copy streaming.
-
-## Getting it
+## Runbook
 
 ```sh
-# Binary (after tags pushed)
-curl -fsSL https://raw.githubusercontent.com/Rethinger/2papi/main/install.sh | sh
-2papi tui    # interactive menu
+# 1. Version metadata is stamped from the tag by goreleaser (ldflags),
+#    so there is no version constant to bump. Update the changelog:
+$EDITOR CHANGELOG.md          # add a section for the new version
 
-# Docker
-docker compose up --build
-# or single binary
-docker build -t 2papi . && docker run -p 8080:8080 2papi
+# 2. Sanity-check the release config without publishing anything:
+goreleaser check              # must report 0 deprecations
+goreleaser release --snapshot --clean   # builds all targets locally into dist/
+
+# 3. Land the changelog, then tag:
+git push origin master
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-## Pushing this release
+The tag push triggers `go-test`, `control-plane-test`, `docker` and then
+`release`. The release job is gated on `startsWith(github.ref, 'refs/tags/v')`
+**and** on `on.push.tags: ['v*']` — without the trigger the job is unreachable and
+silently never runs, which is why no release existed before v0.3.0.
 
-From the repo root (run on a machine with GitHub access):
+## Verifying a release
 
 ```sh
-git push -u origin master
-git tag v0.2.0
-git push origin v0.2.0
-# goreleaser fires on the tag (CI: .github/workflows/ci.yml) →
-# Linux/macOS/Windows binaries + checksums.txt + install.sh
+gh release view vX.Y.Z --json isDraft,assets --jq '{draft:.isDraft,assets:[.assets[].name]}'
+curl -s https://api.github.com/repos/Rethinger/2papi/releases/latest | grep tag_name
 ```
 
-If GitHub Actions is not yet enabled, build manually:
+Then exercise the install path a user actually takes, in a container without Go:
+
 ```sh
-goreleaser release --clean        # needs GITHUB_TOKEN
-# or
-make cross          # dist/2papi_{linux,darwin,windows}_{amd64,arm64}[.exe]
-make build          # bin/2papi (host)
+docker run --rm alpine:3 sh -c 'apk add --no-cache curl tar >/dev/null &&
+  INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/Rethinger/2papi/master/install.sh)" &&
+  2papi version'
 ```
+
+`2papi version` must print the tagged version — `dev (commit none)` means the
+binary was built without ldflags (i.e. from source, not from the release).
+
+## Manual fallback
+
+If Actions is unavailable:
+
+```sh
+goreleaser release --clean    # needs GITHUB_TOKEN with contents:write
+# or, archives only, no publishing:
+make cross                    # dist/2papi_{linux,darwin,windows}_{amd64,arm64}[.exe]
+make build                    # bin/2papi (host)
+```
+
+## Distribution notes
+
+- `install.sh` / `install.ps1` derive archive names by convention
+  (`2papi_<os>_<arch>.tar.gz`, `.zip` on Windows) from `.goreleaser.yaml`'s
+  `name_template`. Changing that template breaks both scripts — change them together.
+- Windows/macOS binaries are unsigned, so SmartScreen and Gatekeeper will warn.
+- Brew/scoop taps are configured but commented out in `.goreleaser.yaml`; they
+  publish once `Rethinger/homebrew-tap` and `Rethinger/scoop-bucket` exist.

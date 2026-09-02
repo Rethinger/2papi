@@ -52,7 +52,7 @@ Requirements: [requirements.md](requirements.md)
 
 ## Phase 3 — First release
 
-- [ ] **TSK-006**: Tag a release from current `master`.
+- [x] **TSK-006**: Tag a release from current `master`.
   - Requirement: FR-1, AC-1.1, Edge cases
   - Detail: a **new** tag (`v0.3.0` — `master` is far ahead of `v0.2.0`: squoze
     dependency, optimization modes, guardrails, cache, OTel). Releasing
@@ -62,20 +62,25 @@ Requirements: [requirements.md](requirements.md)
   - Acceptance: published Release exists with all five archives and
     `checksums.txt`.
 
-- [ ] **TSK-007**: Verify the install path end to end.
+- [x] **TSK-007**: Verify the install path end to end.
   - Requirement: FR-3, AC-3.1, AC-3.2
   - Detail: in a container **without** Go, run `install.sh` and confirm it
     downloads a prebuilt binary (no "building from source" message) and that
     `2papi version` prints the tagged version rather than `dev`.
   - Acceptance: both hold.
 
-- [ ] **TSK-008**: Update install docs to lead with the release path.
+- [x] **TSK-008**: Update install docs to lead with the release path.
   - Requirement: FR-3
-  - Deliverables: `README.md`
+  - Deliverables: `README.md`, `RELEASE.md`
   - Detail: the README currently documents the no-release reality
     ("No published releases yet", `go install` first). Once a release exists,
     promote the script/binary path and delete that section.
   - Acceptance: no README statement about releases is false.
+  - Done: install script leads, then manual download, Docker, `go install` last.
+    Removed the "No published releases yet" section and a duplicated
+    "Interactive controls" block. `RELEASE.md` was titled "Release v0.2.0" and
+    pointed at `/main/install.sh` (HTTP 404 — the branch is `master`); rewritten
+    as a version-agnostic runbook so it cannot go stale per release.
 
 ## Dependency graph
 
@@ -98,6 +103,39 @@ TSK-006 → TSK-007 → TSK-008
 | TSK-003 re-verify snapshot | Complete |
 | TSK-004 stale MIT comment | Complete |
 | TSK-005 install.sh phantom fallback | Complete |
-| TSK-006 tag first release | Pending |
-| TSK-007 verify install path | Pending |
-| TSK-008 promote release path in README | Pending |
+| TSK-006 tag first release | Complete |
+| TSK-007 verify install path | Complete |
+| TSK-008 promote release path in README | Complete |
+
+## Evidence
+
+- **TSK-006** — `v0.3.0` published by CI run 33663522701 (Go test + vet ✅,
+  Control-plane ✅, Docker ✅, Goreleaser ✅ — the job that had never once run).
+  Five archives + `checksums.txt`, `draft: false`, marked Latest.
+- **TSK-007** — `alpine:3` container, no Go present (asserted, not assumed):
+  `install.sh` took the prebuilt path (no "building from source"), and
+  `2papi version` → `2papi 0.3.0 (commit a95fc6d…, built 2026-09-02T17:52:26Z)`,
+  confirming the goreleaser ldflags land.
+- **FR-3 side effect** — the Go module proxy still served `v0.2.0` for `@latest`
+  after the release, and that tag does not compile (`undefined: defaultHostname`,
+  `undefined: AdvertMDNS` in `cmd/gateway/main.go`). Requesting
+  `proxy.golang.org/.../@v/v0.3.0.info` (HTTP 200) made the proxy index it;
+  `go install …@latest` then succeeded. This is why the README no longer pins
+  `@master`.
+- **TSK-008** — all URLs in `README.md` / `RELEASE.md` return 200 (`releases/latest`,
+  `tags`, both raw install scripts, all five badges); `make cross` and `make build`
+  exist at `Makefile:35` and `Makefile:20`. `mcp.example.com` is an intentional
+  config placeholder. No dangling `#no-published-releases-yet` anchors remain.
+
+## Deliberate non-actions
+
+- **`v0.2.0` is left as a bare tag with no Release.** Unlike squoze — where the
+  unreleased `v0.1.2` was backfilled — this tag does not compile
+  (`undefined: defaultHostname`, `undefined: AdvertMDNS` in `cmd/gateway/main.go`,
+  reproduced with `go install …@v0.2.0`). A Release page would advertise
+  unbuildable software. Publishing it would also move the *Latest* flag off
+  `v0.3.0`, since GitHub assigns Latest by publish date rather than semver — a
+  trap actually hit in the squoze repo and documented in
+  [../../../squoze/.kiro/specs/release-automation/tasks.md](../../../squoze/.kiro/specs/release-automation/tasks.md).
+- The non-semver tag `aggg-session-20260821` does not match `v*` and so triggers
+  no release, which is correct.

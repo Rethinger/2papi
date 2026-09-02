@@ -35,18 +35,25 @@ Strategy details: [docs/strategy-v3.md](docs/strategy-v3.md). Error codes: [docs
 
 ## Install
 
-**Go toolchain (verified, no release needed):**
+**Install script (no Go toolchain needed)** — downloads the prebuilt binary for
+your platform from the [latest release](https://github.com/Rethinger/2papi/releases/latest):
 
 ```sh
-go install github.com/Rethinger/2papi/cmd/gateway@master
-gateway --config ~/.2papi/config.yaml
-# Dashboard: http://localhost:8080/dashboard/   Gateway: http://localhost:8080/v1/chat/completions
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/Rethinger/2papi/master/install.sh | sh
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/Rethinger/2papi/master/install.ps1 | iex
+
+2papi version   # 2papi 0.3.0 (commit …, built …)
 ```
 
-> Installed via `go install`, the binary is named `gateway` (from `cmd/gateway`).
-> Rename it to `2papi` if you want the command names used throughout these docs.
-> `@master` is deliberate: the newest tag (`v0.2.0`) predates the optimization
-> modes, guardrails and cache described below.
+If no prebuilt archive matches your platform the script builds from source, which
+does require Go.
+
+**Manual download:** grab an archive from
+[Releases](https://github.com/Rethinger/2papi/releases/latest) — `2papi_<os>_<arch>.tar.gz`
+(`.zip` on Windows), verify it against `checksums.txt`, and put the `2papi` binary
+on your `PATH`.
 
 **Docker (full stack — gateway + Postgres + Redis + control-plane):**
 
@@ -56,33 +63,18 @@ docker compose up --build
 docker build -t 2papi . && docker run -p 8080:8080 2papi
 ```
 
-**Install scripts** — these prefer a prebuilt binary from GitHub Releases and
-fall back to building from source, so today they need a Go toolchain (see
-[No published releases yet](#no-published-releases-yet)):
+**Go toolchain** (for development, or platforms without an archive):
 
 ```sh
-# Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/Rethinger/2papi/master/install.sh | sh
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/Rethinger/2papi/master/install.ps1 | iex
+go install github.com/Rethinger/2papi/cmd/gateway@latest
+gateway --config ~/.2papi/config.yaml
+# Dashboard: http://localhost:8080/dashboard/   Gateway: http://localhost:8080/v1/chat/completions
 ```
 
-Interactive controls (like 9router):
-
-```sh
-2papi tui      # menu: Start / Providers / Quota / Plugins / 2papi.local
-2papi init     # enable http://2papi.local via hosts (Y/n)
-```
-
-### No published releases yet
-
-The repo has a tag (`v0.2.0`) but no GitHub Release, so there are no prebuilt
-archives to download: `install.sh` / `install.ps1` will report *"Release not
-found, building from source"* and require Go, erroring out with a pointer to
-Docker if Go is missing. Goreleaser is configured
-([.goreleaser.yaml](.goreleaser.yaml)) and CI runs it on `v*` tags, so prebuilt
-binaries appear with the first published release. Until then prefer `go install`
-or Docker above.
+> Two differences from the release binaries: `go install` names the binary
+> `gateway` (after `cmd/gateway`) rather than `2papi`, and it reports
+> `dev (commit none)` because version metadata is stamped at release time.
+> Rename it to `2papi` to match the command names used throughout these docs.
 
 *Brew/scoop taps publish once the companion `Rethinger/homebrew-tap` and `Rethinger/scoop-bucket` repos exist (see RELEASE.md).*
 

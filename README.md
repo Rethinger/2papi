@@ -1,6 +1,14 @@
-# 2papi Multi-account AI Gateway
+# 2papi — Multi-account AI Gateway
 
 [![CI](https://github.com/Rethinger/2papi/actions/workflows/ci.yml/badge.svg)](https://github.com/Rethinger/2papi/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Rethinger/2papi.svg)](https://pkg.go.dev/github.com/Rethinger/2papi)
+[![Go version](https://img.shields.io/github/go-mod/go-version/Rethinger/2papi)](go.mod)
+[![Latest tag](https://img.shields.io/github/v/tag/Rethinger/2papi?label=version&sort=semver)](https://github.com/Rethinger/2papi/tags)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+*Self-hosted, OpenAI-compatible gateway that pools Claude / ChatGPT / Gemini
+subscription accounts behind one endpoint — with virtual keys, budgets, built-in
+token savers and an MCP gateway. One static Go binary, no Python.*
 
 **A Go AI gateway for teams that outgrew LiteLLM.** Same virtual-key/budget
 model, but: **TTF overhead <5ms** (LiteLLM's Rust rewrite targets ~8ms p95),
@@ -25,28 +33,56 @@ OpenAI Codex account setup, model discovery, quota/reset safety, and validation 
 
 Strategy details: [docs/strategy-v3.md](docs/strategy-v3.md). Error codes: [docs/error-catalog.md](docs/error-catalog.md). Security policy: [SECURITY.md](SECURITY.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Quick Install (30s)
+## Install
 
-**No Docker, no Go required — single binary with embedded dashboard:**
+**Go toolchain (verified, no release needed):**
+
+```sh
+go install github.com/Rethinger/2papi/cmd/gateway@master
+gateway --config ~/.2papi/config.yaml
+# Dashboard: http://localhost:8080/dashboard/   Gateway: http://localhost:8080/v1/chat/completions
+```
+
+> Installed via `go install`, the binary is named `gateway` (from `cmd/gateway`).
+> Rename it to `2papi` if you want the command names used throughout these docs.
+> `@master` is deliberate: the newest tag (`v0.2.0`) predates the optimization
+> modes, guardrails and cache described below.
+
+**Docker (full stack — gateway + Postgres + Redis + control-plane):**
+
+```sh
+docker compose up --build
+# or the gateway alone
+docker build -t 2papi . && docker run -p 8080:8080 2papi
+```
+
+**Install scripts** — these prefer a prebuilt binary from GitHub Releases and
+fall back to building from source, so today they need a Go toolchain (see
+[No published releases yet](#no-published-releases-yet)):
 
 ```sh
 # Linux / macOS
 curl -fsSL https://raw.githubusercontent.com/Rethinger/2papi/master/install.sh | sh
-2papi --config ~/.2papi/config.yaml
-# Dashboard: http://localhost:8080/dashboard/   Gateway: http://localhost:8080/v1/chat/completions
-
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/Rethinger/2papi/master/install.ps1 | iex
+```
 
-# Interactive controls (like 9router):
+Interactive controls (like 9router):
+
+```sh
 2papi tui      # menu: Start / Providers / Quota / Plugins / 2papi.local
 2papi init     # enable http://2papi.local via hosts (Y/n)
-
-# Docker (full stack)
-docker compose up --build
-# or single binary container
-docker build -t 2papi . && docker run -p 8080:8080 2papi
 ```
+
+### No published releases yet
+
+The repo has a tag (`v0.2.0`) but no GitHub Release, so there are no prebuilt
+archives to download: `install.sh` / `install.ps1` will report *"Release not
+found, building from source"* and require Go, erroring out with a pointer to
+Docker if Go is missing. Goreleaser is configured
+([.goreleaser.yaml](.goreleaser.yaml)) and CI runs it on `v*` tags, so prebuilt
+binaries appear with the first published release. Until then prefer `go install`
+or Docker above.
 
 *Brew/scoop taps publish once the companion `Rethinger/homebrew-tap` and `Rethinger/scoop-bucket` repos exist (see RELEASE.md).*
 

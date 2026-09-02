@@ -280,6 +280,13 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 			squozeActive = true
 			w.Header().Set("X-Gateway-Squoze", strconv.FormatBool(res.BlocksSqueezed > 0))
 			w.Header().Set("X-Gateway-Squoze-Format", res.Format.String())
+			w.Header().Set("X-Gateway-Squoze-Latency-Ms", fmt.Sprintf("%.2f", res.DurationMS))
+			if len(res.Transforms) > 0 {
+				w.Header().Set("X-Gateway-Squoze-Transforms", strings.Join(res.Transforms, ","))
+			}
+			if res.MemoHits > 0 {
+				w.Header().Set("X-Gateway-Squoze-Memo-Hits", strconv.Itoa(res.MemoHits))
+			}
 			if res.SavedBytes > 0 {
 				w.Header().Set("X-Gateway-Saved-Bytes", strconv.Itoa(res.SavedBytes))
 				w.Header().Set("X-Gateway-Saved-Tokens", strconv.Itoa(res.SavedBytes/4))

@@ -23,11 +23,12 @@ builds:
         goarch: arm64
 archives:
   - id: tarball
-    builds: [gateway]
+    ids: [gateway]
     name_template: "2papi_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - src: README.md
         dst: README.md
@@ -57,11 +58,11 @@ release:
 #     folder: Formula
 #     homepage: https://github.com/Rethinger/2papi
 #     description: "Lightweight AI Gateway — faster than LiteLLM, 9Router token savers"
-#     license: MIT
+#     license: Apache-2.0
 # scoop:
 #   repository:
 #     owner: Rethinger
 #     name: scoop-bucket
 #   homepage: https://github.com/Rethinger/2papi
 #   description: "Lightweight AI Gateway — faster than LiteLLM, 9Router token savers"
-#   license: MIT
+#   license: Apache-2.0

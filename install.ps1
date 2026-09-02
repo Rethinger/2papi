@@ -14,7 +14,15 @@ function Get-LatestVersion {
     $latest = (Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest").tag_name
     if ($latest) { return $latest }
   } catch {}
-  return "v0.1.0"
+  # No published release (or the API is unreachable). Don't guess a tag —
+  # a made-up version just turns this into a confusing 404 later.
+  Write-Host "No published release found for $Repo." -ForegroundColor Yellow
+  Write-Host "Install from source instead:"
+  Write-Host "  go install github.com/Rethinger/2papi/cmd/gateway@master"
+  Write-Host "or run the full stack with Docker:"
+  Write-Host "  docker compose up --build"
+  Write-Host "To pin a specific tag once releases exist: -Version vX.Y.Z"
+  exit 1
 }
 
 $Platform = Get-Platform

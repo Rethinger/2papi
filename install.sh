@@ -29,10 +29,17 @@ get_latest_version() {
     echo "$VERSION"
     return
   fi
-  # Try GitHub API, fallback to v0.1.0 if offline
   LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/' || true)
   if [ -z "$LATEST" ]; then
-    LATEST="v0.1.0"
+    # No published release (or the API is unreachable). Don't guess a tag —
+    # a made-up version just turns this into a confusing 404 later.
+    echo "No published release found for ${REPO}." >&2
+    echo "Install from source instead:" >&2
+    echo "  go install github.com/Rethinger/2papi/cmd/gateway@master" >&2
+    echo "or run the full stack with Docker:" >&2
+    echo "  docker compose up --build" >&2
+    echo "To pin a specific tag once releases exist: VERSION=vX.Y.Z $0" >&2
+    exit 1
   fi
   echo "$LATEST"
 }

@@ -8,8 +8,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/Rethinger/squoze => ../squoze
-
 require (
 	github.com/grandcat/zeroconf v1.0.0
 	go.opentelemetry.io/otel v1.31.0

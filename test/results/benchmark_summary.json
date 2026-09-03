@@ -1,0 +1,26 @@
+{
+  "direct_benchmark": {
+    "without_squoze": {
+      "elapsed_sec": 125.08031797409058,
+      "usage": null,
+      "headers": {}
+    },
+    "with_squoze": {
+      "elapsed_sec": 125.22078084945679,
+      "usage": null,
+      "headers": {}
+    }
+  },
+  "agent_multiturn_benchmark": {
+    "without_squoze": {
+      "elapsed_sec": 0.8976538181304932,
+      "usage": null,
+      "headers": {}
+    },
+    "with_squoze": {
+      "elapsed_sec": 2.7922253608703613,
+      "usage": null,
+      "headers": {}
+    }
+  }
+}

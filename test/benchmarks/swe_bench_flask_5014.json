@@ -1,0 +1,49 @@
+{
+  "instance_id": "pallets__flask-5014",
+  "repo": "pallets/flask",
+  "problem_statement": "Blueprint name should not be allowed to be empty or contain only whitespace. Currently Blueprint('') succeeds, but later causes errors when generating endpoint names or url_for routes. Blueprint should raise a ValueError if name is empty.",
+  "system_instruction": "You are a senior open-source maintainer working on pallets/flask. Analyze the issue, inspect the provided file contents and test failure logs, and produce the exact unified diff patch to fix the issue. Output ONLY the git diff patch.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Resolve the issue in pallets/flask: Blueprint name should not be empty. Examine src/flask/blueprints.py and the failing test in tests/test_blueprints.py, then provide the patch."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_read_bp_001",
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"path\": \"src/flask/blueprints.py\"}"
+          }
+        },
+        {
+          "id": "call_pytest_bp_002",
+          "type": "function",
+          "function": {
+            "name": "run_pytest",
+            "arguments": "{\"test\": \"tests/test_blueprints.py::test_empty_name\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_read_bp_001",
+      "content": "import os\nimport typing as t\nfrom .scaffold import Scaffold\nfrom .scaffold import _sentinel\n\nclass Blueprint(Scaffold):\n    \"\"\"Represents a blueprint, a collection of routes and other\n    app-related functions that can be registered on a real application\n    later.\n    \"\"\"\n\n    warn_on_modifications = False\n    _got_first_request = False\n\n    def __init__(\n        self,\n        name: str,\n        import_name: str,\n        static_folder: t.Optional[t.Union[str, os.PathLike]] = None,\n        static_url_path: t.Optional[str] = None,\n        template_folder: t.Optional[t.Union[str, os.PathLike]] = None,\n        url_prefix: t.Optional[str] = None,\n        subdomain: t.Optional[str] = None,\n        url_defaults: t.Optional[dict] = None,\n        root_path: t.Optional[str] = None,\n        cli_group: t.Optional[str] = _sentinel,\n    ) -> None:\n        super().__init__(\n            import_name=import_name,\n            static_folder=static_folder,\n            static_url_path=static_url_path,\n            template_folder=template_folder,\n            root_path=root_path,\n        )\n\n        if \".\" in name:\n            raise ValueError(\"'name' may not contain a dot '.' character.\")\n\n        self.name = name\n        self.url_prefix = url_prefix\n        self.subdomain = subdomain\n        self.deferred_functions: t.List[t.Callable] = []\n\n    def route(self, rule: str, **options: t.Any) -> t.Callable:\n        def decorator(f: t.Callable) -> t.Callable:\n            endpoint = options.pop(\"endpoint\", f.__name__)\n            self.add_url_rule(rule, endpoint, f, **options)\n            return f\n        return decorator\n"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_pytest_bp_002",
+      "content": "============================= test session starts ==============================\nplatform linux -- Python 3.11.8, pytest-8.1.1, pluggy-1.4.0\nrootdir: /workspace/flask\nconfigfile: pyproject.toml\ntestpaths: tests\ncollected 88 items\n\ntests/test_blueprints.py .....................................................\n.........................F......                                         [100%]\n\n=================================== FAILURES ===================================\n_______________________________ test_empty_name ________________________________\n\ndef test_empty_name():\n    import pytest\n    from flask import Blueprint\n\n    with pytest.raises(ValueError, match=\"'name' may not be empty\"):\n>       Blueprint(\"\", __name__)\nE       Failed: DID NOT RAISE <class 'ValueError'>\n\ntests/test_blueprints.py:245: Failed\n=========================== short test summary info ============================\nFAILED tests/test_blueprints.py::test_empty_name - Failed: DID NOT RAISE <class 'ValueError'>\n========================= 1 failed, 87 passed in 0.88s =========================\n"
+    }
+  ],
+  "ground_truth": {
+    "file": "src/flask/blueprints.py",
+    "patterns": ["if not name:", "ValueError", "'name' may not be empty"],
+    "required_patch_subsequence": "if not name:"
+  }
+}

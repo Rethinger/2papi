@@ -1,0 +1,49 @@
+{
+  "instance_id": "django__django-16595",
+  "repo": "django/django",
+  "problem_statement": "Migration optimizer does not reduce multiple AlterField operations. When a migration has consecutive AlterField operations on the same field (for example altering null=True, then altering help_text='foo'), the migration optimizer should collapse them into a single AlterField operation.",
+  "system_instruction": "You are a core Django developer. Inspect the issue description, the current implementation of AlterField in django/db/migrations/operations/fields.py, and the failing test. Produce the exact git diff patch to fix the migration optimizer for AlterField.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Fix django__django-16595: Migration optimizer does not reduce multiple AlterField operations. Provide the exact unified diff patch."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_django_fields_001",
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"path\": \"django/db/migrations/operations/fields.py\"}"
+          }
+        },
+        {
+          "id": "call_django_test_002",
+          "type": "function",
+          "function": {
+            "name": "run_test",
+            "arguments": "{\"test\": \"tests.migrations.test_optimizer.OptimizerTests.test_alter_alter_field\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_django_fields_001",
+      "content": "class AlterField(FieldOperation):\n    \"\"\"\n    Alter a field's database column (e.g. null, max_length) to match the\n    current state.\n    \"\"\"\n\n    def __init__(self, model_name, name, field, preserve_default=True):\n        self.preserve_default = preserve_default\n        super().__init__(model_name, name, field)\n\n    def deconstruct(self):\n        kwargs = {\n            \"model_name\": self.model_name,\n            \"name\": self.name,\n            \"field\": self.field,\n        }\n        if self.preserve_default is not True:\n            kwargs[\"preserve_default\"] = self.preserve_default\n        return (self.__class__.__name__, [], kwargs)\n\n    def state_forwards(self, app_label, state):\n        state.alter_field(\n            app_label,\n            self.model_name_lower,\n            self.name,\n            self.field,\n            self.preserve_default,\n        )\n\n    def reduce(self, operation, app_label):\n        if isinstance(operation, RemoveField) and self.is_same_field_operation(operation):\n            return [operation]\n        return super().reduce(operation, app_label)\n"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_django_test_002",
+      "content": "Testing against Django installed in '/workspace/django/django'\nTraceback (most recent call last):\n  File \"/workspace/django/tests/migrations/test_optimizer.py\", line 112, in test_alter_alter_field\n    self.assertOptimizesTo(\n  File \"/workspace/django/tests/migrations/test_optimizer.py\", line 28, in assertOptimizesTo\n    self.assertEqual(\nAssertionError: Lists differ: [<AlterField model_name='book', name='title', field=<CharField>>, <AlterField model_name='book', name='title', field=<CharField: max_length=128>>] != [<AlterField model_name='book', name='title', field=<CharField: max_length=128>>]\n\nFirst differing element 0:\n<AlterField model_name='book', name='title', field=<CharField>>\n<AlterField model_name='book', name='title', field=<CharField: max_length=128>>\n\nFirst list contains 1 additional elements.\nFirst extra element 1:\n<AlterField model_name='book', name='title', field=<CharField: max_length=128>>\n\n----------------------------------------------------------------------\nRan 1 test in 0.004s\n\nFAILED (failures=1)\n"
+    }
+  ],
+  "ground_truth": {
+    "file": "django/db/migrations/operations/fields.py",
+    "patterns": ["isinstance(operation, AlterField)", "self.is_same_field_operation(operation)", "return [operation]"],
+    "required_patch_subsequence": "isinstance(operation, AlterField)"
+  }
+}

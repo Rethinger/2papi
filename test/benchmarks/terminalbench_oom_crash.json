@@ -1,0 +1,61 @@
+{
+  "instance_id": "terminalbench__v2_sys_042",
+  "category": "TerminalBench v2.1 CLI & System Diagnostics",
+  "task_description": "Production service payment-worker.service abruptly terminated with exit code 137. Inspect systemctl status, dmesg kernel logs, and the systemd unit file. Identify the exact root cause, explain why signal 9 (SIGKILL) was issued, and provide the fixed systemd unit configuration.",
+  "system_instruction": "You are a Linux systems engineer and site reliability specialist. Diagnose the process crash based on the CLI tools output. Explain the exact mechanism of exit code 137, identify the kernel oom-killer invocation, and output the corrected systemd unit file.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Our payment-worker daemon crashed in production with exit code 137. Please inspect systemctl status, dmesg, and the service file to find the cause and fix it."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_systemctl_001",
+          "type": "function",
+          "function": {
+            "name": "systemctl_status",
+            "arguments": "{\"unit\": \"payment-worker.service\"}"
+          }
+        },
+        {
+          "id": "call_dmesg_002",
+          "type": "function",
+          "function": {
+            "name": "dmesg",
+            "arguments": "{\"filter\": \"oom\"}"
+          }
+        },
+        {
+          "id": "call_cat_unit_003",
+          "type": "function",
+          "function": {
+            "name": "cat_file",
+            "arguments": "{\"path\": \"/etc/systemd/system/payment-worker.service\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_systemctl_001",
+      "content": "● payment-worker.service - Payment Queue Processor Daemon\n     Loaded: loaded (/etc/systemd/system/payment-worker.service; enabled; vendor preset: enabled)\n     Active: failed (Result: oom-kill) since Thu 2026-09-03 01:42:10 UTC; 4min ago\n   Duration: 42min 18.291s\n    Process: 19842 ExecStart=/usr/local/bin/payment-worker (code=killed, signal=KILL)\n   Main PID: 19842 (code=killed, signal=KILL)\n     Status: \"Processing queue batch\"\n      Tasks: 0 (limit: 4915)\n     Memory: 8.2M (peak: 4.1G, max: 4.0G)\n        CPU: 1min 12.482s\n\nSep 03 01:42:09 prod-srv-04 payment-worker[19842]: [INFO] Processing batch size=50000 items\nSep 03 01:42:10 prod-srv-04 systemd[1]: payment-worker.service: A process of this unit has been killed by the OOM killer.\nSep 03 01:42:10 prod-srv-04 systemd[1]: payment-worker.service: Main process exited, code=killed, status=9/KILL\nSep 03 01:42:10 prod-srv-04 systemd[1]: payment-worker.service: Failed with result 'oom-kill'."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_dmesg_002",
+      "content": "[    0.000000] Linux version 6.8.0-40-generic (buildd@lcy02-amd64-001)\n[    0.000000] Command line: BOOT_IMAGE=/vmlinuz-6.8.0-40-generic root=/dev/mapper/ubuntu--vg-ubuntu--lv ro quiet splash\n[    0.128491] ACPI: Core revision 20230628\n[    1.291048] pci 0000:00:01.0: [10de:1f02] type 00 class 0x030000\n[    2.148291] systemd[1]: Inserted module 'autofs4'\n[ 2534.192801] Memory cgroup out of memory: Killed process 19842 (payment-worker) total-vm:8392104kB, anon-rss:4194304kB, file-rss:0kB, shmem-rss:0kB, UID:1001 pgtables:8204kB oom_score_adj:0\n[ 2534.192831] oom_reaper: reaped process 19842 (payment-worker), now anon-rss:0kB, file-rss:0kB, shmem-rss:0kB"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_cat_unit_003",
+      "content": "[Unit]\nDescription=Payment Queue Processor Daemon\nAfter=network.target redis.service\n\n[Service]\nType=simple\nUser=worker\nGroup=worker\nExecStart=/usr/local/bin/payment-worker\nRestart=on-failure\nRestartSec=5s\n\n# Resource Limits\nMemoryMax=4G\nMemoryHigh=3.5G\n\n# Environment\nEnvironment=WORKER_CONCURRENCY=64\nEnvironment=WORKER_BATCH_SIZE=50000\nEnvironment=REDIS_URL=redis://127.0.0.1:6379/0\n\n[Install]\nWantedBy=multi-user.target\n"
+    }
+  ],
+  "ground_truth": {
+    "root_cause_keywords": ["oom", "oom-kill", "137", "memorymax", "4g", "batch_size"],
+    "patterns": ["MemoryMax", "WORKER_BATCH_SIZE", "OOM killer", "SIGKILL"]
+  }
+}

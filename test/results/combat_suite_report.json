@@ -1,0 +1,362 @@
+{
+  "timestamp": "2026-09-02T23:02:24.367Z",
+  "suite": "Squoze v2 Real-World Engineering Scenarios",
+  "provider": "gorouter.app",
+  "model": "claude-opus-5",
+  "scenarios": [
+    {
+      "id": "SCENARIO-1",
+      "name": "Scenario 1: High-Concurrency Incident & Deadlock (Go)",
+      "with_squoze": {
+        "success": true,
+        "label": "With Squoze v2",
+        "modelAlias": "claude-opus-5",
+        "elapsed": 104.022,
+        "firstTokenTime": 4.598,
+        "headers": {
+          "status": 200,
+          "squoze": "true",
+          "squozeLatencyMs": 0.58,
+          "savedBytes": 2822,
+          "overheadMs": 2,
+          "upstreamMs": 2912
+        },
+        "usage": {
+          "prompt_tokens": 18157,
+          "completion_tokens": 3019,
+          "total_tokens": 21176,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 18157,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 3019,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 18157,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "accuracyScore": {
+          "keywordMatch": "6/6",
+          "patternMatch": "4/4",
+          "verified": true
+        },
+        "responsePreview": "## Root cause\n\nA leaked mutex, not a lock-ordering deadlock. In the new fast-path fallback added to `RefreshSession`, the error return from `store.FetchRemote` exits the function while `sm.mu` is still held:\n\n```go\nsm.mu.Lock()\nsess, exists := sm.cache[sessionID]\nif !exists {\n    remoteSess, err := ..."
+      },
+      "without_squoze": {
+        "success": true,
+        "label": "Without Squoze (Baseline)",
+        "modelAlias": "claude-opus-5-nosquoze",
+        "elapsed": 119.089,
+        "firstTokenTime": 4.182,
+        "headers": {
+          "status": 200,
+          "squoze": null,
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 7,
+          "upstreamMs": 3141
+        },
+        "usage": {
+          "prompt_tokens": 21521,
+          "completion_tokens": 3519,
+          "total_tokens": 25040,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 21521,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 3519,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 21521,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "accuracyScore": {
+          "keywordMatch": "6/6",
+          "patternMatch": "4/4",
+          "verified": true
+        },
+        "responsePreview": "## Root cause\n\nA leaked mutex, not a deadlock. The new cache-miss fallback in `RefreshSession` returns on the `FetchRemote` error path while still holding `sm.mu`, and `sync.Mutex` has no owner tracking or reentrancy — once that goroutine returns, nothing can ever unlock it.\n\n```go\nsm.mu.Lock()\nsess..."
+      }
+    },
+    {
+      "id": "SCENARIO-2",
+      "name": "Scenario 2: Monorepo Build Failure & Module Export Collision",
+      "with_squoze": {
+        "success": true,
+        "label": "With Squoze v2",
+        "modelAlias": "claude-opus-5",
+        "elapsed": 41.454,
+        "firstTokenTime": 5.581,
+        "headers": {
+          "status": 200,
+          "squoze": "true",
+          "squozeLatencyMs": 0.57,
+          "savedBytes": 1378,
+          "overheadMs": 1,
+          "upstreamMs": 3642
+        },
+        "usage": {
+          "prompt_tokens": 11352,
+          "completion_tokens": 1209,
+          "total_tokens": 12561,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 11352,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 1209,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 11352,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "accuracyScore": {
+          "keywordMatch": "4/4",
+          "patternMatch": "3/3",
+          "verified": true
+        },
+        "responsePreview": "Two corrections before the fix, because they change where you should look:\n\n**It is not `packages/api`.** The failing task is `apps/web:build`, and the package with the broken `exports` map is `packages/core`. `packages/api` does not appear anywhere in the log. `packages/core:build` actually succeed..."
+      },
+      "without_squoze": {
+        "success": true,
+        "label": "Without Squoze (Baseline)",
+        "modelAlias": "claude-opus-5-nosquoze",
+        "elapsed": 42.836,
+        "firstTokenTime": 4.179,
+        "headers": {
+          "status": 200,
+          "squoze": null,
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 0,
+          "upstreamMs": 1681
+        },
+        "usage": {
+          "prompt_tokens": 12718,
+          "completion_tokens": 1412,
+          "total_tokens": 14130,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 12718,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 1412,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 12718,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "accuracyScore": {
+          "keywordMatch": "4/4",
+          "patternMatch": "3/3",
+          "verified": true
+        },
+        "responsePreview": "Two corrections to the premise before the fix.\n\nThe failing task is `apps/web:build` (`next build`), not `packages/api`. And the package with the broken export map is `packages/core` — `packages/api` doesn't appear anywhere in the log. The import site is `apps/web/src/pages/dashboard/analytics.tsx:1..."
+      }
+    },
+    {
+      "id": "SCENARIO-3",
+      "name": "Scenario 3: 3-Turn Agent Diagnostic & Refactor Session",
+      "with_squoze": {
+        "success": true,
+        "label": "With Squoze v2",
+        "modelAlias": "claude-opus-5",
+        "elapsed": 24.366,
+        "firstTokenTime": 4.238,
+        "headers": {
+          "status": 200,
+          "squoze": "false",
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 0,
+          "upstreamMs": 1634
+        },
+        "usage": {
+          "prompt_tokens": 10443,
+          "completion_tokens": 732,
+          "total_tokens": 11175,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 10443,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 732,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 10443,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "accuracyScore": {
+          "keywordMatch": "5/5",
+          "patternMatch": "2/3",
+          "verified": true
+        },
+        "responsePreview": "Root cause: a key-case mismatch, not a math error. `config/rates.json` stores rate keys lowercase (`\"ny\": 0.08875`), but callers pass canonical uppercase codes (`'NY'`). `rates.get('NY')` misses, `rate` is `None`, and the `if rate is None` guard swallows it by returning `0.0`. So NY silently becomes..."
+      },
+      "without_squoze": {
+        "success": true,
+        "label": "Without Squoze (Baseline)",
+        "modelAlias": "claude-opus-5-nosquoze",
+        "elapsed": 29.475,
+        "firstTokenTime": 4.438,
+        "headers": {
+          "status": 200,
+          "squoze": null,
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 0,
+          "upstreamMs": 1871
+        },
+        "usage": {
+          "prompt_tokens": 11047,
+          "completion_tokens": 835,
+          "total_tokens": 11882,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 11047,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 835,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 11047,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "accuracyScore": {
+          "keywordMatch": "5/5",
+          "patternMatch": "3/3",
+          "verified": true
+        },
+        "responsePreview": "Root cause: the rate table in `config/rates.json` keys states in lowercase (`\"ny\": 0.08875`), but `calculate_tax` is called with uppercase codes (`'NY'`). `dict.get` is case-sensitive, so the lookup misses and returns `None`. The `if rate is None: return 0.0` guard then swallows the miss and reports..."
+      }
+    }
+  ]
+}

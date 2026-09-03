@@ -1,0 +1,240 @@
+{
+  "timestamp": "2026-09-02T23:17:48.096Z",
+  "benchmark": "SWE-bench Verified Curated Subset",
+  "provider": "gorouter.app",
+  "model": "claude-opus-5",
+  "results": [
+    {
+      "instance_id": "pallets__flask-5014",
+      "repo": "pallets/flask",
+      "with_squoze": {
+        "success": true,
+        "instance_id": "pallets__flask-5014",
+        "label": "With Squoze v2",
+        "modelAlias": "claude-opus-5",
+        "elapsed": 4.27,
+        "firstTokenTime": 3.53,
+        "headers": {
+          "status": 200,
+          "squoze": "false",
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 0,
+          "upstreamMs": 2240
+        },
+        "usage": {
+          "prompt_tokens": 8824,
+          "completion_tokens": 213,
+          "total_tokens": 9037,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 8824,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 213,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 8824,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "resolved": true,
+        "isDiff": true,
+        "matchedPatterns": "3/3",
+        "patchPreview": "```diff\ndiff --git a/src/flask/blueprints.py b/src/flask/blueprints.py\n--- a/src/flask/blueprints.py\n+++ b/src/flask/blueprints.py\n@@ -30,6 +30,9 @@ class Blueprint(Scaffold):\n             root_path=root_path,\n         )\n \n+        if not name:\n+            raise ValueError(\"'name' may not be empty.\")\n+\n         if \".\" in name:\n             raise V..."
+      },
+      "without_squoze": {
+        "success": true,
+        "instance_id": "pallets__flask-5014",
+        "label": "Without Squoze (Baseline)",
+        "modelAlias": "claude-opus-5-nosquoze",
+        "elapsed": 13.195,
+        "firstTokenTime": 4.444,
+        "headers": {
+          "status": 200,
+          "squoze": null,
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 0,
+          "upstreamMs": 2374
+        },
+        "usage": {
+          "prompt_tokens": 9824,
+          "completion_tokens": 217,
+          "total_tokens": 10041,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 9824,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 217,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 9824,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "resolved": true,
+        "isDiff": true,
+        "matchedPatterns": "3/3",
+        "patchPreview": "```diff\ndiff --git a/src/flask/blueprints.py b/src/flask/blueprints.py\n--- a/src/flask/blueprints.py\n+++ b/src/flask/blueprints.py\n@@ -33,6 +33,9 @@ class Blueprint(Scaffold):\n             root_path=root_path,\n         )\n \n+        if not name:\n+            raise ValueError(\"'name' may not be empty.\")\n+\n         if \".\" in name:\n             raise V..."
+      }
+    },
+    {
+      "instance_id": "django__django-16595",
+      "repo": "django/django",
+      "with_squoze": {
+        "success": true,
+        "instance_id": "django__django-16595",
+        "label": "With Squoze v2",
+        "modelAlias": "claude-opus-5",
+        "elapsed": 53.718,
+        "firstTokenTime": 4.755,
+        "headers": {
+          "status": 200,
+          "squoze": "false",
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 0,
+          "upstreamMs": 1627
+        },
+        "usage": {
+          "prompt_tokens": 12950,
+          "completion_tokens": 1007,
+          "total_tokens": 13957,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 12950,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 1007,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 12950,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "resolved": true,
+        "isDiff": true,
+        "matchedPatterns": "3/3",
+        "patchPreview": "The fix is a new branch in `AlterField.reduce`: an `AlterField` on the same model/field fully supersedes the earlier one, so the optimizer can drop the first and keep the later operation.\n\n```diff\ndiff --git a/django/db/migrations/operations/fields.py b/django/db/migrations/operations/fields.py\n--- a/django/db/migrations/operations/fields.py\n+++ b/..."
+      },
+      "without_squoze": {
+        "success": true,
+        "instance_id": "django__django-16595",
+        "label": "Without Squoze (Baseline)",
+        "modelAlias": "claude-opus-5-nosquoze",
+        "elapsed": 44.435,
+        "firstTokenTime": 4.309,
+        "headers": {
+          "status": 200,
+          "squoze": null,
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 0,
+          "upstreamMs": 1805
+        },
+        "usage": {
+          "prompt_tokens": 11923,
+          "completion_tokens": 1088,
+          "total_tokens": 13011,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 11923,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 1088,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 11923,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "resolved": false,
+        "isDiff": true,
+        "matchedPatterns": "2/3",
+        "patchPreview": "The failing test shows two `AlterField`s on `book.title` surviving optimization: `AlterField.reduce()` has no case for a following `AlterField`, so it falls through to `FieldOperation.reduce()`, which only answers \"can these be reordered?\" and never collapses them. Since `AlterField` carries the complete target field definition, a later `AlterField..."
+      }
+    }
+  ]
+}

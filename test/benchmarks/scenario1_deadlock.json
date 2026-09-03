@@ -1,0 +1,60 @@
+{
+  "name": "Scenario 1: High-Concurrency Incident & Deadlock (Go)",
+  "system_instruction": "You are a principal distributed systems and Go reliability engineer. Review the incident artifacts provided by tools. Diagnostically identify the exact root cause, pinpoint the file and line number, explain the lock contention mechanism, and provide the exact production-ready Go patch. Keep explanations concise and focused.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "A high-severity production incident just occurred under load. Multiple workers locked up with 409 Conflict and deadline timeouts. Please examine the recent git diff, the load test terminal logs, and the OpenTelemetry trace to diagnose the root cause and provide the fix."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_diff_001",
+          "type": "function",
+          "function": {
+            "name": "git_diff",
+            "arguments": "{\"commit\": \"HEAD~1..HEAD\"}"
+          }
+        },
+        {
+          "id": "call_logs_002",
+          "type": "function",
+          "function": {
+            "name": "read_terminal_logs",
+            "arguments": "{\"file\": \"load_test.log\"}"
+          }
+        },
+        {
+          "id": "call_trace_003",
+          "type": "function",
+          "function": {
+            "name": "fetch_otel_trace",
+            "arguments": "{\"trace_id\": \"4bf92f3577b34da6a3ce929d0e0e4736\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_diff_001",
+      "content": "diff --git a/pkg/session/manager.go b/pkg/session/manager.go\nindex a7f89c2..b3e10d4 100644\n--- a/pkg/session/manager.go\n+++ b/pkg/session/manager.go\n@@ -130,18 +130,22 @@ type SessionManager struct {\n func (sm *SessionManager) RefreshSession(ctx context.Context, sessionID string) (*Session, error) {\n \tsm.mu.Lock()\n \tsess, exists := sm.cache[sessionID]\n \tif !exists {\n+\t\t// NEW: Fast path fallback to primary store\n+\t\tremoteSess, err := sm.store.FetchRemote(ctx, sessionID)\n+\t\tif err != nil {\n+\t\t\treturn nil, fmt.Errorf(\"remote session fetch failed: %w\", err) // BUG: missed sm.mu.Unlock()!\n+\t\t}\n+\t\tsm.cache[sessionID] = remoteSess\n+\t\tsm.mu.Unlock()\n+\t\treturn remoteSess, nil\n \t}\n \n \tsess.LastAccessed = time.Now()\n \tsm.mu.Unlock()\n \treturn sess, nil\n }\ndiff --git a/go.sum b/go.sum\nindex 1c4e912..8d7a3f0 100644\n--- a/go.sum\n+++ b/go.sum\n@@ -1,50 +1,50 @@\n github.com/alicebob/gopher-json v0.0.0-20200520072559-a9ec2260ced0 h1:3r9fW4Wjh8Y9c32A6VdJ+o8x+2yF0w7tX/h6m1vjNq4=\n github.com/alicebob/gopher-json v0.0.0-20200520072559-a9ec2260ced0/go.mod h1:xErgahUwqvLM65hIZwZx06K/cxLTTUNnpdvMWNRkx8A=\n github.com/alicebob/miniredis/v2 v2.30.2 h1:aFj0Q0Xm/OaYl8o0d0e6w/w7g1zE9A0c8q6/8yE9v1w=\n github.com/alicebob/miniredis/v2 v2.30.2/go.mod h1:1q8j0Z0e7w9m9X1w2y3z4A5b6C7d8E9f0G1h2I3j4K5=\n github.com/armon/go-metrics v0.4.1 h1:inmOecb6/bVp6B93sYn5L3b5K5p2P5Q8M6R9x3q1v3w=\n github.com/armon/go-metrics v0.4.1/go.mod h1:7yH2o8lX6L1p9V8q4g3b5M7N2Q8m6P3k5v8e1r4t7y=\n github.com/aws/aws-sdk-go v1.44.200 h1:aF8q9w2e3r4t5y6u7i8o9p0q1w2e3r4t5y6u7i8o9p=\n github.com/aws/aws-sdk-go v1.44.200/go.mod h1:1q2w3e4r5t6y7u8i9o0p1w2e3r4t5y6u7i8o9p0q1w=\n github.com/beorn7/perks v1.0.1 h1:VlbKKnNKG2oBUQKmxF3Et42q/jlPX544QGKW40i5vHY=\n github.com/beorn7/perks v1.0.1/go.mod h1:G3xFhSpQfp6DDxBGw8gk3LYCRUyb2Mcc/g5pL5lB8eY=\n github.com/cespare/xxhash/v2 v2.2.0 h1:DC20rnRDTNTGxybo5RdphW752NWUVP80DsFVD4MQ77I=\n github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX02pr4p+I0vW6FfV9v6D8m5wK1Xk+8n3y8L1p0rA=\n github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=\n github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=\n github.com/fatih/color v1.15.0 h1:kOqhGZaYVPqq9tuY442CDzkLNx2Wmn878A8aoU3qgu4=\n github.com/fatih/color v1.15.0/go.mod h1:0h5AjQHR2vT5Ph870hA6+m2rF7c5v1pXz7g3l9L8eZ0=\n github.com/fsnotify/fsnotify v1.6.0 h1:n+ZUnVMR45I3858oocPzXRK06TLK444Re4VO228tuFQ=\n github.com/fsnotify/fsnotify v1.6.0/go.mod h1:sl3t1tCWNW4cG0rRjvW53n8i9f4L4h6qB7m8N9f8L8=\n github.com/go-redis/redis/v8 v8.11.5 h1:0L1K9oP6V8A5n8a6Q4r5e8t9y0u1i2o3p4q5w6e7r8=\n github.com/go-redis/redis/v8 v8.11.5/go.mod h1:8m9v7x8y6t5r4e3w2q1z0p4o5i6u7y8t9r0e1w2q3=\n github.com/golang/protobuf v1.5.3 h1:Khy+dQtW+WIXK/P9w8UtXxnw7AKowRmSgk/QU5rW2mQ=\n github.com/golang/protobuf v1.5.3/go.mod h1:MrTxMCbcG2Ie7yF5+wL3yG5g6M2K0i4a4R7l4h3q6="
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_logs_002",
+      "content": "\u001b[38;5;242m2026-09-03T01:13:58.100Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] progress: 100/5000 VUs active, latency p95=4.2ms, p99=8.1ms\n\u001b[38;5;242m2026-09-03T01:13:59.200Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] progress: 250/5000 VUs active, latency p95=4.5ms, p99=8.4ms\n\u001b[38;5;242m2026-09-03T01:14:00.300Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] progress: 500/5000 VUs active, latency p95=4.8ms, p99=8.9ms\n\u001b[38;5;242m2026-09-03T01:14:01.400Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] progress: 1000/5000 VUs active, latency p95=5.1ms, p99=9.2ms\n\u001b[38;5;242m2026-09-03T01:14:01.500Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] http_reqs: 200 OK (count=450)\n\u001b[38;5;242m2026-09-03T01:14:01.600Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] http_reqs: 200 OK (count=500)\n\u001b[38;5;242m2026-09-03T01:14:01.700Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] http_reqs: 200 OK (count=550)\n\u001b[38;5;242m2026-09-03T01:14:01.800Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] http_reqs: 200 OK (count=600)\n\u001b[38;5;242m2026-09-03T01:14:01.900Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] http_reqs: 200 OK (count=650)\n\u001b[38;5;242m2026-09-03T01:14:02.000Z\u001b[0m \u001b[32mINFO\u001b[0m [k6-load] http_reqs: 200 OK (count=700)\n\u001b[38;5;242m2026-09-03T01:14:02.819Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[1mpkg/session/manager.go:142\u001b[0m: worker-47 failed to acquire session lock after 5000ms: deadlock detected on SessionManager.mu\n\u001b[38;5;242m2026-09-03T01:14:02.822Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[1mpkg/session/manager.go:142\u001b[0m: worker-52 failed to acquire session lock after 5000ms: deadlock detected on SessionManager.mu\n\u001b[38;5;242m2026-09-03T01:14:02.825Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[1mpkg/session/manager.go:142\u001b[0m: worker-89 failed to acquire session lock after 5000ms: deadlock detected on SessionManager.mu\n\u001b[38;5;242m2026-09-03T01:14:03.000Z\u001b[0m \u001b[33mWARN\u001b[0m [health-check] /healthz degraded: active_deadlocked_goroutines=3"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_trace_003",
+      "content": "[\n  {\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"span_id\":\"001\",\"name\":\"HTTP POST /session/refresh\",\"status\":\"OK\",\"duration_ms\":1.2,\"attributes\":{\"client.ip\":\"10.0.1.5\",\"http.status\":200}},\n  {\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"span_id\":\"002\",\"name\":\"HTTP POST /session/refresh\",\"status\":\"OK\",\"duration_ms\":1.1,\"attributes\":{\"client.ip\":\"10.0.1.6\",\"http.status\":200}},\n  {\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"span_id\":\"003\",\"name\":\"HTTP POST /session/refresh\",\"status\":\"OK\",\"duration_ms\":1.4,\"attributes\":{\"client.ip\":\"10.0.1.7\",\"http.status\":200}},\n  {\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"span_id\":\"004\",\"name\":\"HTTP POST /session/refresh\",\"status\":\"OK\",\"duration_ms\":1.3,\"attributes\":{\"client.ip\":\"10.0.1.8\",\"http.status\":200}},\n  {\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"span_id\":\"005\",\"name\":\"HTTP POST /session/refresh\",\"status\":\"OK\",\"duration_ms\":1.2,\"attributes\":{\"client.ip\":\"10.0.1.9\",\"http.status\":200}},\n  {\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"span_id\":\"006\",\"name\":\"store.FetchRemote\",\"status\":\"ERROR\",\"duration_ms\":120.4,\"attributes\":{\"error.type\":\"connection_refused\",\"session.id\":\"sess-4099\"}},\n  {\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"span_id\":\"007\",\"name\":\"session.acquire_lock\",\"status\":\"DEADLINE_EXCEEDED\",\"duration_ms\":5000.1,\"attributes\":{\"error.type\":\"lock_timeout\",\"file\":\"pkg/session/manager.go:142\"}}\n]"
+    }
+  ],
+  "ground_truth": {
+    "file": "pkg/session/manager.go",
+    "patterns": ["defer sm.mu.Unlock()", "Unlock()", "FetchRemote", "err != nil"],
+    "root_cause_keywords": ["lock", "unlock", "deadlock", "leak", "mutex", "remote"]
+  }
+}

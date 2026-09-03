@@ -27,3 +27,5 @@ Thumbs.db
 
 # local scratch (never push)
 .enola/
+scratch/
+test/config-benchmark.yaml

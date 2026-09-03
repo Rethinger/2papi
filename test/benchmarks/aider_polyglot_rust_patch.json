@@ -1,0 +1,48 @@
+{
+  "instance_id": "aider__polyglot_rust_018",
+  "category": "Aider Polyglot Multi-Language Git Diff Editing",
+  "task_description": "In a high-throughput Rust caching crate, a recent refactor to avoid allocations broke lifetime semantics, causing error[E0597] during cargo check. Inspect cargo check compiler errors and src/cache.rs, and provide the exact git diff patch to fix the compilation error while maintaining thread safety.",
+  "system_instruction": "You are a senior Rust systems programmer participating in the Aider Polyglot benchmark. Output ONLY a valid git unified diff (--- a/... +++ b/...) that fixes the borrow checker compilation error.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "cargo check fails with error[E0597] in src/cache.rs. Please inspect compiler output and src/cache.rs, then provide the git diff patch."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_cargo_check_001",
+          "type": "function",
+          "function": {
+            "name": "cargo_check",
+            "arguments": "{\"package\": \"fast-cache\"}"
+          }
+        },
+        {
+          "id": "call_read_cache_002",
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "arguments": "{\"path\": \"src/cache.rs\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_cargo_check_001",
+      "content": "   Compiling fast-cache v0.4.2 (/workspace/fast-cache)\nerror[E0597]: `key` does not live long enough\n  --> src/cache.rs:48:38\n   |\n45 |     pub fn insert_entry(&mut self, key: &str, val: Vec<u8>) {\n   |                                         ---- has type `&'1 str`\n... \n48 |         self.entries.insert(key, val);\n   |         --------------------^^^------\n   |         |                   |\n   |         |                   borrowed value does not live long enough\n   |         argument requires that `'1` must outlive `'static`\n\nFor more information about this error, try `rustc --explain E0597`.\nerror: could not compile `fast-cache` (lib) due to 1 previous error\n"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_read_cache_002",
+      "content": "use std::collections::HashMap;\nuse std::sync::RwLock;\n\npub struct FastCache {\n    entries: HashMap<String, Vec<u8>>,\n}\n\nimpl FastCache {\n    pub fn new() -> Self {\n        Self {\n            entries: HashMap::new(),\n        }\n    }\n\n    pub fn get(&self, key: &str) -> Option<&[u8]> {\n        self.entries.get(key).map(|v| v.as_slice())\n    }\n\n    pub fn insert_entry(&mut self, key: &str, val: Vec<u8>) {\n        self.entries.insert(key.to_string(), val);\n    }\n}\n"
+    }
+  ],
+  "ground_truth": {
+    "file": "src/cache.rs",
+    "patterns": ["to_string()", "key.to_string()", "insert("]
+  }
+}

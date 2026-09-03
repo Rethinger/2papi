@@ -1,0 +1,132 @@
+{
+  "timestamp": "2026-09-03T00:37:44.638Z",
+  "benchmark": "Live OSS Issue Benchmark",
+  "provider": "gorouter.app",
+  "model": "claude-opus-5",
+  "results": [
+    {
+      "instance_id": "go-chi__chi-641",
+      "repo": "go-chi/chi",
+      "issue_url": "https://github.com/go-chi/chi/issues/641",
+      "issue_title": "URL encoded route parameters not handled correctly",
+      "with_squoze": {
+        "success": true,
+        "instance_id": "go-chi__chi-641",
+        "repo": "go-chi/chi",
+        "issue_url": "https://github.com/go-chi/chi/issues/641",
+        "label": "With Squoze v2",
+        "modelAlias": "claude-opus-5",
+        "elapsed": 165.57,
+        "firstTokenTime": 4.929,
+        "headers": {
+          "status": 200,
+          "squoze": "false",
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 3,
+          "upstreamMs": 2255
+        },
+        "usage": {
+          "prompt_tokens": 23856,
+          "completion_tokens": 2862,
+          "total_tokens": 26718,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 23856,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 2862,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 23856,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "passed": true,
+        "hasDiff": true,
+        "matchedPatterns": "2/2",
+        "patchPreview": "```diff\ndiff --git a/mux.go b/mux.go\n--- a/mux.go\n+++ b/mux.go\n@@ -396,13 +396,17 @@ func (mx *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n \t\tr = r.WithContext(context.WithValue(r.Context(), RouteCtxKey, rctx))\n \t}\n \n \t// Route path resolution\n-\troutePath := r.URL.RawPath\n-\tif routePath == \"\" {\n-\t\troutePath = r.URL.Path\n-\t}\n+\t//\n+\t// Match against the escaped path. Reading URL.RawPath...",
+        "fullPatch": "```diff\ndiff --git a/mux.go b/mux.go\n--- a/mux.go\n+++ b/mux.go\n@@ -396,13 +396,17 @@ func (mx *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n \t\tr = r.WithContext(context.WithValue(r.Context(), RouteCtxKey, rctx))\n \t}\n \n \t// Route path resolution\n-\troutePath := r.URL.RawPath\n-\tif routePath == \"\" {\n-\t\troutePath = r.URL.Path\n-\t}\n+\t//\n+\t// Match against the escaped path. Reading URL.RawPath directly is unsafe:\n+\t// net/url only populates it when it differs from the default encoding of\n+\t// URL.Path, and it goes stale as soon as a middleware or proxy rewrites\n+\t// URL.Path. EscapedPath() returns RawPath only when it is still a valid\n+\t// encoding of Path and re-encodes Path otherwise, so percent-encoded\n+\t// characters such as %2F are matched as data, not as a '/' separator.\n+\troutePath := r.URL.EscapedPath()\n \tif routePath == \"\" {\n \t\troutePath = \"/\"\n \t}\n \n \t// Match route against tree\n```\n\n```go\nfunc TestURLEncodedParam(t *testing.T) {\n\tmux := NewRouter()\n\tmux.Get(\"/\", func(w http.ResponseWriter, r *http.Request) {\n\t\tw.Write([]byte(\"root\"))\n\t})\n\tmux.Get(\"/files/{name}\", func(w http.ResponseWriter, r *http.Request) {\n\t\tw.Write([]byte(\"file=\" + URLParam(r, \"name\")))\n\t})\n\tmux.Get(\"/files/{name}/meta\", func(w http.ResponseWriter, r *http.Request) {\n\t\tw.Write([]byte(\"meta=\" + URLParam(r, \"name\")))\n\t})\n\tmux.Get(\"/files/*\", func(w http.ResponseWriter, r *http.Request) {\n\t\tw.Write([]byte(\"wild=\" + URLParam(r, \"*\")))\n\t})\n\n\ttests := []struct {\n\t\tname   string\n\t\ttarget string\n\t\tmutate func(*http.Request)\n\t\tstatus int\n\t\tbody   string\n\t}{\n\t\t{\n\t\t\t// %2F must stay inside the param and not split the segment.\n\t\t\tname:   \"encoded slash is not a separator\",\n\t\t\ttarget: \"/files/docs%2Freport.pdf\",\n\t\t\tstatus: http.StatusOK,\n\t\t\tbody:   \"file=docs%2Freport.pdf\",\n\t\t},\n\t\t{\n\t\t\tname:   \"encoded slash with trailing static segment\",\n\t\t\ttarget: \"/files/docs%2Freport.pdf/meta\",\n\t\t\tstatus: http.StatusOK,\n\t\t\tbody:   \"meta=docs%2Freport.pdf\",\n\t\t},\n\t\t{\n\t\t\tname:   \"unencoded path still matches\",\n\t\t\ttarget: \"/files/report.pdf\",\n\t\t\tstatus: http.StatusOK,\n\t\t\tbody:   \"file=report.pdf\",\n\t\t},\n\t\t{\n\t\t\t// RawPath is empty here (\"%25\" is the default encoding of \"%\"),\n\t\t\t// so matching must use the escaped form rather than URL.Path.\n\t\t\tname:   \"literal percent stays escaped\",\n\t\t\ttarget: \"/files/50%25.txt\",\n\t\t\tstatus: http.StatusOK,\n\t\t\tbody:   \"file=50%25.txt\",\n\t\t},\n\t\t{\n\t\t\t// A prefix-stripping middleware or proxy rewrites URL.Path and\n\t\t\t// leaves URL.RawPath pointing at the original, encoded request.\n\t\t\tname:   \"stale RawPath after Path rewrite\",\n\t\t\ttarget: \"/api/files/docs%2Freport.pdf\",\n\t\t\tmutate: func(req *http.Request) {\n\t\t\t\treq.URL.Path = \"/files/docs/report.pdf\" // RawPath left stale\n\t\t\t},\n\t\t\tstatus: http.StatusOK,\n\t\t\tbody:   \"wild=docs/report.pdf\",\n\t\t},\n\t\t{\n\t\t\tname:   \"empty path falls back to /\",\n\t\t\ttarget: \"/api\",\n\t\t\tmutate: func(req *http.Request) {\n\t\t\t\treq.URL.Path = \"\"\n\t\t\t},\n\t\t\tstatus: http.StatusOK,\n\t\t\tbody:   \"root\",\n\t\t},\n\t}\n\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\treq := httptest.NewRequest(\"GET\", tt.target, nil)\n\t\t\tif tt.mutate != nil {\n\t\t\t\ttt.mutate(req)\n\t\t\t}\n\n\t\t\tw := httptest.NewRecorder()\n\t\t\tmux.ServeHTTP(w, req)\n\n\t\t\tif w.Code != tt.status {\n\t\t\t\tt.Fatalf(\"%s: got status %d (%s), want %d\",\n\t\t\t\t\ttt.target, w.Code, http.StatusText(w.Code), tt.status)\n\t\t\t}\n\t\t\tif got := w.Body.String(); got != tt.body {\n\t\t\t\tt.Fatalf(\"%s: got body %q, want %q\", tt.target, got, tt.body)\n\t\t\t}\n\t\t})\n\t}\n}\n```"
+      },
+      "without_squoze": {
+        "success": true,
+        "instance_id": "go-chi__chi-641",
+        "repo": "go-chi/chi",
+        "issue_url": "https://github.com/go-chi/chi/issues/641",
+        "label": "Without Squoze (Baseline)",
+        "modelAlias": "claude-opus-5-nosquoze",
+        "elapsed": 155.373,
+        "firstTokenTime": 4.796,
+        "headers": {
+          "status": 200,
+          "squoze": null,
+          "squozeLatencyMs": 0,
+          "savedBytes": 0,
+          "overheadMs": 2,
+          "upstreamMs": 1736
+        },
+        "usage": {
+          "prompt_tokens": 23135,
+          "completion_tokens": 2451,
+          "total_tokens": 25586,
+          "usage_semantic": "openai",
+          "usage_source": "anthropic",
+          "billing_usage": {
+            "source": "claude_messages",
+            "semantic": "anthropic",
+            "claude_usage": {
+              "input_tokens": 23135,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 2451,
+              "claude_cache_creation_5_m_tokens": 0,
+              "claude_cache_creation_1_h_tokens": 0
+            }
+          },
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0
+          },
+          "completion_tokens_details": {
+            "text_tokens": 0,
+            "audio_tokens": 0,
+            "image_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "input_tokens": 23135,
+          "output_tokens": 0,
+          "input_tokens_details": null,
+          "claude_cache_creation_5_m_tokens": 0,
+          "claude_cache_creation_1_h_tokens": 0
+        },
+        "passed": true,
+        "hasDiff": true,
+        "matchedPatterns": "2/2",
+        "patchPreview": "Root cause: routing resolved the path by reading `r.URL.RawPath` and falling back to `r.URL.Path`. `net/url` only populates `RawPath` when the default encoding of `Path` doesn't round-trip, so for many encoded paths it is empty and matching happens against the *decoded* path — turning `%2F` into a real separator and splitting one segment into two. It is also left stale when middleware rewrites `r....",
+        "fullPatch": "Root cause: routing resolved the path by reading `r.URL.RawPath` and falling back to `r.URL.Path`. `net/url` only populates `RawPath` when the default encoding of `Path` doesn't round-trip, so for many encoded paths it is empty and matching happens against the *decoded* path — turning `%2F` into a real separator and splitting one segment into two. It is also left stale when middleware rewrites `r.URL.Path`. `EscapedPath()` handles both: it returns `RawPath` only when it is a valid encoding of `Path`, and otherwise re-escapes `Path`.\n\n```diff\ndiff --git a/mux.go b/mux.go\n--- a/mux.go\n+++ b/mux.go\n@@ -396,11 +396,15 @@ func (mx *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n \t\tr = r.WithContext(context.WithValue(r.Context(), RouteCtxKey, rctx))\n \t}\n \n-\t// Route path resolution\n-\troutePath := r.URL.RawPath\n-\tif routePath == \"\" {\n-\t\troutePath = r.URL.Path\n-\t}\n+\t// Route path resolution.\n+\t//\n+\t// Match against the escaped path: EscapedPath() returns RawPath when it is\n+\t// a valid encoding of Path, and re-escapes Path otherwise. Reading RawPath\n+\t// directly is wrong in both directions - net/url leaves it empty whenever\n+\t// the default encoding of Path round-trips, and leaves it stale when a\n+\t// middleware rewrites r.URL.Path - so encoded segments such as %2F ended up\n+\t// matched in their decoded form and split across path segments.\n+\troutePath := r.URL.EscapedPath()\n \tif routePath == \"\" {\n \t\troutePath = \"/\"\n \t}\n```\n\nTest (mux_test.go; needs `context`, `net/http`, `net/http/httptest`, `net/url`, `testing`):\n\n```go\n// TestURLEncodedParam covers issue #641: routing must run against the escaped\n// request path so percent-encoded characters stay inside a single path segment,\n// and so rewrites of r.URL.Path by upstream middleware are honoured.\nfunc TestURLEncodedParam(t *testing.T) {\n\techoParam := func(key string) http.HandlerFunc {\n\t\treturn func(w http.ResponseWriter, r *http.Request) {\n\t\t\tw.Write([]byte(URLParam(r, key)))\n\t\t}\n\t}\n\n\tdo := func(t *testing.T, h http.Handler, target string) (int, string) {\n\t\tt.Helper()\n\t\tw := httptest.NewRecorder()\n\t\th.ServeHTTP(w, httptest.NewRequest(\"GET\", target, nil))\n\t\treturn w.Code, w.Body.String()\n\t}\n\n\tt.Run(\"encoded slash stays within one param\", func(t *testing.T) {\n\t\tmux := NewRouter()\n\t\tmux.Get(\"/files/{name}\", echoParam(\"name\"))\n\n\t\tcode, body := do(t, mux, \"/files/docs%2Freport.pdf\")\n\t\tif code != http.StatusOK {\n\t\t\tt.Fatalf(\"expected route match for '/files/docs%%2Freport.pdf', but got %d %s\",\n\t\t\t\tcode, http.StatusText(code))\n\t\t}\n\t\tif body != \"docs%2Freport.pdf\" {\n\t\t\tt.Fatalf(\"param should keep its encoding: got %q, want %q\", body, \"docs%2Freport.pdf\")\n\t\t}\n\t\tgot, err := url.PathUnescape(body)\n\t\tif err != nil || got != \"docs/report.pdf\" {\n\t\t\tt.Fatalf(\"PathUnescape(%q) = %q, %v; want %q\", body, got, err, \"docs/report.pdf\")\n\t\t}\n\t})\n\n\tt.Run(\"encoded characters round-trip\", func(t *testing.T) {\n\t\tmux := NewRouter()\n\t\tmux.Get(\"/files/{name}\", echoParam(\"name\"))\n\n\t\tcases := map[string]string{\n\t\t\t\"/files/my%20file.txt\": \"my file.txt\",\n\t\t\t\"/files/100%25.txt\":    \"100%.txt\",\n\t\t\t\"/files/a%3Fb.txt\":     \"a?b.txt\",\n\t\t\t\"/files/caf%C3%A9.txt\": \"café.txt\",\n\t\t}\n\t\tfor target, want := range cases {\n\t\t\tcode, body := do(t, mux, target)\n\t\t\tif code != http.StatusOK {\n\t\t\t\tt.Fatalf(\"%s: got %d, want 200\", target, code)\n\t\t\t}\n\t\t\tgot, err := url.PathUnescape(body)\n\t\t\tif err != nil {\n\t\t\t\tt.Fatalf(\"%s: PathUnescape(%q): %v\", target, body, err)\n\t\t\t}\n\t\t\tif got != want {\n\t\t\t\tt.Fatalf(\"%s: param = %q, want %q\", target, got, want)\n\t\t\t}\n\t\t}\n\t})\n\n\tt.Run(\"encoded slash in wildcard\", func(t *testing.T) {\n\t\tmux := NewRouter()\n\t\tmux.Get(\"/static/*\", echoParam(\"*\"))\n\n\t\tcode, body := do(t, mux, \"/static/js%2Fapp.min.js\")\n\t\tif code != http.StatusOK {\n\t\t\tt.Fatalf(\"got %d, want 200\", code)\n\t\t}\n\t\tif body != \"js%2Fapp.min.js\" {\n\t\t\tt.Fatalf(\"wildcard = %q, want %q\", body, \"js%2Fapp.min.js\")\n\t\t}\n\t})\n\n\tt.Run(\"unencoded path is unaffected\", func(t *testing.T) {\n\t\tmux := NewRouter()\n\t\tmux.Get(\"/files/{name}\", echoParam(\"name\"))\n\n\t\tcode, body := do(t, mux, \"/files/report.pdf\")\n\t\tif code != http.StatusOK || body != \"report.pdf\" {\n\t\t\tt.Fatalf(\"got %d %q, want 200 %q\", code, body, \"report.pdf\")\n\t\t}\n\t})\n\n\tt.Run(\"rewritten r.URL.Path wins over stale RawPath\", func(t *testing.T) {\n\t\tmux := NewRouter()\n\t\tmux.Get(\"/files/{name}\", echoParam(\"name\"))\n\n\t\t// Middleware such as a custom rewrite or http.StripPrefix typically\n\t\t// updates only r.URL.Path, leaving RawPath describing the original\n\t\t// request. Routing must follow the rewrite, not the stale RawPath.\n\t\trewrite := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\t\tr.URL.Path = \"/files/report.pdf\"\n\t\t\tmux.ServeHTTP(w, r)\n\t\t})\n\n\t\tcode, body := do(t, rewrite, \"/files/docs%2Freport.pdf\")\n\t\tif code != http.StatusOK || body != \"report.pdf\" {\n\t\t\tt.Fatalf(\"got %d %q, want 200 %q\", code, body, \"report.pdf\")\n\t\t}\n\t})\n\n\tt.Run(\"empty path falls back to /\", func(t *testing.T) {\n\t\tmux := NewRouter()\n\t\tmux.Get(\"/\", func(w http.ResponseWriter, r *http.Request) {\n\t\t\tw.Write([]byte(\"root\"))\n\t\t})\n\n\t\treq := (&http.Request{Method: \"GET\", URL: &url.URL{}}).WithContext(context.Background())\n\t\tw := httptest.NewRecorder()\n\t\tmux.ServeHTTP(w, req)\n\t\tif w.Code != http.StatusOK || w.Body.String() != \"root\" {\n\t\t\tt.Fatalf(\"got %d %q, want 200 %q\", w.Code, w.Body.String(), \"root\")\n\t\t}\n\t})\n}\n```\n\nBehavioral note worth calling out in the changelog: `URLParam` now returns the still-encoded segment for encoded paths (`docs%2Freport.pdf`), which is the only lossless option — callers decode with `url.PathUnescape`. I could not run the suite in this turn, so the patch is verified by inspection against the resolution logic only."
+      }
+    }
+  ]
+}

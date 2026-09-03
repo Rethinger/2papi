@@ -3,7 +3,7 @@ module github.com/Rethinger/2papi
 go 1.22
 
 require (
-	github.com/Rethinger/squoze v0.1.2
+	github.com/Rethinger/squoze v0.2.0
 	golang.org/x/net v0.33.0
 	gopkg.in/yaml.v3 v3.0.1
 )

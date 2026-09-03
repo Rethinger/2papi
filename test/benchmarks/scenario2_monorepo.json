@@ -1,0 +1,47 @@
+{
+  "name": "Scenario 2: Monorepo Build Failure & Module Export Collision",
+  "system_instruction": "You are a senior fullstack monorepo architect and TypeScript build specialist. Analyze the build failure log and lockfile diff. Identify the exact package causing the build break, pinpoint the subpath export mismatch, and provide the exact fix for package.json. Keep explanations concise and focused.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Our monorepo CI build is failing on packages/api. Inspect the build log and lockfile diff to find why ./v2/client cannot be imported and provide the exact fix."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_build_log_001",
+          "type": "function",
+          "function": {
+            "name": "read_build_log",
+            "arguments": "{\"target\": \"apps/web:build\"}"
+          }
+        },
+        {
+          "id": "call_lockfile_002",
+          "type": "function",
+          "function": {
+            "name": "git_diff_lockfile",
+            "arguments": "{\"file\": \"pnpm-lock.yaml\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_build_log_001",
+      "content": "• turborepo 1.13.4\n• packages/ui:build: cache hit, replaying logs...\n• packages/utils:build: cache hit, replaying logs...\n• packages/core:build: done in 420ms\n• apps/web:build: cache miss, executing command \"next build\"\n(node:4102) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.\n(Use `node --trace-deprecation ...` to show where the warning was created)\n▲ Next.js 14.2.3\n- Environments: .env.production\n- Experiments (use at your own risk):\n  · turbo\n\nCreating an optimized production build ...\n✓ Compiled successfully\nLinting and checking validity of types ...\n\u001b[33mWarning: React Hook useEffect has a missing dependency: 'fetchData'. Either include it or remove the dependency array.\u001b[0m\n\u001b[33mWarning: Using target \"es5\" is deprecated in tsconfig. Please upgrade to \"es2022\".\u001b[0m\nCollecting page data ...\nGenerating static pages (0/14) ...\nGenerating static pages (3/14) ...\n\u001b[31m[ERROR] Failed to compile /dashboard/analytics\u001b[0m\nError [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './v2/client' is not defined by \"exports\" in /workspace/packages/core/package.json\n    at applyExports (node:internal/modules/esm/resolve:85:21)\n    at resolvePackageTarget (node:internal/modules/esm/resolve:67:15)\n    at resolvePackage (node:internal/modules/esm/resolve:45:10)\n    at packageResolve (node:internal/modules/esm/resolve:890:14)\n    at moduleResolve (node:internal/modules/esm/resolve:952:20)\n    at defaultResolve (node:internal/modules/esm/resolve:1143:11)\n    at nextResolve (node:internal/modules/esm/hooks:744:28)\n    at /workspace/apps/web/src/pages/dashboard/analytics.tsx:14:26\n> Build error occurred\nError: Command failed with exit code 1: next build"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_lockfile_002",
+      "content": "diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml\nindex 4f882a1..99d10e4 100644\n--- a/pnpm-lock.yaml\n+++ b/pnpm-lock.yaml\n@@ -120,40 +120,40 @@ packages:\n   /@babel/core@7.24.0:\n     resolution: {integrity: sha512-Zcv+u4zWj/p+uE9P9mS+hT+G7/j7T8n8i+Q7V9mF5Q...}\n     engines: {node: '>=6.9.0'}\n     dependencies:\n       /@babel/code-frame: 7.23.5\n       /@babel/generator: 7.23.6\n       /@babel/helper-compilation-targets: 7.23.6\n   /@babel/generator@7.23.6:\n     resolution: {integrity: sha512-CyZBRmoNyjnOcYa4UwnSz1E29Qv4Z5qY08tW5c0yq...\n     engines: {node: '>=6.9.0'}\n   /@babel/helper-compilation-targets@7.23.6:\n     resolution: {integrity: sha512-9JB88f4B3m6Y6s8N4w3e3r5v7s8i+Q9p0w1e2r3t4y5u...\n   /@next/swc-win32-x64-msvc@14.2.3:\n     resolution: {integrity: sha512-Y3z4A5b6C7d8E9f0G1h2I3j4K5l6M7N8O9P0Q1R2S3T4U5...\n     cpu: [x64]\n     os: [win32]\n     optional: true\n   /@typescript-eslint/parser@7.8.0:\n     resolution: {integrity: sha512-1q2w3e4r5t6y7u8i9o0p1w2e3r4t5y6u7i8o9p0q1w2e3...\n     engines: {node: ^18.18.0 || >=20.0.0}\n   /@typescript-eslint/scope-manager@7.8.0:\n     resolution: {integrity: sha512-aF8q9w2e3r4t5y6u7i8o9p0q1w2e3r4t5y6u7i8o9p0q1w...\n   /clsx@2.1.1:\n     resolution: {integrity: sha512-eYm0QWBJTDcxn329vHsSUZcL2KUyVXJV4HPjUbxkF87w...\n     engines: {node: '>=6'}\n   /zod@3.23.8:\n     resolution: {integrity: sha512-FQHpLzEOz3jRzQ5lK0k4m5m6m7n8o9p0q1w2e3r4t5y6u7...}\n     engines: {node: '>=18.0.0'}"
+    }
+  ],
+  "ground_truth": {
+    "file": "packages/core/package.json",
+    "patterns": ["exports", "./v2/client", "packages/core/package.json"],
+    "root_cause_keywords": ["exports", "ERR_PACKAGE_PATH_NOT_EXPORTED", "subpath", "package.json"]
+  }
+}

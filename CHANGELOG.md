@@ -2,6 +2,17 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## v0.4.0 — 2026-09-03
+
+Major release introducing Squoze v2 streaming context distillation, thinking budget control, coding agent machine output compression in `role: "user"`, and reproducible September 2026 combat benchmark suites.
+
+### Highlights
+
+- **Squoze v2 Context Distillation Engine (`v0.2.0`)** — Embedded official release of `github.com/Rethinger/squoze v0.2.0` with sub-millisecond single-pass stream scanning (`< 0.6 ms` latency), Unified Diff distillation (Diff-Squoze), Structural JSON pruning (J-Squoze), and cross-turn stale read deduplication.
+- **Thinking Budget Control** — Added `thinking_budget` configuration for models and `X-Gateway-Thinking-Budget` header support. Gateway automatically injects `thinking: { type: "enabled", budget_tokens: N }` and ensures `max_tokens >= budget_tokens + 1024`. Demonstrated a 5x latency speedup on Claude Opus 5 (from 165s down to 33s).
+- **Machine Output Squoze in `role: "user"`** — Full support for coding agents (Aider, Cursor, Cline, OpenCode) that transmit tool results and terminal logs within user messages. Automatically extracts and compresses `<tool_output>`, `<command_output>`, ````terminal`, and ````diff` blocks while preserving 100% of human instructions verbatim.
+- **Reproducible Combat Benchmark Suites** — Added end-to-end benchmark suites for SWE-bench Verified (`django__django-16595`), TerminalBench v2.1, Aider Polyglot, and autonomous contribution to `go-chi/chi` ([go-chi/chi#1171](https://github.com/go-chi/chi/pull/1171)).
+
 ## v0.3.0 — 2026-09-02
 
 First release built and published by CI. 77 commits since `v0.2.0`

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Rethinger/2papi/internal/adapter"
@@ -59,7 +60,15 @@ func (a *Adapter) Execute(ctx context.Context, ex adapter.Execution) (*adapter.R
 		if ex.Endpoint == adapter.EndpointAudioTranscriptions {
 			body = ex.Body
 		} else {
-			rewritten, err := protocol.RewriteModel(ex.Body, ex.Model.UpstreamModel)
+			budget := ex.Model.ThinkingBudget
+			if ex.Request != nil {
+				if h := ex.Request.Header.Get("X-Gateway-Thinking-Budget"); h != "" {
+					if n, err := strconv.Atoi(h); err == nil && n > 0 {
+						budget = n
+					}
+				}
+			}
+			rewritten, err := protocol.RewriteModelAndThinking(ex.Body, ex.Model.UpstreamModel, budget)
 			if err != nil {
 				return nil, err
 			}

@@ -50,3 +50,33 @@ func TestRewriteModelPreservesLargeJSONNumberLexeme(t *testing.T) {
 		}
 	}
 }
+
+func TestRewriteModelAndThinking(t *testing.T) {
+	body := []byte(`{"model":"public","messages":[{"role":"user","content":"hi"}],"max_tokens":500}`)
+	rewritten, err := RewriteModelAndThinking(body, "claude-opus-5", 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(rewritten, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got["model"] != "claude-opus-5" {
+		t.Fatalf("expected model claude-opus-5, got %v", got["model"])
+	}
+
+	th, ok := got["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected thinking block, got %v", got["thinking"])
+	}
+	if th["type"] != "enabled" || th["budget_tokens"] != float64(2048) {
+		t.Fatalf("unexpected thinking config: %+v", th)
+	}
+
+	// max_tokens must be >= 2048 + 1024 = 3072
+	if maxT, ok := got["max_tokens"].(float64); !ok || maxT < 3072 {
+		t.Fatalf("expected max_tokens >= 3072, got %v", got["max_tokens"])
+	}
+}

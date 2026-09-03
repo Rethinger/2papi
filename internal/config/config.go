@@ -189,6 +189,9 @@ type Model struct {
 	// CacheTTL overrides the default 5m window (Go duration string).
 	Cache    string `yaml:"cache,omitempty" json:"cache,omitempty"`
 	CacheTTL string `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
+	// ThinkingBudget bounds thinking tokens for reasoning models (Claude Opus 5, o-series).
+	// 0 = unbounded / client default.
+	ThinkingBudget int `yaml:"thinking_budget,omitempty" json:"thinking_budget,omitempty"`
 	// Sources (шаг 5 хребта): per-account overrides for multi-provider
 	// aliases — one public name served by different providers with their own
 	// upstream model names, weights and prices. Empty = legacy 1:1 behavior.

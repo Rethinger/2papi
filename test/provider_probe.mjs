@@ -2,9 +2,15 @@
 // and does it report token usage consistently?
 //
 // Usage:
-//   PROBE_KEY=sk-... node test/provider_probe.mjs [--base https://gorouter.app/v1]
+//   PROBE_KEY=sk-... node test/provider_probe.mjs [--base=https://gorouter.app/v1]
 //
-// Writes test/results/provider_probe.json
+//   PROBE_KEY   upstream API key (required; never hard-coded, never in a report)
+//   PROBE_BASE  base URL including the version prefix, or --base=
+//   PROBE_MODELS  comma-separated catalogue to probe (default: DEFAULT_CANDIDATES)
+//   PROBE_OUT   report file name under test/results, or --out=
+//   PROBE_GAP_MS  pause between calls (default 6000)
+//
+// Writes test/results/<PROBE_OUT>, default provider_probe.json
 
 import fs from 'fs';
 import path from 'path';
@@ -16,10 +22,16 @@ if (!KEY) {
   process.exit(2);
 }
 
+// One report per provider. A second provider probed into the same file would
+// silently delete the evidence for the first, and both are cited by
+// test/results/README.md.
+const OUT_NAME =
+  process.argv.find((a) => a.startsWith('--out='))?.slice(6) || process.env.PROBE_OUT || 'provider_probe.json';
+
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-const CANDIDATES = [
+const DEFAULT_CANDIDATES = [
   'claude-opus-5',
   'claude-opus-4-5',
   'claude-opus-4-1',
@@ -36,6 +48,12 @@ const CANDIDATES = [
   'deepseek-chat',
   'deepseek-reasoner',
 ];
+
+// PROBE_MODELS points the same runner at a provider with a different catalogue.
+// Forking the file per provider would fork the probe logic with it.
+const CANDIDATES = (process.env.PROBE_MODELS || '').trim()
+  ? process.env.PROBE_MODELS.split(',').map((m) => m.trim()).filter(Boolean)
+  : DEFAULT_CANDIDATES;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const GAP_MS = Number(process.env.PROBE_GAP_MS || 6000);
@@ -89,6 +107,21 @@ async function probe(model, prompt, maxTokens) {
     if (body.error) {
       return { model, status: res.status, elapsed, ok: false, error: String(body.error.message || '').slice(0, 160) };
     }
+    // A gateway that fails upstream can still answer with parseable JSON and no
+    // `error` key -- crax returns exactly that on 502. Absent this check the probe
+    // records `ok: true, usage: null, content: ""` for a model that answered
+    // nothing, which is the opposite of what the report is for.
+    const content = body.choices?.[0]?.message?.content || '';
+    if (!res.ok || !content) {
+      return {
+        model,
+        status: res.status,
+        elapsed,
+        ok: false,
+        error: res.ok ? 'empty completion (no error field, no content)' : `HTTP ${res.status}, no error field in body`,
+        usage: body.usage || null,
+      };
+    }
     return {
       model,
       status: res.status,
@@ -96,7 +129,7 @@ async function probe(model, prompt, maxTokens) {
       ok: true,
       usage: body.usage || null,
       upstreamModel: body.model || null,
-      content: (body.choices?.[0]?.message?.content || '').slice(0, 80),
+      content: content.slice(0, 80),
     };
   } catch (err) {
     return { model, status: 0, elapsed: Date.now() - t0, ok: false, error: String(err).slice(0, 160) };
@@ -126,6 +159,9 @@ async function main() {
   console.log(`\nAlive models: ${alive.length ? alive.join(', ') : '(none)'}`);
 
   // Usage sanity: does prompt_tokens scale with prompt size, and is it stable?
+  // A provider that returns the same prompt_tokens for 2 and 4000 tokens of input
+  // is reporting a placeholder, and any token-savings figure taken from its usage
+  // block is meaningless — which is a finding about the provider, not a result.
   if (alive.length) {
     const m = alive[0];
     console.log(`\n--- usage accounting sanity on ${m} ---`);
@@ -133,6 +169,7 @@ async function main() {
       { label: 'tiny', prompt: 'ok' },
       { label: 'tiny-repeat', prompt: 'ok' },
       { label: 'padded-1k-words', prompt: 'Count the words. ' + 'lorem ipsum dolor sit amet '.repeat(200) },
+      { label: 'padded-4k-words', prompt: 'Count the words. ' + 'lorem ipsum dolor sit amet '.repeat(800) },
     ];
     for (const c of cases) {
       const r = await probe(m, c.prompt, 8);
@@ -147,7 +184,7 @@ async function main() {
 
   const outDir = 'test/results';
   fs.mkdirSync(outDir, { recursive: true });
-  const out = path.join(outDir, 'provider_probe.json');
+  const out = path.join(outDir, OUT_NAME);
   fs.writeFileSync(out, JSON.stringify(report, null, 2), 'utf-8');
   console.log(`\nSaved ${out}`);
 }

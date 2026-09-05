@@ -28,7 +28,11 @@ Thumbs.db
 # local scratch (never push)
 .enola/
 scratch/
-test/config-benchmark.yaml
+# Any benchmark config holds a live upstream key. Ignore the whole family and
+# keep only the placeholder example tracked, so a second provider config
+# cannot slip past a single-filename rule.
+test/config-benchmark*.yaml
+!test/config-benchmark.example.yaml
 
 # benchmark harness scratch
 node_modules/

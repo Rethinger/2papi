@@ -4,9 +4,9 @@ Date: 2026-08-05
 Status: Draft for written user review
 Related designs:
 
-- `docs/superpowers/specs/2026-08-04-multi-account-ai-gateway-design.md`
-- `docs/superpowers/specs/2026-08-04-dashboard-control-plane-design.md`
-- `docs/superpowers/specs/2026-08-05-dashboard-ru-en-localization-design.md`
+- `docs/history/specs/2026-08-04-multi-account-ai-gateway-design.md`
+- `docs/history/specs/2026-08-04-dashboard-control-plane-design.md`
+- `docs/history/specs/2026-08-05-dashboard-ru-en-localization-design.md`
 
 ## 1. Goal
 

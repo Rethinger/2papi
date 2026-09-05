@@ -1,7 +1,7 @@
 # Implementation Plan: Dashboard Control Plane Phase A
 
 Date: 2026-08-04
-Design: `docs/superpowers/specs/2026-08-04-dashboard-control-plane-design.md`
+Design: `docs/history/specs/2026-08-04-dashboard-control-plane-design.md`
 
 ## Outcome
 

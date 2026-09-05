@@ -1611,4 +1611,4 @@ git commit -m "docs: validate and document Codex provider"
 
 ## Plan Completion Gate
 
-Before declaring implementation complete, verify every acceptance criterion from `docs/superpowers/specs/2026-08-05-openai-codex-provider-design.md` maps to a green automated or visual check above. Record final evidence in the todo goal assessment, including exact command results, Compose health, screenshot paths, E2E reset consume count, database secret scan, and git commit range.
+Before declaring implementation complete, verify every acceptance criterion from `docs/history/specs/2026-08-05-openai-codex-provider-design.md` maps to a green automated or visual check above. Record final evidence in the todo goal assessment, including exact command results, Compose health, screenshot paths, E2E reset consume count, database secret scan, and git commit range.

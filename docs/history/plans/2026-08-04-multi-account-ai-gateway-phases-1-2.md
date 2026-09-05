@@ -1,7 +1,7 @@
 # Implementation Plan: Multi-account AI Gateway, Phases 1-2
 
 Date: 2026-08-04
-Design: `docs/superpowers/specs/2026-08-04-multi-account-ai-gateway-design.md`
+Design: `docs/history/specs/2026-08-04-multi-account-ai-gateway-design.md`
 
 ## Outcome
 

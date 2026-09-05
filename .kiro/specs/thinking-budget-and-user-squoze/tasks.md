@@ -25,17 +25,17 @@ Requirements: [requirements.md](requirements.md) · Design: [design.md](design.m
 
 - [x] **TSK-204**: Implement `user_tool_scanner.go` in `squoze/internal/engine/` supporting XML tags, code fences, and lockfile diffs.
   - Requirement: FR-2, AC-2.1, AC-2.2
-  - Deliverables: `C:/Users/rethi/Documents/Projects/squoze/internal/engine/user_tool_scanner.go`
+  - Deliverables: `squoze/internal/engine/user_tool_scanner.go`
   - Acceptance: Human text preserved 100% verbatim; machine blocks distilled.
 
 - [x] **TSK-205**: Integrate `distillUserContent` into `stream_scanner.go` for OpenAI messages loop.
   - Requirement: FR-2, AC-2.3
-  - Deliverables: `C:/Users/rethi/Documents/Projects/squoze/internal/engine/stream_scanner.go`
+  - Deliverables: `squoze/internal/engine/stream_scanner.go`
   - Acceptance: Squoze scans and compresses `role: "user"` tool outputs seamlessly.
 
 - [x] **TSK-206**: Add comprehensive unit tests for user tool squoze.
   - Requirement: AC-2.1, AC-2.2
-  - Deliverables: `C:/Users/rethi/Documents/Projects/squoze/internal/engine/user_tool_scanner_test.go`
+  - Deliverables: `squoze/internal/engine/user_tool_scanner_test.go`
   - Acceptance: Tests verify XML `<tool_output>`, fenced ````terminal`, and pure human prompt protection.
 
 ---

@@ -2,7 +2,7 @@
 
 Date: 2026-08-05
 Status: Approved
-Related design: `docs/superpowers/specs/2026-08-04-dashboard-control-plane-design.md`
+Related design: `docs/history/specs/2026-08-04-dashboard-control-plane-design.md`
 
 ## 1. Goal
 

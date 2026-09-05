@@ -1,7 +1,7 @@
 # Dashboard RU/EN Localization Implementation Plan
 
 Date: 2026-08-05
-Design: `docs/superpowers/specs/2026-08-05-dashboard-ru-en-localization-design.md`
+Design: `docs/history/specs/2026-08-05-dashboard-ru-en-localization-design.md`
 
 ## Goal
 

@@ -2,7 +2,7 @@
 
 Date: 2026-08-04
 Status: Draft for user review
-Related design: `docs/superpowers/specs/2026-08-04-multi-account-ai-gateway-design.md`
+Related design: `docs/history/specs/2026-08-04-multi-account-ai-gateway-design.md`
 
 ## 1. Goal
 

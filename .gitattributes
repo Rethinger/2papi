@@ -1,0 +1,6 @@
+# The repro scripts and node harnesses are run inside Linux containers straight
+# from the checkout. With core.autocrlf=true a Windows clone would hand them
+# CRLF, and `sh script.sh` then dies on the literal carriage return, so pin LF
+# regardless of the cloning platform.
+*.sh    text eol=lf
+*.mjs   text eol=lf

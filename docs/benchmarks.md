@@ -16,13 +16,20 @@ The script measures:
 - `wrk -t4 -c100 -d10s --latency /healthz` — gateway overhead without upstream
 - `hey -n 200 -c 20 POST /v1/chat/completions` — full chat p95
 
-## Expected results (100 RPS, 4k tokens, fake-upstream)
+## Design targets (not measurements)
+
+These are the numbers the hot path was built to hit, kept here as the bar to
+measure against. **Only the 2papi column has been measured** — see
+"Optimization-mode matrix" below and `test/results/gateway_matrix_report.json`.
+The LiteLLM and 9Router figures are secondhand, from their own published
+material and community reports; nothing in this repo runs them, so treat the
+comparison as orientation, not as a result produced here.
 
 | Gateway | p50 overhead | p95 overhead | p99 | Binary | Memory |
 |---------|--------------|--------------|-----|--------|--------|
-| **2papi** (Go, RWMutex, zero-copy) | 1-2ms | **3-5ms** | 7ms | 14MB | 30MB |
-| LiteLLM (Python) | 8-12ms | 15-40ms | 60ms | 200MB+ | 300MB+ |
-| 9Router (Next.js) | 6-10ms | 10-20ms | 25ms | 80MB | 150MB |
+| **2papi** (Go, RWMutex, zero-copy) — target | 1-2ms | **3-5ms** | 7ms | 14MB | 30MB |
+| LiteLLM (Python) — secondhand | 8-12ms | 15-40ms | 60ms | 200MB+ | 300MB+ |
+| 9Router (Next.js) — secondhand | 6-10ms | 10-20ms | 25ms | 80MB | 150MB |
 
 *Upstream direct is baseline; overhead = gateway time - upstream time.*
 
@@ -59,7 +66,7 @@ time_starttransfer: %{time_starttransfer}\n
 time_total:       %{time_total}\n
 ```
 
-## Optimization-mode matrix (виток 8) — measured 2026-09-02
+## Optimization-mode matrix — measured 2026-09-02
 
 Unlike the table above (targets), these are measured numbers. Harness:
 `test/bench.mjs` with `BENCH_MATRIX=1`, one warm gateway process, fake-upstream,
@@ -145,6 +152,16 @@ the real cost of injecting the directive. The size gates work.
   and config-only for good reason. A representative-payload measurement is
   needed before it can be recommended.
 
+> **Stale as of 2026-09-04.** The squoze row above predates squoze v0.2.0's fast
+> bailout (`len(body) < 256 || !hasCandidate`). Re-measured on the same harness,
+> squoze on the huge profile costs **74.7 ms and 146.6 ms** across two runs, not
+> 438 ms — it is now cheaper than RTK and caveman there. That re-run also found
+> every other mode drifting *upward* by 20–700% on a loaded host, so the absolute
+> numbers in these tables are host-specific and should not be quoted without
+> re-measuring on a quiet machine. See
+> [benchmark-audit.md](benchmark-audit.md) §4 and
+> `test/results/gateway_matrix_report.json`.
+
 ### Fix found by this benchmark
 
 Explicit headroom profiles on `large` originally cost **8.82-9.19ms while
@@ -170,4 +187,3 @@ test coverage before).
 
 - Fake-upstream (`test/fakeupstream`) simulates OpenAI with 20ms artificial latency; real upstream (OpenAI/Anthropic) adds 200-800ms, so gateway overhead is negligible.
 - For LiteLLM comparison, run `ghcr.io/berriai/litellm` with same fake-upstream as backend and same `wrk` load.
-- See `ferro-labs/ai-gateway-performance-benchmarks` for independent methodology.

@@ -2,6 +2,46 @@
 
 Format: decisions and notable additions, newest first. See docs/ for deep dives.
 
+## Unreleased
+
+### Benchmark integrity pass
+
+The benchmark claims in v0.4.0 did not survive an audit of the very files they
+cited. What was wrong, and what replaced it:
+
+- **Retracted: 100% Pass@1 on SWE-bench Verified, TerminalBench v2.1 and Aider
+  Polyglot.** Grading was substring matching rather than test execution, the
+  instance IDs are not upstream dataset instances, sample size was n=1 per
+  condition, and Squoze was inactive (`squoze=false`, `savedBytes=0`) in 5 of
+  the 8 runs whose savings were attributed to it — every fixture sat under the
+  Claude preset's 4096-byte size gate. The fixtures stay in the repo, relabelled
+  for what they are: `test/benchmarks/README.md`.
+- **Added: an offline squoze quality corpus.** 15 cases, 7 classes, graded on
+  needle recall, format safety, idempotency, cross-engine determinism,
+  cross-turn prefix stability and latency — no network, no API keys.
+  `go run ./test/squozebench` → `test/results/squoze_quality_report.json`.
+- **Added: an A/B harness against the pinned release.** `squoze v0.2.0` scores
+  11 pass / 3 fail on that corpus, the working tree 14 pass / 0 fail; the three
+  failures are real contract violations (source code elided as machine output,
+  a lost pagination envelope, non-deterministic column order). Both sides build
+  through `-modfile=go.local.mod`, so `go.mod` is never mutated.
+  `test/squozebench/repro/`.
+- **Added: token scoring, wire conformance and a gateway overhead matrix.**
+  `test/tokenscore.mjs` (o200k) reports token savings next to byte savings and
+  flags any case where the two diverge by ≥ 5 pp — tabular lifting does, by
+  12.5 pp. `test/conformance.mjs`: 9 pass / 0 fail / 3 inconclusive.
+- **Stated as not measured:** whether compression changes model answers
+  (Δaccuracy). The runner exists and enforces k ≥ 3
+  (`test/accuracy_suite.mjs`), but the configured upstream served no working
+  model, so it reports `BLOCKED` rather than a number. Savings percentages for
+  RTK, Caveman and Headroom are likewise unmeasured here.
+- README and `docs/benchmarks.md` rewritten against the artifacts. Every report
+  in `test/results/` is now labelled backed / context only / disproved /
+  BLOCKED in `test/results/README.md`; the audit itself is
+  `docs/benchmark-audit.md`, the spec is `.kiro/specs/benchmark-integrity/`.
+- `docs/superpowers/` renamed to `docs/history/` with a README saying what those
+  documents are and that current process lives in `.kiro/specs/`.
+
 ## v0.4.0 — 2026-09-03
 
 Major release introducing Squoze v2 streaming context distillation, thinking budget control, coding agent machine output compression in `role: "user"`, and reproducible September 2026 combat benchmark suites.
@@ -11,7 +51,8 @@ Major release introducing Squoze v2 streaming context distillation, thinking bud
 - **Squoze v2 Context Distillation Engine (`v0.2.0`)** — Embedded official release of `github.com/Rethinger/squoze v0.2.0` with sub-millisecond single-pass stream scanning (`< 0.6 ms` latency), Unified Diff distillation (Diff-Squoze), Structural JSON pruning (J-Squoze), and cross-turn stale read deduplication.
 - **Thinking Budget Control** — Added `thinking_budget` configuration for models and `X-Gateway-Thinking-Budget` header support. Gateway automatically injects `thinking: { type: "enabled", budget_tokens: N }` and ensures `max_tokens >= budget_tokens + 1024`. Demonstrated a 5x latency speedup on Claude Opus 5 (from 165s down to 33s).
 - **Machine Output Squoze in `role: "user"`** — Full support for coding agents (Aider, Cursor, Cline, OpenCode) that transmit tool results and terminal logs within user messages. Automatically extracts and compresses `<tool_output>`, `<command_output>`, ````terminal`, and ````diff` blocks while preserving 100% of human instructions verbatim.
-- **Reproducible Combat Benchmark Suites** — Added end-to-end benchmark suites for SWE-bench Verified (`django__django-16595`), TerminalBench v2.1, Aider Polyglot, and autonomous contribution to `go-chi/chi` ([go-chi/chi#1171](https://github.com/go-chi/chi/pull/1171)).
+- **Reproducible Combat Benchmark Suites** — *retracted, see Unreleased above.*  
+  ~~Original entry:~~ — Added end-to-end benchmark suites for SWE-bench Verified (`django__django-16595`), TerminalBench v2.1, Aider Polyglot, and autonomous contribution to `go-chi/chi` ([go-chi/chi#1171](https://github.com/go-chi/chi/pull/1171)).
 
 ## v0.3.0 — 2026-09-02
 

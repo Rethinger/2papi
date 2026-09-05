@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-09-04T08:09:43.423Z",
+  "timestamp": "2026-09-05T21:28:43.546Z",
   "suite": "live accuracy: squoze vs baseline",
   "gateway": "http://127.0.0.1:8989",
   "models": {
-    "squoze": "claude-opus-5",
-    "baseline": "claude-opus-5-nosquoze"
+    "squoze": "crax-squoze",
+    "baseline": "crax-nosquoze"
   },
-  "repeats": 5,
+  "repeats": 3,
   "protocol": "Paired per fixture: k repeats per condition, order alternated. Grading is substring presence against fixture ground_truth and is reported as such — it is not a SWE-bench/TerminalBench harness execution.",
   "gates": {
     "delta_accuracy_pp_max": 2,
@@ -15,5 +15,5 @@
   },
   "status": "BLOCKED",
   "fixtures": [],
-  "blocked_reason": "preflight failed: HTTP 502 {\"error\":{\"code\":502,\"message\":\"all upstream attempts failed\",\"type\":\"gateway_error\"}}\n"
+  "blocked_reason": "preflight failed: HTTP 403 {\"error\":{\"message\":\"Site temporarily locked — please try again later. Updates: https://discord.gg/craxgpt\",\"type\":\"site_locked\",\"code\":403}}"
 }

@@ -1,7 +1,7 @@
 {
   "suite": "squoze offline compression quality",
-  "squoze_version": "0.3.0",
-  "timestamp": "2026-09-05T08:01:44Z",
+  "squoze_version": "0.4.0",
+  "timestamp": "2026-09-05T21:28:22Z",
   "method": "each case is built into an OpenAI-chat body, passed through a fresh squoze.Engine, and graded against the tool's published contracts (fail-open, never-elide, cache-safe, idempotent). Latency is the median/p95 of 12 Apply calls on a warm engine.",
   "cases": [
     {
@@ -36,8 +36,8 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 3.684,
-      "latency_p95_ms": 4.243,
+      "latency_p50_ms": 3.811,
+      "latency_p95_ms": 4.556,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/go_test_3k_lines_buried_fails.before.txt",
       "artifact_after": "test/results/squoze_artifacts/go_test_3k_lines_buried_fails.after.txt"
@@ -74,8 +74,8 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 0.586,
-      "latency_p95_ms": 1.47,
+      "latency_p50_ms": 0.587,
+      "latency_p95_ms": 1.09,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/pytest_traceback_400_passing.before.txt",
       "artifact_after": "test/results/squoze_artifacts/pytest_traceback_400_passing.after.txt"
@@ -112,8 +112,8 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 1.583,
-      "latency_p95_ms": 2.339,
+      "latency_p50_ms": 1.691,
+      "latency_p95_ms": 2.72,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/k8s_logs_1200_lines.before.txt",
       "artifact_after": "test/results/squoze_artifacts/k8s_logs_1200_lines.after.txt"
@@ -150,8 +150,8 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 4.634,
-      "latency_p95_ms": 5.395,
+      "latency_p50_ms": 4.737,
+      "latency_p95_ms": 5.579,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/pnpm_ansi_progress_spam.before.txt",
       "artifact_after": "test/results/squoze_artifacts/pnpm_ansi_progress_spam.after.txt"
@@ -188,8 +188,8 @@
       "expectation": "either",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.08,
-      "latency_p95_ms": 0.107,
+      "latency_p50_ms": 0.064,
+      "latency_p95_ms": 0.068,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/deepseek_gate_small_log.before.txt",
       "artifact_after": "test/results/squoze_artifacts/deepseek_gate_small_log.after.txt"
@@ -226,8 +226,8 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.145,
-      "latency_p95_ms": 0.208,
+      "latency_p50_ms": 0.124,
+      "latency_p95_ms": 0.267,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/claude_gate_3kb_log.before.txt",
       "artifact_after": "test/results/squoze_artifacts/claude_gate_3kb_log.after.txt"
@@ -264,8 +264,8 @@
       "expectation": "either",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 0.104,
-      "latency_p95_ms": 0.232,
+      "latency_p50_ms": 0.1,
+      "latency_p95_ms": 0.338,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/claude_gate_6kb_log.before.txt",
       "artifact_after": "test/results/squoze_artifacts/claude_gate_6kb_log.after.txt"
@@ -488,8 +488,8 @@
       "touched": true,
       "expectation_met": true,
       "known_limit": "compress.Params.MaxKept=50 caps rescued middle error lines",
-      "latency_p50_ms": 3.252,
-      "latency_p95_ms": 3.88,
+      "latency_p50_ms": 3.504,
+      "latency_p95_ms": 5.243,
       "verdict": "KNOWN-LIMIT",
       "artifact_before": "test/results/squoze_artifacts/go_test_200_fails_vs_maxkept50.before.txt",
       "artifact_after": "test/results/squoze_artifacts/go_test_200_fails_vs_maxkept50.after.txt"
@@ -526,8 +526,8 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.793,
-      "latency_p95_ms": 1.066,
+      "latency_p50_ms": 0.737,
+      "latency_p95_ms": 1.231,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/go_source_dense_in_test_words.before.txt",
       "artifact_after": "test/results/squoze_artifacts/go_source_dense_in_test_words.after.txt"
@@ -564,8 +564,8 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.65,
-      "latency_p95_ms": 1.197,
+      "latency_p50_ms": 0.853,
+      "latency_p95_ms": 1.3,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/realistic_test_helper_source.before.txt",
       "artifact_after": "test/results/squoze_artifacts/realistic_test_helper_source.after.txt"
@@ -602,8 +602,8 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.198,
-      "latency_p95_ms": 0.424,
+      "latency_p50_ms": 0.244,
+      "latency_p95_ms": 0.364,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/incident_postmortem_prose.before.txt",
       "artifact_after": "test/results/squoze_artifacts/incident_postmortem_prose.after.txt"
@@ -640,8 +640,8 @@
       "expectation": "either",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 2.808,
-      "latency_p95_ms": 3.369,
+      "latency_p50_ms": 3.184,
+      "latency_p95_ms": 4.007,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/json_api_list_800_rows.before.txt",
       "artifact_after": "test/results/squoze_artifacts/json_api_list_800_rows.after.txt"
@@ -678,8 +678,8 @@
       "expectation": "either",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 1.015,
-      "latency_p95_ms": 1.571,
+      "latency_p50_ms": 1.316,
+      "latency_p95_ms": 1.976,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/unified_diff_with_lockfile.before.txt",
       "artifact_after": "test/results/squoze_artifacts/unified_diff_with_lockfile.after.txt"
@@ -716,8 +716,8 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 3.684,
-      "latency_p95_ms": 4.296,
+      "latency_p50_ms": 3.631,
+      "latency_p95_ms": 4.763,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/user_role_fenced_terminal.before.txt",
       "artifact_after": "test/results/squoze_artifacts/user_role_fenced_terminal.after.txt"
@@ -752,8 +752,8 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.319,
-      "latency_p95_ms": 0.817,
+      "latency_p50_ms": 0.32,
+      "latency_p95_ms": 0.486,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/user_role_file_content_source.before.txt",
       "artifact_after": "test/results/squoze_artifacts/user_role_file_content_source.after.txt"
@@ -886,7 +886,7 @@
     "cases_total": 15,
     "cases_touched": 9,
     "contract_violations": {},
-    "max_latency_p95_ms": 5.4,
+    "max_latency_p95_ms": 5.58,
     "median_savings_pct_when_hit": 97.02,
     "prefix_broken_models": []
   }

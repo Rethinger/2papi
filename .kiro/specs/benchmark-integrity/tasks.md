@@ -91,15 +91,28 @@ Requirements: [requirements.md](requirements.md) · Design: [design.md](design.m
 
 ## Фаза 7 — Живая точность и честное сравнение (P2/P3)
 
-- [ ] **TSK-016**: Preflight на действующем провайдере (`https://gpt.crax.lol`) и выбор моделей, которые реально отвечают.
+- [x] **TSK-016**: Preflight на действующем провайдере (`https://gpt.crax.lol`) и выбор моделей, которые реально отвечают.
   - Requirement: FR-11, AC-11.3, AC-11.4, NFR-2
-  - Deliverables: `test/results/provider_probe.json` (перепрогон), при необходимости правка `test/provider_probe.mjs`
-  - Acceptance: список отвечающих моделей и признак наличия `usage` у каждой; ключ только из env (`PROBE_KEY`/`CRAX_KEY`), в отчёте его нет.
+  - Deliverables: `test/results/provider_probe.crax.json`, правки `test/provider_probe.mjs`
+  - Acceptance: выполнено — список отвечающих моделей **пуст**, и отчёт говорит почему: из 19 id в `/v1/models` ни одна из 15 текстовых моделей не ответила (9×502, 6×429), через несколько минут — 403 `site_locked`. Ключ только из env, в отчёте его нет.
+  - **отклонение от плана** (путь артефакта): отчёт пишется в `provider_probe.crax.json`, а не в
+    `provider_probe.json`. Прогон второго провайдера в тот же файл удалил бы единственное
+    свидетельство о первом, а на оба ссылается `test/results/README.md`. Имя выбирается через
+    `PROBE_OUT`, каталог моделей — через `PROBE_MODELS`, чтобы один раннер обслуживал разных
+    провайдеров без форка логики пробы.
+  - **дополнительно найдено**: сама проба считала `ok: true` любой ответ с разбираемым JSON без поля
+    `error` — включая 502 с пустым телом. Исправлено: теперь требуется 2xx **и** непустое `content`.
 
-- [ ] **TSK-017**: Прогон набора точности с k≥3 и снятие статуса BLOCKED.
+- [~] **TSK-017**: Прогон набора точности с k≥3 и снятие статуса BLOCKED. — **AC-11.2 сделан, AC-11.1 блокирован провайдером**
   - Requirement: FR-11, AC-11.1, AC-11.2
-  - Deliverables: `test/results/accuracy_report.json`, строка в `test/results/README.md`
-  - Acceptance: по каждому условию Δaccuracy, экономия токенов, overhead p95, k и дата; три гейта набора выведены как pass/fail; недоступные модели остаются BLOCKED поимённо, а не обнуляют отчёт.
+  - Deliverables: `test/results/accuracy_report.json`, `test/accuracy_gates_selftest.mjs`, строки в `test/results/README.md`
+  - Acceptance: три гейта теперь судят, а не печатают — `evaluateGates()` даёт `pass`/`fail`/`null` по каждому и ставит `status` ∈ `PASS`/`FAIL`/`PARTIAL`/`INCONCLUSIVE` вместо безусловного `COMPLETE`; 11 проверок самотеста зелёные. Сам прогон на живом провайдере не состоялся.
+  - **чем заблокировано**: оба провайдера на руках лежат — gorouter отдаёт 403 с 2026-09-04, crax прошёл
+    502 → 429 → 403 `site_locked` за 2026-09-05. Шлюз был поднят с парными алиасами (`crax-squoze` /
+    `crax-nosquoze` — один upstream, разница только в squoze), preflight упёрся в 403, и отчёт машинно
+    записал `status: BLOCKED` с текстом провайдера в `blocked_reason` — как и требует AC-11.4.
+    Замена оффлайн-доказательством не делается: `squoze_quality_report.json` мерит другое
+    (сохранность иголок в тексте), а не ответ модели.
 
 - [ ] **TSK-018**: Перемер накладных расходов шлюза после v0.4.0 и обновление BASELINE матрицы.
   - Requirement: FR-7, FR-12, AC-12.2
@@ -146,8 +159,8 @@ graph LR
 | TSK-013 | Complete | `test/results/squoze_ab/` — 3+3 прогона, канонические пары сверены `cmp` |
 | TSK-014 | Complete | `verify_test.go` гейт `SQUOZE_CONTRACT_PINS`, задание CI `squoze-contract-pins` |
 | TSK-015 | Complete | `go.mod` → `squoze v0.3.0`, гейт и задание CI удалены, 14 pass / 0 fail без переменных |
-| TSK-016 | Pending | preflight crax → `test/results/provider_probe.json` |
-| TSK-017 | Pending | `test/results/accuracy_report.json` — снять BLOCKED |
+| TSK-016 | Complete | preflight crax → `test/results/provider_probe.crax.json`: 19 id в каталоге, 0 ответивших (502/429, затем 403 `site_locked`); исправлен `ok`-критерий пробы |
+| TSK-017 | Blocked (AC-11.2 Complete) | гейты судят через `evaluateGates()`, 11/11 самотестов; BLOCKED не снят — оба провайдера недоступны |
 | TSK-018 | Pending | `gateway_matrix_report.json` + BASELINE после v0.4.0 |
 | TSK-019 | Pending | таблица «измерено / заявление вендора» |
 

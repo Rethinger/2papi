@@ -3,38 +3,26 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/Rethinger/squoze"
 )
 
-// contractPin gates the three tests that assert contracts the pinned squoze
-// release violates. All three are fixed in squoze's working tree but not in any
-// tag, so against the go.mod pin they can only fail — and a permanently red
-// `go test ./...` is a signal nobody reads, which is worse than no signal. They
-// therefore skip by default and run under SQUOZE_CONTRACT_PINS=1; CI runs them
-// in a separate non-blocking job so the failures stay visible on GitHub.
-//
-// When go.mod pins a squoze above v0.2.0 and these pass with the variable set,
-// delete the gate: from that point the pin protects a fixed contract instead of
-// documenting a broken one. The test-to-bug table is in
+// Three of the tests below — TestJSONTabularDeterminism, TestJSONEnvelopeLoss
+// and TestDedupReExpandsHistory — were written against defects of squoze
+// v0.2.0, the release go.mod pinned when docs/benchmark-audit.md was written.
+// They were skipped by default behind SQUOZE_CONTRACT_PINS while no tag carried
+// the fixes, because a permanently red `go test ./...` is a signal nobody reads.
+// squoze v0.3.0 fixes all three; go.mod pins it, the gate is gone and they run
+// unconditionally as ordinary regression tests. The test-to-bug table is in
 // docs/benchmark-audit.md section 8.
-func contractPin(t *testing.T, defect string) {
-	t.Helper()
-	if os.Getenv("SQUOZE_CONTRACT_PINS") == "" {
-		t.Skipf("contract pin: %s is a known, unfixed defect of the pinned squoze release; "+
-			"re-run with SQUOZE_CONTRACT_PINS=1 to see it fail", defect)
-	}
-}
 
 // TestJSONTabularDeterminism checks whether two independent engines produce
 // byte-identical output for the same JSON tool result. squoze's stated
 // cache-safe contract requires it: "identical original bytes always produce
 // byte-identical output".
 func TestJSONTabularDeterminism(t *testing.T) {
-	contractPin(t, "non-deterministic column order in tabular lifting")
 	c := Case{Name: "json", Model: "gpt-5", Content: jsonAPIResponse(800)}
 	body := c.bodyFor()
 
@@ -79,7 +67,6 @@ func TestJSONTabularDeterminism(t *testing.T) {
 // 800 rows with has_more dropped cannot tell that more pages exist. Key and
 // value both present, in whatever form, is the contract.
 func TestJSONEnvelopeLoss(t *testing.T) {
-	contractPin(t, "JSON envelope fields dropped by tabular lifting")
 	c := Case{Name: "json", Model: "gpt-5", Content: jsonAPIResponse(800)}
 	eng := squoze.NewEngine(squoze.DefaultMemoCapacity)
 	out, _ := eng.Apply(c.bodyFor())
@@ -112,7 +99,6 @@ func TestJSONEnvelopeLoss(t *testing.T) {
 // ORIGINAL bytes. Net effect: the earlier turn, which turn N-1 had already
 // elided, is resent in full.
 func TestDedupReExpandsHistory(t *testing.T) {
-	contractPin(t, "cross-turn dedup re-expands the earlier turn")
 	turns := MultiTurnSession("claude-opus-4-5")
 	eng := squoze.NewEngine(squoze.DefaultMemoCapacity)
 

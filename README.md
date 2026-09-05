@@ -239,22 +239,22 @@ docker run --rm -v "$PWD:/src" -w /src golang:1.23 go run ./test/squozebench
 node test/tokenscore.mjs   # after: npm install --no-save gpt-tokenizer
 ```
 
-Two builds matter here, because they grade differently:
+Two squoze releases matter here, because they grade differently:
 
-| squoze build | corpus | median savings when it fires | cross-turn prefix |
+| squoze release | corpus | median savings when it fires | cross-turn prefix |
 |---|---|---|---|
-| **v0.2.0** — what `go.mod` pins today | 11 pass · **3 fail** · 1 known-limit | 96.14% | broken on both model families |
-| working tree, **untagged** | **14 pass · 0 fail** · 1 known-limit | 97.02% | stable |
+| **v0.2.0** — the previous pin | 11 pass · **3 fail** · 1 known-limit | 96.14% | broken on both model families |
+| **v0.3.0** — what `go.mod` pins today | **14 pass · 0 fail** · 1 known-limit | 97.02% | stable |
 
-The three v0.2.0 failures are real contract violations, not fixture quibbles:
+The three v0.2.0 failures were real contract violations, not fixture quibbles:
 two Go source files were elided as if they were test output, the JSON envelope
 (`has_more`, `next_cursor`, `total_count`) vanished when a list was lifted into a
-table, and that lift was non-deterministic. All three are fixed upstream and
-pinned by tests there; until a tag above v0.2.0 exists, a `go install` of this
-gateway still gets the v0.2.0 behaviour. Reproduce either side:
+table, and that lift was non-deterministic. squoze v0.3.0 (2026-09-05) fixes all
+three; the corpus tests here now pin the fixed contracts unconditionally, so a
+regression in any of them fails `go test ./...`. Both sides are reproducible:
 [`test/squozebench/repro/`](test/squozebench/repro/).
 
-Head-of-tree numbers, per case:
+Per case, against the pinned v0.3.0:
 
 | Tool output | Byte savings | Token savings | Facts kept |
 |---|---|---|---|
@@ -266,9 +266,10 @@ Head-of-tree numbers, per case:
 | paginated JSON, 800 rows → Markdown table | 76.2% | 63.7% | 3/3 envelope fields |
 
 Corpus total 318 138 → 41 805 tokens (86.9% saved), 9 of 15 cases touched.
-Engine latency p50 0.06–4.8 ms, worst p95 6.5 ms in the committed run — one
-repeat spiked to 14.9 ms on the same case under host contention, which is
-measurement noise rather than a second code path.
+Engine latency p50 0.06–4.8 ms, worst p95 5.4 ms in the committed run; across
+six A/B repeats the worst case sits between 5.0 and 6.5 ms, except one repeat
+that spiked to 14.9 ms on a case measuring 4.6 ms in the other two — host
+contention, not a second code path. That is why three repeats per side exist.
 
 **Byte savings are an honest proxy for token savings — with one documented
 exception.** On elided machine output the two agree within 0.6 pp, so
@@ -353,20 +354,13 @@ mangled.
 The host does not need Go installed — the official image is enough, and the same
 image builds the container: `docker build -t 2papi-gateway .`
 
-That run is green, with three skips. `TestJSONTabularDeterminism`,
-`TestJSONEnvelopeLoss` and `TestDedupReExpandsHistory` assert the three contracts
-the pinned squoze v0.2.0 violates; the fixes exist upstream but are untagged, so
-against the pin they can only fail, and a permanently red suite is a signal
-nobody reads. They run on demand and in a separate non-blocking CI job:
-
-```sh
-docker run --rm -v "$PWD:/src" -w /src -e SQUOZE_CONTRACT_PINS=1 golang:1.22 \
-  go test -v -run 'TestJSONTabularDeterminism|TestJSONEnvelopeLoss|TestDedupReExpandsHistory' \
-  ./test/squozebench/
-```
-
-All three fail with the variable set — that is the pin working. Every other test
-in that package is unconditional, so a failure there is a real regression.
+That run is green with no skips, and every test in `test/squozebench/` is
+unconditional, so a failure there is a real regression. Three of them —
+`TestJSONTabularDeterminism`, `TestJSONEnvelopeLoss` and
+`TestDedupReExpandsHistory` — were written against contract violations of
+squoze v0.2.0 and were skipped behind `SQUOZE_CONTRACT_PINS` for as long as no
+tag carried the fixes, because a permanently red suite is a signal nobody reads.
+squoze v0.3.0 fixes all three, `go.mod` pins it, and the gate is gone.
 
 Control-plane integration tests (migrations, constraints, audit, envelope
 encryption, compile/publish/rollback, gateway acknowledgements):

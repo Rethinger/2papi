@@ -1,6 +1,11 @@
 #!/bin/sh
-# Приёмка: харнесс squozebench плюс остальной набор тестов 2papi против
-# рабочего дерева squoze.
+# Приёмка ЛОКАЛЬНОГО дерева squoze: харнесс squozebench плюс остальной набор
+# тестов 2papi против /squoze, а не против релиза из `go.mod`. Нужен, когда
+# squoze правится дальше и надо увидеть эффект до тега.
+#
+# Приёмка того, что шлюз реально везёт, — это обычный `go test ./... -count=1`
+# без `-modfile`: он берёт пин из `go.mod` (сегодня squoze v0.3.0) и с ним
+# зелёный без переменных окружения.
 #
 #   MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/w" -v "/abs/path/to/squoze:/squoze" golang:1.23 sh /w/test/squozebench/repro/accept.sh
 #

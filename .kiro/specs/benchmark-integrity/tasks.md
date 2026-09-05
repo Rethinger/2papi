@@ -72,7 +72,7 @@ Requirements: [requirements.md](requirements.md) · Design: [design.md](design.m
 - [x] **TSK-012**: A/B-харнесс, не мутирующий `go.mod`.
   - Requirement: NFR-3
   - Deliverables: `test/squozebench/repro/{savings_ab.sh,accept.sh,cmp_savings.mjs,README.md}`, `.gitignore`
-  - Acceptance: обе стороны собираются через `-modfile=go.local.mod`; прерванный прогон не оставляет `replace` в дереве; последняя строка вывода печатает пин `squoze v0.2.0` из нетронутого `go.mod`.
+  - Acceptance: обе стороны собираются через `-modfile=go.local.mod`; прерванный прогон не оставляет `replace` в дереве; последняя строка вывода печатает пин squoze из нетронутого `go.mod` (на момент задачи v0.2.0, с 2026-09-05 v0.3.0).
 
 - [x] **TSK-013**: Пересобрать сохранённые отчёты текущими скриптами и согласовать снимок.
   - Requirement: NFR-3, FR-1
@@ -83,6 +83,11 @@ Requirements: [requirements.md](requirements.md) · Design: [design.md](design.m
   - Requirement: NFR-3, FR-1
   - Deliverables: `test/squozebench/verify_test.go`, `.github/workflows/ci.yml`, `docs/benchmark-audit.md`, `test/squozebench/repro/README.md`, `README.md`, `CHANGELOG.md`
   - Acceptance: `go test -race ./...` зелёный на пине `squoze v0.2.0` (три `SKIP` вместо трёх `FAIL`), с `SQUOZE_CONTRACT_PINS=1` все три по-прежнему падают, задание `squoze-contract-pins` помечено `continue-on-error` и не входит в `needs` релиза.
+
+- [x] **TSK-015**: Поднять пин squoze до v0.3.0, снять гейт и каскадом обновить документацию.
+  - Requirement: NFR-3, FR-1
+  - Deliverables: `go.mod`, `go.sum`, `test/squozebench/verify_test.go`, `test/squozebench/classify_test.go`, `.github/workflows/ci.yml`, `test/results/squoze_quality_report.json`, `README.md`, `CHANGELOG.md`, `docs/benchmark-audit.md`, `test/results/README.md`, `test/squozebench/repro/README.md`, `test/squozebench/repro/savings_ab.sh`, `test/squozebench/repro/accept.sh`, `.kiro/specs/benchmark-integrity/design.md`
+  - Acceptance: `go.mod` пинит `github.com/Rethinger/squoze v0.3.0`; `go vet ./...` и `go test -race ./... -count=1` зелёные без переменных окружения, без `SKIP` в `test/squozebench`; `contractPin` и задание CI `squoze-contract-pins` удалены; свежий `go run ./test/squozebench` даёт 14 pass / 0 fail / 1 known-limit вердикт-в-вердикт равно `squoze_ab/head.1.json` и лежит в репозитории с `squoze_version: 0.3.0`; ни один документ больше не утверждает, что тега выше v0.2.0 нет; зеркало скорера в `classify_test.go` отражает v0.3.0 (добавлен line-anchored `crashHits`, не отражённые диагностические строки объявлены как нижняя граница) и исключает само себя из выборки, потому что держит маркеры литералами; §3 аудита и таблица §7 пересчитаны по свежему прогону: 0 из 97 файлов элидировано, 0 из 65 тест-файлов выше порога, пункты 1–5 закрыты в v0.3.0, 6–7 открыты, 8 частично.
 
 ## Dependency graph
 
@@ -95,7 +100,7 @@ graph LR
     T8[TSK-008] --> T10
     T3 --> T11[TSK-011] --> T13[TSK-013] --> T10
     T5 --> T12[TSK-012] --> T13
-    T11 --> T14[TSK-014]
+    T11 --> T14[TSK-014] --> T15[TSK-015]
 ```
 
 ## Progress
@@ -116,6 +121,7 @@ graph LR
 | TSK-012 | Complete | `test/squozebench/repro/` — `-modfile=go.local.mod`, `go.mod` не мутируется |
 | TSK-013 | Complete | `test/results/squoze_ab/` — 3+3 прогона, канонические пары сверены `cmp` |
 | TSK-014 | Complete | `verify_test.go` гейт `SQUOZE_CONTRACT_PINS`, задание CI `squoze-contract-pins` |
+| TSK-015 | Complete | `go.mod` → `squoze v0.3.0`, гейт и задание CI удалены, 14 pass / 0 fail без переменных |
 
 ## Результаты прогона
 
@@ -125,7 +131,7 @@ graph LR
 смешивать: A/B прогоняется `test/squozebench/repro/savings_ab.sh`, 3 повтора на
 сторону, отчёты в `test/results/squoze_ab/`.
 
-### Сторона base — `squoze v0.2.0`, то, что пинит `go.mod` (2026-09-04)
+### Сторона base — `squoze v0.2.0`, то, что `go.mod` пинил до 2026-09-05 (снято 2026-09-04)
 
 11 pass · 3 fail · 1 known-limit · сжатие сработало на 11/15 · медиана
 96.14% · p95 max 5.89 мс · `prefix_broken_models: [claude-opus-4-5, gpt-5]`.
@@ -137,7 +143,7 @@ graph LR
 3. **Недетерминизм** — `tryTabularLifting` строит порядок колонок обходом Go-map: 3 разных порядка на 12 свежих движках. Прямое нарушение cache-safe контракта.
 4. **`PREFIX-BROKEN`** — кросс-turn дедуп переотправляет ранний ход в ПОЛНОМ виде (4 245 → 29 159 байт) из-за самопротиворечивого guard в `stream_scanner.go`.
 
-### Сторона head — рабочее дерево squoze, тега нет (2026-09-05)
+### Сторона head — рабочее дерево squoze, вышло релизом v0.3.0 (2026-09-05)
 
 14 pass · 0 fail · 1 known-limit · сжатие сработало на 9/15 · медиана
 97.02% · p95 max 5.62 мс · `contract_violations: {}` · `prefix_broken_models: []`.
@@ -151,9 +157,12 @@ graph LR
 Known-limit один и тот же на обеих сторонах: `go_test_200_fails_vs_maxkept50`
 при `MaxKept=50` оставляет 17 из 200 строк `FAIL`, потеря раскрыта в маркере.
 
-**Ограничение поставки.** Тега выше `v0.2.0` у squoze нет, поэтому `go.mod`
-пинит релиз, и потребитель шлюза получает поведение стороны base. Головные
-цифры действительны только под `-modfile=go.local.mod` до момента тега.
+**Поставлено (2026-09-05).** Сторона head вышла релизом `squoze v0.3.0`,
+`go.mod` шлюза пинит его, и головные цифры теперь воспроизводятся простым
+`go run ./test/squozebench` без `-modfile`: свежий прогон на релизе даёт те же
+вердикты и те же проценты, что сторона head снимка (p95 max 5.4 мс против
+5.62 — шум хоста). `-modfile=go.local.mod` остаётся механизмом для следующего
+раунда правок squoze, а не условием действительности цифр.
 
 ### Слой шлюза
 

@@ -15,12 +15,30 @@ import (
 // files sit to the router's test-output threshold.
 //
 // The elision hazard is not "does it fire today" but "how much margin is
-// there". router.Classify returns KindTestOutput at testScore >= 3, counting
-// substrings like "assert ", "FAILED", "PASSED", "=== RUN" across sampled
-// windows. A test file that scores 2 today becomes elidable the moment someone
-// adds one more assertion.
+// there". router.Classify returns KindTestOutput at testScore >= 3. A test file
+// that scores 2 today becomes elidable the moment someone adds one more
+// assertion.
+//
+// score below is a PARTIAL mirror of the v0.3.0 scorer, and partial on
+// purpose:
+//
+//   - testHits, counted as substrings. Exact for these inputs: Classify counts
+//     over up to three 32 KiB windows, and under 96 KiB that window set is the
+//     whole string, which every file scanned here is.
+//   - crashHits, counted once per line whose first token matches. New in
+//     v0.3.0 - v0.2.0 scored testHits alone.
+//   - diagnostic lines (router.countDiagnosticLines) are NOT mirrored:
+//     reproducing looksLikeDiagnostic would fork engine internals into a
+//     benchmark harness, and the router is behind internal/ so it cannot be
+//     called.
+//
+// So score is a LOWER BOUND on the real testScore - a file printed at 2 may
+// already be at 3 inside the router, never the other way round. The elided
+// column carries no such caveat: it comes from the real pipeline through the
+// public API.
 func TestClassificationMarginOnRealTestFiles(t *testing.T) {
-	// Mirror of router.testHits (squoze v0.2.0, internal/router/router.go).
+	// Mirrors of router.testHits and router.crashHits, squoze v0.3.0,
+	// internal/router/router.go. testHits is byte-identical to v0.2.0.
 	testHits := []string{
 		"--- FAIL", "--- PASS", "--- SKIP",
 		"=== RUN", "=== CONT", "=== PAUSE",
@@ -28,6 +46,13 @@ func TestClassificationMarginOnRealTestFiles(t *testing.T) {
 		"pytest", "PASSED", "FAILED",
 		"vitest", "jest", "✓ ", "✗ ",
 		"assert ", "AssertionError", "unittest",
+	}
+
+	crashHits := []string{
+		"panic:", "goroutine ", "exit status ", "signal: ",
+		"FAIL", "ok  ", "PASS", "--- FAIL", "--- PASS", "--- SKIP",
+		"Traceback (most recent call last):", "E   ", "OK (",
+		"Caused by:", "at java.", "Error: ", "AssertionError",
 	}
 
 	type row struct {
@@ -38,6 +63,7 @@ func TestClassificationMarginOnRealTestFiles(t *testing.T) {
 		savedPct float64
 	}
 	var rows []row
+	var skippedSelf bool
 
 	roots := []string{"../../internal", "../../cmd", "../../control-plane/tests", "../../test"}
 	for _, root := range roots {
@@ -53,6 +79,13 @@ func TestClassificationMarginOnRealTestFiles(t *testing.T) {
 			if !isTest {
 				return nil
 			}
+			// This file holds the marker lists as literals, so it scores high by
+			// definition and says nothing about real test files. Skipped, and the
+			// skip is logged rather than silent.
+			if base == "classify_test.go" {
+				skippedSelf = true
+				return nil
+			}
 			if info.Size() < 4096 {
 				return nil
 			}
@@ -65,6 +98,11 @@ func TestClassificationMarginOnRealTestFiles(t *testing.T) {
 			score := 0
 			for _, h := range testHits {
 				score += strings.Count(content, h)
+			}
+			for _, line := range strings.Split(content, "\n") {
+				if tl := strings.TrimSpace(line); tl != "" && hasAnyPrefix(tl, crashHits) {
+					score++
+				}
 			}
 
 			c := Case{Name: "t", Model: "claude-opus-4-5", Content: content}
@@ -104,6 +142,9 @@ func TestClassificationMarginOnRealTestFiles(t *testing.T) {
 	}
 
 	t.Logf("real test files >=4KB scanned: %d", len(rows))
+	if skippedSelf {
+		t.Logf("  (this file excluded: its marker lists are literals)")
+	}
 	t.Logf("  score >= 3 (router would classify as test output): %d", atRisk)
 	t.Logf("  actually elided by the full pipeline: %d", elided)
 	t.Logf("top scorers:")
@@ -123,4 +164,15 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// hasAnyPrefix mirrors router.hasAnyPrefix: a line counts once, however many
+// markers it starts with.
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,7 +1,7 @@
 {
   "suite": "squoze offline compression quality",
-  "squoze_version": "0.2.0",
-  "timestamp": "2026-09-05T00:44:50Z",
+  "squoze_version": "0.3.0",
+  "timestamp": "2026-09-05T08:01:44Z",
   "method": "each case is built into an OpenAI-chat body, passed through a fresh squoze.Engine, and graded against the tool's published contracts (fail-open, never-elide, cache-safe, idempotent). Latency is the median/p95 of 12 Apply calls on a warm engine.",
   "cases": [
     {
@@ -36,16 +36,11 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 4.601,
-      "latency_p95_ms": 6.066,
+      "latency_p50_ms": 3.684,
+      "latency_p95_ms": 4.243,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/go_test_3k_lines_buried_fails.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/go_test_3k_lines_buried_fails.after.txt",
-      "tokens_before": 41978,
-      "tokens_after": 912,
-      "token_savings_pct": 97.83,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/go_test_3k_lines_buried_fails.after.txt"
     },
     {
       "name": "pytest_traceback_400_passing",
@@ -79,16 +74,11 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 0.895,
-      "latency_p95_ms": 2.538,
+      "latency_p50_ms": 0.586,
+      "latency_p95_ms": 1.47,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/pytest_traceback_400_passing.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/pytest_traceback_400_passing.after.txt",
-      "tokens_before": 7072,
-      "tokens_after": 929,
-      "token_savings_pct": 86.86,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/pytest_traceback_400_passing.after.txt"
     },
     {
       "name": "k8s_logs_1200_lines",
@@ -122,16 +112,11 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 1.9,
-      "latency_p95_ms": 2.594,
+      "latency_p50_ms": 1.583,
+      "latency_p95_ms": 2.339,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/k8s_logs_1200_lines.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/k8s_logs_1200_lines.after.txt",
-      "tokens_before": 30254,
-      "tokens_after": 1175,
-      "token_savings_pct": 96.12,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": false
+      "artifact_after": "test/results/squoze_artifacts/k8s_logs_1200_lines.after.txt"
     },
     {
       "name": "pnpm_ansi_progress_spam",
@@ -165,16 +150,11 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 5.875,
-      "latency_p95_ms": 6.495,
+      "latency_p50_ms": 4.634,
+      "latency_p95_ms": 5.395,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/pnpm_ansi_progress_spam.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/pnpm_ansi_progress_spam.after.txt",
-      "tokens_before": 85233,
-      "tokens_after": 73,
-      "token_savings_pct": 99.91,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": false
+      "artifact_after": "test/results/squoze_artifacts/pnpm_ansi_progress_spam.after.txt"
     },
     {
       "name": "deepseek_gate_small_log",
@@ -208,16 +188,11 @@
       "expectation": "either",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.049,
-      "latency_p95_ms": 0.054,
+      "latency_p50_ms": 0.08,
+      "latency_p95_ms": 0.107,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/deepseek_gate_small_log.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/deepseek_gate_small_log.after.txt",
-      "tokens_before": 504,
-      "tokens_after": 504,
-      "token_savings_pct": 0,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": false
+      "artifact_after": "test/results/squoze_artifacts/deepseek_gate_small_log.after.txt"
     },
     {
       "name": "claude_gate_3kb_log",
@@ -251,16 +226,11 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.089,
-      "latency_p95_ms": 0.106,
+      "latency_p50_ms": 0.145,
+      "latency_p95_ms": 0.208,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/claude_gate_3kb_log.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/claude_gate_3kb_log.after.txt",
-      "tokens_before": 904,
-      "tokens_after": 904,
-      "token_savings_pct": 0,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/claude_gate_3kb_log.after.txt"
     },
     {
       "name": "claude_gate_6kb_log",
@@ -294,16 +264,11 @@
       "expectation": "either",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 0.134,
-      "latency_p95_ms": 0.16,
+      "latency_p50_ms": 0.104,
+      "latency_p95_ms": 0.232,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/claude_gate_6kb_log.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/claude_gate_6kb_log.after.txt",
-      "tokens_before": 1804,
-      "tokens_after": 1505,
-      "token_savings_pct": 16.57,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/claude_gate_6kb_log.after.txt"
     },
     {
       "name": "go_test_200_fails_vs_maxkept50",
@@ -523,16 +488,11 @@
       "touched": true,
       "expectation_met": true,
       "known_limit": "compress.Params.MaxKept=50 caps rescued middle error lines",
-      "latency_p50_ms": 4.033,
-      "latency_p95_ms": 4.645,
+      "latency_p50_ms": 3.252,
+      "latency_p95_ms": 3.88,
       "verdict": "KNOWN-LIMIT",
       "artifact_before": "test/results/squoze_artifacts/go_test_200_fails_vs_maxkept50.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/go_test_200_fails_vs_maxkept50.after.txt",
-      "tokens_before": 39986,
-      "tokens_after": 1318,
-      "token_savings_pct": 96.7,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": false
+      "artifact_after": "test/results/squoze_artifacts/go_test_200_fails_vs_maxkept50.after.txt"
     },
     {
       "name": "go_source_dense_in_test_words",
@@ -566,16 +526,11 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.881,
-      "latency_p95_ms": 1.305,
+      "latency_p50_ms": 0.793,
+      "latency_p95_ms": 1.066,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/go_source_dense_in_test_words.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/go_source_dense_in_test_words.after.txt",
-      "tokens_before": 7752,
-      "tokens_after": 7752,
-      "token_savings_pct": 0,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/go_source_dense_in_test_words.after.txt"
     },
     {
       "name": "realistic_test_helper_source",
@@ -609,16 +564,11 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.807,
-      "latency_p95_ms": 0.878,
+      "latency_p50_ms": 0.65,
+      "latency_p95_ms": 1.197,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/realistic_test_helper_source.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/realistic_test_helper_source.after.txt",
-      "tokens_before": 6184,
-      "tokens_after": 6184,
-      "token_savings_pct": 0,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/realistic_test_helper_source.after.txt"
     },
     {
       "name": "incident_postmortem_prose",
@@ -652,16 +602,11 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.179,
-      "latency_p95_ms": 0.209,
+      "latency_p50_ms": 0.198,
+      "latency_p95_ms": 0.424,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/incident_postmortem_prose.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/incident_postmortem_prose.after.txt",
-      "tokens_before": 1192,
-      "tokens_after": 1192,
-      "token_savings_pct": 0,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/incident_postmortem_prose.after.txt"
     },
     {
       "name": "json_api_list_800_rows",
@@ -695,16 +640,11 @@
       "expectation": "either",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 3.048,
-      "latency_p95_ms": 3.388,
+      "latency_p50_ms": 2.808,
+      "latency_p95_ms": 3.369,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/json_api_list_800_rows.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/json_api_list_800_rows.after.txt",
-      "tokens_before": 28792,
-      "tokens_after": 10457,
-      "token_savings_pct": 63.68,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": false
+      "artifact_after": "test/results/squoze_artifacts/json_api_list_800_rows.after.txt"
     },
     {
       "name": "unified_diff_with_lockfile",
@@ -738,16 +678,11 @@
       "expectation": "either",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 0.998,
-      "latency_p95_ms": 1.495,
+      "latency_p50_ms": 1.015,
+      "latency_p95_ms": 1.571,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/unified_diff_with_lockfile.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/unified_diff_with_lockfile.after.txt",
-      "tokens_before": 16706,
-      "tokens_after": 189,
-      "token_savings_pct": 98.87,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/unified_diff_with_lockfile.after.txt"
     },
     {
       "name": "user_role_fenced_terminal",
@@ -781,23 +716,18 @@
       "expectation": "squeeze",
       "touched": true,
       "expectation_met": true,
-      "latency_p50_ms": 3.136,
-      "latency_p95_ms": 3.448,
+      "latency_p50_ms": 3.684,
+      "latency_p95_ms": 4.296,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/user_role_fenced_terminal.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/user_role_fenced_terminal.after.txt",
-      "tokens_before": 42001,
-      "tokens_after": 935,
-      "token_savings_pct": 97.77,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": true
+      "artifact_after": "test/results/squoze_artifacts/user_role_fenced_terminal.after.txt"
     },
     {
       "name": "user_role_file_content_source",
       "class": "user-path",
       "model": "claude-opus-4-5",
       "model_family": "",
-      "notes": "source file wrapped in <file_content> — must not be elided",
+      "notes": "source file wrapped in \u003cfile_content\u003e — must not be elided",
       "role": "user",
       "wire_format": "openai_chat",
       "blob_bytes_in": 29263,
@@ -822,16 +752,11 @@
       "expectation": "untouched",
       "touched": false,
       "expectation_met": true,
-      "latency_p50_ms": 0.398,
-      "latency_p95_ms": 0.903,
+      "latency_p50_ms": 0.319,
+      "latency_p95_ms": 0.817,
       "verdict": "PASS",
       "artifact_before": "test/results/squoze_artifacts/user_role_file_content_source.before.txt",
-      "artifact_after": "test/results/squoze_artifacts/user_role_file_content_source.after.txt",
-      "tokens_before": 7776,
-      "tokens_after": 7776,
-      "token_savings_pct": 0,
-      "tokenizer": "o200k_base",
-      "tokenizer_is_proxy": false
+      "artifact_after": "test/results/squoze_artifacts/user_role_file_content_source.after.txt"
     }
   ],
   "multi_turn": [
@@ -961,23 +886,8 @@
     "cases_total": 15,
     "cases_touched": 9,
     "contract_violations": {},
-    "max_latency_p95_ms": 6.5,
+    "max_latency_p95_ms": 5.4,
     "median_savings_pct_when_hit": 97.02,
     "prefix_broken_models": []
-  },
-  "token_summary": {
-    "tokenizer": "o200k_base",
-    "note": "Anthropic ships no local tokenizer; Claude-family cases are scored with o200k_base as a proxy. Byte savings and token savings diverge because repetitive machine output tokenizes more densely than prose.",
-    "corpus_tokens_before": 318138,
-    "corpus_tokens_after": 41805,
-    "corpus_token_savings_pct": 86.86,
-    "byte_vs_token_divergences": [
-      {
-        "name": "json_api_list_800_rows",
-        "byte": 76.20024816264198,
-        "token": 63.68,
-        "delta": -12.52
-      }
-    ]
   }
 }

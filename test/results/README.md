@@ -11,9 +11,9 @@ Status legend — **backed**: reproducible and the numbers mean what they say ·
 
 | File | Produced by | Status |
 |---|---|---|
-| `squoze_quality_report.json` | `go run ./test/squozebench` | **backed** — 15 offline cases, needle recall / idempotency / determinism / prefix stability graded per case |
-| `squoze_ab/squoze_quality_report.{base,head}.json` | `test/squozebench/repro/savings_ab.sh` | **backed** — released squoze (11 pass / 3 fail) vs. the working tree (14 pass / 0 fail), compared by `repro/cmp_savings.mjs`, which reads exactly this pair |
-| `squoze_ab/{base,head}.1..3.json` | same script, `N=3` | **backed** — the three repeats per side the canonical pair is drawn from; they exist so p95 has a spread (5.6–6.5 ms) instead of a single sample |
+| `squoze_quality_report.json` | `go run ./test/squozebench` | **backed** — 15 offline cases, needle recall / idempotency / determinism / prefix stability graded per case; the committed run is squoze **v0.3.0**, the version `go.mod` pins, and the file states it in `squoze_version` |
+| `squoze_ab/squoze_quality_report.{base,head}.json` | `test/squozebench/repro/savings_ab.sh` | **backed** — squoze v0.2.0 (11 pass / 3 fail) vs. the tree that became v0.3.0 (14 pass / 0 fail), compared by `repro/cmp_savings.mjs`, which reads exactly this pair. Both sides report `squoze_version: 0.2.0` because the head tree had not yet bumped the constant; the released v0.3.0 run is the top-level report and is verdict- and savings-identical to the head side |
+| `squoze_ab/{base,head}.1..3.json` | same script, `N=3` | **backed** — the three repeats per side the canonical pair is drawn from; they exist so p95 has a spread instead of a single sample, and the spread earns its keep: worst-case p95 is 5.0–6.5 ms in five of the six runs and 14.9 ms in `head.2`, on a case that measured 4.6 ms in the other two — host contention, visible only because the run was repeated |
 | `conformance_report.json` | `node test/conformance.mjs` | **backed** — 9 pass / 0 fail / 3 skip on OpenAI wire-shape conformance |
 | `provider_probe.json` | `PROBE_KEY=… node test/provider_probe.mjs` | **backed** — which upstream models answer, and whether they report `usage` |
 | `crax_probe.json` | `PROBE_KEY=… node test/crax_probe.mjs` | **backed** — model list and context windows as advertised by the provider |

@@ -1,5 +1,6 @@
 #!/bin/sh
-# A/B харнесса squozebench: релиз squoze v0.2.0 против рабочего дерева squoze.
+# A/B харнесса squozebench: релиз squoze, который пинит go.mod шлюза
+# (сегодня v0.3.0), против локального рабочего дерева squoze.
 #
 #   MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/w" -v "/abs/path/to/squoze:/squoze" golang:1.23 sh /w/test/squozebench/repro/savings_ab.sh
 #
@@ -18,7 +19,7 @@ OUT=/w/test/results/squoze_ab
 mkdir -p "$OUT"
 N=${N:-3}
 
-echo "=== BASELINE: released squoze v0.2.0 ==="
+echo "=== BASELINE: squoze release pinned by go.mod ==="
 i=1
 while [ "$i" -le "$N" ]; do
   go run ./test/squozebench > /dev/null 2>&1 || { echo "baseline run $i failed"; break; }

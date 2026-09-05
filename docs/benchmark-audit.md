@@ -56,21 +56,24 @@ docker run --rm -v "$PWD:/src" -w /src golang:1.23 go run ./test/squozebench
 node test/tokenscore.mjs
 ```
 
-15 cases across 6 classes → `test/results/squoze_quality_report.json`.
-**11 pass · 3 fail · 1 known-limit** against squoze v0.2.0, which is the state
-this audit describes and the reason it was written.
+15 cases across 7 classes → `test/results/squoze_quality_report.json`, which
+now holds the v0.3.0 run. **11 pass · 3 fail · 1 known-limit** is the squoze
+v0.2.0 result this audit describes and was written for; it is kept as
+`test/results/squoze_ab/base.{1,2,3}.json`.
 
-> **Head state, 2026-09-05: 14 pass · 0 fail · 1 known-limit**, median savings
-> 97.02% when compression fires, worst p95 engine latency 5.95 ms, no broken
-> prefixes. Every finding below is fixed in the squoze working tree (untagged);
-> the numbers in the rest of this section are the v0.2.0 measurements and are
-> left as they were, because the point of the audit is what the release did.
-> One corpus entry was also wrong rather than merely failing:
+> **Fixed in squoze v0.3.0, released 2026-09-05, and pinned by `go.mod` since:
+> 14 pass · 0 fail · 1 known-limit**, median savings 97.02% when compression
+> fires, worst p95 engine latency 5.4 ms, no broken prefixes. Every finding
+> below is fixed there. The numbers in the rest of this section are the v0.2.0
+> measurements and are left as they were, because the point of the audit is what
+> the release did. One corpus entry was also wrong rather than merely failing:
 > `json_api_list_800_rows` asserted both `ExpectEither` and a JSON format
 > contract, and lifting 800 rows into a Markdown table cannot satisfy the
 > second — the contract was dropped and `TestJSONEnvelopeLoss` now carries the
-> property it was reaching for. Re-run: `go run ./test/squozebench` with the
-> module pointed at the working tree (see `test/squozebench/repro/README.md`).
+> property it was reaching for. The v0.3.0 numbers come from the command above,
+> unmodified; the v0.2.0 side is reproducible from
+> `test/results/squoze_ab/base.{1,2,3}.json` and
+> `test/squozebench/repro/README.md`.
 
 ### What works, and works well
 
@@ -121,21 +124,30 @@ docker run --rm -v "$PWD:/src" -w /src golang:1.23 \
   go test -v -run 'TestRealRepoFiles|TestClassificationMargin' ./test/squozebench/
 ```
 
-- **1 of 93** real source files ≥4 KB was elided — and it is this suite's own
-  `corpus.go`, which deliberately contains test-output samples.
-- **0 of 64** real `_test.go` / `.test.ts` files score above the threshold.
+- **1 of 93** real source files ≥4 KB was elided on the v0.2.0 pin — and it is
+  this suite's own `corpus.go`, which deliberately contains test-output samples.
+  Re-run against the v0.3.0 pin the same scan checks **97** files and elides
+  **none**, `corpus.go` included: that release added a code-opener guard
+  (`hasCodeOpener` + `codeMarkers >= 2` → `KindCode`, ahead of the test-output
+  branch and absent in v0.2.0) precisely for fixture generators and golden files.
+- **0 of 65** real `_test.go` / `.test.ts` files score above the threshold.
   They all score **1** against a threshold of **3**, because real Go tests use
   `t.Fatalf` / `require.Equal`, not the literal strings `FAILED` / `PASSED` /
-  `assert `.
+  `assert `. The scan skips its own mirror file, which holds those markers as
+  list literals: it sat under the 4 KB floor when this audit was written and is
+  excluded by name since, so the number keeps meaning "real test files".
 
-So the realistic exposure is narrow: files that *store* test output as data
-(fixtures, golden files, corpora, log-parsing test data). The mechanism is real
-and the margin is thin, but ordinary code is not currently being truncated.
+So the realistic exposure was narrow even then: files that *store* test output
+as data (fixtures, golden files, corpora, log-parsing test data). The mechanism
+was real, but ordinary code was not being truncated — and on v0.3.0 not even the
+fixture generator is.
 
-`TestRealRepoFilesAreNotElided` therefore **passes**, excluding this suite's own
-`corpus.go` (reported as a log line, not a failure — it embeds machine output by
-construction). It fails if any file under `internal/`, `cmd/`, or ordinary test
-code starts getting elided, which is the regression worth catching.
+`TestRealRepoFilesAreNotElided` **passes** on both pins. Its `corpus.go`
+exemption (a log line, not a failure — the file embeds machine output by
+construction) is what v0.2.0 needed and v0.3.0 no longer exercises; the test
+keeps it, because the guard that made it unnecessary is one release old. It
+fails if any file under `internal/`, `cmd/`, or ordinary test code starts
+getting elided, which is the regression worth catching.
 
 **(b) JSON silently becomes a Markdown table, and envelope fields are lost.**
 
@@ -262,16 +274,20 @@ fixture.
 
 ## 7. Recommended fixes, in impact order
 
-| # | Fix | Where | Effort |
-|---|---|---|---|
-| 1 | `sort.Strings(colKeys)` — restore determinism | squoze `internal/distill/json_tabular.go` | one line |
-| 2 | Fix the dedup guard so the marker is applied instead of dropped | squoze `internal/engine/stream_scanner.go` (both paths) | small |
-| 3 | Preserve JSON envelope fields, or emit the table *alongside* a kept envelope | squoze `internal/distill/json_tabular.go` | small |
-| 4 | Raise the code-vs-test-output discrimination: require line-start anchoring for `=== RUN`/`--- FAIL`, and reject blobs that parse as source (brace balance, `^func`/`^def`) | squoze `internal/router/router.go` | medium |
-| 5 | State in the elision marker how many error lines were dropped when `MaxKept` is hit | squoze `internal/compress/compress.go` | small |
-| 6 | Make the fake upstream OpenAI-faithful (emit `usage`, `object`, `id`, `finish_reason`; honour non-stream requests) so conformance and token measurements are possible offline | `test/fakeupstream/main.go` | medium |
-| 7 | Log the upstream status and error message when all attempts fail — currently a `503 "no available channel"` becomes a bare `502` with nothing on stdout | `internal/proxy/proxy.go:589` | small |
-| 8 | Refresh the squoze row in `docs/benchmarks.md`; it is stale by ~3–6× | `docs/benchmarks.md` | docs |
+Status as of 2026-09-05. Rows 1–5 are squoze-side and all landed in v0.3.0,
+which `go.mod` pins; each is guarded by a named test in `test/squozebench/` so a
+regression is a red suite, not a rediscovered audit finding.
+
+| # | Fix | Where | Effort | Status |
+|---|---|---|---|---|
+| 1 | `sort.Strings(colKeys)` — restore determinism | squoze `internal/distill/json_tabular.go` | one line | **done in v0.3.0** — `sort.Strings` on both key paths; `TestJSONTabularDeterminism` green |
+| 2 | Fix the dedup guard so the marker is applied instead of dropped | squoze `internal/engine/stream_scanner.go` (both paths) | small | **done in v0.3.0** — `TestDedupReExpandsHistory` green, prefixes stable on both model families |
+| 3 | Preserve JSON envelope fields, or emit the table *alongside* a kept envelope | squoze `internal/distill/json_tabular.go` | small | **done in v0.3.0** — scalar siblings hoisted into the table headline; `TestJSONEnvelopeLoss` green |
+| 4 | Raise the code-vs-test-output discrimination: require line-start anchoring for `=== RUN`/`--- FAIL`, and reject blobs that parse as source (brace balance, `^func`/`^def`) | squoze `internal/router/router.go` | medium | **done in v0.3.0** — `hasCodeOpener` + `codeMarkers` ahead of the test branch, crash markers line-anchored; 0 of 97 real files elided (§3 calibration) |
+| 5 | State in the elision marker how many error lines were dropped when `MaxKept` is hit | squoze `internal/compress/compress.go` | small | **done in v0.3.0** — marker carries `· N more failure lines over cap=…` |
+| 6 | Make the fake upstream OpenAI-faithful (emit `usage`, `object`, `id`, `finish_reason`; honour non-stream requests) so conformance and token measurements are possible offline | `test/fakeupstream/main.go` | medium | **open** — the codex path emits `usage`, `/v1/chat/completions` still answers with bare `{"choices":[{"delta":…}]}` SSE regardless of `stream`. This is why `benchmark_summary.json` reads `usage: null` |
+| 7 | Log the upstream status and error message when all attempts fail — currently a `503 "no available channel"` becomes a bare `502` with nothing on stdout | `internal/proxy/proxy.go` | small | **open** — the final path is still `Error(w, http.StatusBadGateway, "all upstream attempts failed")` with no upstream status or body retained |
+| 8 | Refresh the squoze row in `docs/benchmarks.md`; it is stale by ~3–6× | `docs/benchmarks.md` | docs | **partial** — the row is annotated stale with the re-measured 74.7 / 146.6 ms and a host-load caveat; the table itself still prints 438 ms |
 
 ## 8. How to re-run everything
 
@@ -296,31 +312,22 @@ REPEATS=5 GATEWAY_URL=http://127.0.0.1:8989 node test/accuracy_suite.mjs
 
 ### Expected result of `go test ./test/squozebench/`
 
-Green, with three skips. Three tests are regression pins on contracts the pinned
-`github.com/Rethinger/squoze v0.2.0` violates; all three are **fixed in squoze's
-working tree and verified green there**, but the fixes are not tagged, so against
-the pin they can only fail. A `go test ./...` that is red on every commit until
-an unrelated repository cuts a release is a signal nobody reads, so the three
-skip by default and run under `SQUOZE_CONTRACT_PINS=1`:
+Green, no skips. Three of the tests — `TestJSONTabularDeterminism`,
+`TestJSONEnvelopeLoss`, `TestDedupReExpandsHistory` — are regression pins on the
+three contracts `github.com/Rethinger/squoze v0.2.0` violated. While no tag
+carried the fixes they could only fail against the `go.mod` pin, and a
+`go test ./...` that is red on every commit until an unrelated repository cuts a
+release is a signal nobody reads — so for one day they skipped unless
+`SQUOZE_CONTRACT_PINS=1` was set, with a non-blocking CI job keeping the failures
+visible. squoze v0.3.0 (2026-09-05) fixes all three; `go.mod` pins it, the gate
+and the extra CI job are deleted, and the three now run unconditionally, where
+they protect a fixed contract instead of documenting a broken one.
 
-```sh
-docker run --rm -v "$PWD:/src" -w /src -e SQUOZE_CONTRACT_PINS=1 golang:1.23 \
-  go test -v -run 'TestJSONTabularDeterminism|TestJSONEnvelopeLoss|TestDedupReExpandsHistory' \
-  ./test/squozebench/
-```
-
-With the variable set, all three fail — that is the pin doing its job. CI runs
-exactly that command in a separate `squoze-contract-pins` job marked
-`continue-on-error`, so the failures stay visible on GitHub without blocking the
-release job. When `go.mod` pins a squoze above v0.2.0 and the three pass with
-the variable set, delete the gate: from that point they protect a fixed contract
-instead of documenting a broken one.
-
-| Test | Pins finding | Fixed upstream in | Green against release when |
-|---|---|---|---|
-| `TestJSONEnvelopeLoss` | (b) JSON → Markdown table, envelope fields dropped | `hoistConstantColumns` + envelope in the headline (`internal/distill/json_tabular.go`) | squoze tags a release above v0.2.0 and `go.mod` is bumped |
-| `TestJSONTabularDeterminism` | (c) random column order | column order taken from document order, `sort.Strings` only as fallback | same |
-| `TestDedupReExpandsHistory` | (d) earlier turn re-expanded, cache prefix dead | `toolTarget.orig` + inverted dedup direction (`internal/distill/dedup.go`) | same |
+| Test | Pins finding | Fixed in squoze v0.3.0 by |
+|---|---|---|
+| `TestJSONEnvelopeLoss` | (b) JSON → Markdown table, envelope fields dropped | `hoistConstantColumns` + envelope in the headline (`internal/distill/json_tabular.go`) |
+| `TestJSONTabularDeterminism` | (c) random column order | column order taken from document order, `sort.Strings` only as fallback |
+| `TestDedupReExpandsHistory` | (d) earlier turn re-expanded, cache prefix dead | `toolTarget.orig` + inverted dedup direction (`internal/distill/dedup.go`) |
 
 Both assertions in `TestJSONEnvelopeLoss` were rewritten during that work: it
 used to require JSON quoting around `"object"`, which is satisfiable only by

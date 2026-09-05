@@ -21,11 +21,11 @@ cited. What was wrong, and what replaced it:
   cross-turn prefix stability and latency — no network, no API keys.
   `go run ./test/squozebench` → `test/results/squoze_quality_report.json`.
 - **Added: an A/B harness against the pinned release.** `squoze v0.2.0` scores
-  11 pass / 3 fail on that corpus, the working tree 14 pass / 0 fail; the three
-  failures are real contract violations (source code elided as machine output,
-  a lost pagination envelope, non-deterministic column order). Both sides build
-  through `-modfile=go.local.mod`, so `go.mod` is never mutated.
-  `test/squozebench/repro/`.
+  11 pass / 3 fail on that corpus, what shipped as `v0.3.0` 14 pass / 0 fail;
+  the three failures are real contract violations (source code elided as
+  machine output, a lost pagination envelope, non-deterministic column order).
+  Both sides build through `-modfile=go.local.mod`, so `go.mod` is never
+  mutated. `test/squozebench/repro/`.
 - **Added: token scoring, wire conformance and a gateway overhead matrix.**
   `test/tokenscore.mjs` (o200k) reports token savings next to byte savings and
   flags any case where the two diverge by ≥ 5 pp — tabular lifting does, by
@@ -41,13 +41,29 @@ cited. What was wrong, and what replaced it:
   `docs/benchmark-audit.md`, the spec is `.kiro/specs/benchmark-integrity/`.
 - `docs/superpowers/` renamed to `docs/history/` with a README saying what those
   documents are and that current process lives in `.kiro/specs/`.
-- **CI is green again, without dropping the pins.** Three of the corpus tests
-  assert contracts the pinned `squoze v0.2.0` violates, so `go test ./...` could
-  only be red until squoze cuts a tag — and a permanently failing suite is a
-  signal nobody reads. Those three now skip unless `SQUOZE_CONTRACT_PINS=1` is
-  set, and a separate `squoze-contract-pins` job runs them with
-  `continue-on-error` so the failures stay visible on GitHub without gating the
-  release. Delete the gate when `go.mod` moves past v0.2.0 and they pass.
+- **Bumped `squoze` to v0.3.0, which fixes all three contract violations.**
+  The corpus scores 14 pass / 0 fail / 1 known-limit against it, median savings
+  97.02% when compression fires, worst p95 5.4 ms, cross-turn prefixes stable on
+  both model families — verdict-for-verdict identical to the A/B head side, so
+  the tag changed nothing the harness had already measured. For the one day
+  between the audit and that tag the three tests skipped unless
+  `SQUOZE_CONTRACT_PINS=1` was set, with a non-blocking CI job keeping the
+  failures visible on GitHub: a suite that is red on every commit until an
+  unrelated repository cuts a release is a signal nobody reads. Both the gate
+  and that job are gone; the three run unconditionally and now protect a fixed
+  contract instead of documenting a broken one.
+- **The code-truncation hazard is gone too, and the audit tracks status now.**
+  v0.3.0 puts a code-opener guard ahead of the test-output branch, so the
+  calibration scan that elided this suite's own `corpus.go` under v0.2.0 checks
+  97 real repo files and elides none; real `_test.go` / `.test.ts` files still
+  top out at score 1 against a threshold of 3. `docs/benchmark-audit.md` §7 now
+  carries a status column checked against the source: recommendations 1–5 done
+  in v0.3.0, 6 (an OpenAI-faithful fake upstream — `/v1/chat/completions` still
+  answers with bare delta chunks and no `usage`) and 7 (log the upstream status
+  behind the bare 502) open, 8 partial. The classifier mirror in
+  `classify_test.go` tracks the v0.3.0 scorer, declares the one term it does not
+  mirror as a lower bound, and skips itself — a file holding the markers as
+  literals scores high by definition.
 - `*.sh` and `*.mjs` are pinned to LF via `.gitattributes`: cloned on Windows
   with `core.autocrlf=true` they arrived with CRLF, and the repro scripts are run
   inside Linux containers straight from the checkout, where `sh` dies on the

@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-09-04T08:04:59.597Z",
+  "gateway": "http://gateway-bench:8080",
+  "model": "bench-model",
+  "summary": {
+    "pass": 9,
+    "fail": 0,
+    "skip": 3
+  },
+  "checks": [
+    {
+      "name": "GET /healthz is reachable without auth",
+      "spec": "HTTP 200 without an Authorization header",
+      "passed": true,
+      "observed": "HTTP 200",
+      "detail": ""
+    },
+    {
+      "name": "GET /readyz is reachable without auth",
+      "spec": "HTTP 200 without an Authorization header",
+      "passed": true,
+      "observed": "HTTP 200",
+      "detail": ""
+    },
+    {
+      "name": "GET /v1/models returns an OpenAI model list",
+      "spec": "HTTP 200, {object:\"list\", data:[{id, object:\"model\", ...}]}",
+      "passed": true,
+      "observed": "HTTP 200, object=list, n=2",
+      "detail": ""
+    },
+    {
+      "name": "non-stream completion has OpenAI object shape",
+      "spec": "id, object:\"chat.completion\", created, choices[0].{index,message,finish_reason}",
+      "passed": null,
+      "observed": "upstream answered a non-stream request with SSE framing (data: {\"choices\":[{\"delta\":{\"content\":\"h…)",
+      "detail": "INCONCLUSIVE: the configured upstream is not OpenAI-shaped, so this check cannot grade the gateway. Re-run against a real provider or an OpenAI-faithful fake."
+    },
+    {
+      "name": "non-stream response reports consistent usage",
+      "spec": "usage.{prompt,completion,total}_tokens present; prompt+completion == total",
+      "passed": null,
+      "observed": "not evaluable: response was SSE-framed",
+      "detail": "INCONCLUSIVE for the same reason. Note that a fake upstream emitting no usage makes any token-savings measurement through it unmeasurable."
+    },
+    {
+      "name": "streaming uses SSE framing terminated by [DONE]",
+      "spec": "Content-Type text/event-stream, \"data: \" frames, final \"data: [DONE]\"",
+      "passed": true,
+      "observed": "content-type=text/event-stream, data frames=3, [DONE]=true",
+      "detail": ""
+    },
+    {
+      "name": "stream frames are well-formed JSON the gateway did not corrupt",
+      "spec": "every non-[DONE] frame parses as JSON",
+      "passed": true,
+      "observed": "frames=3, json parse errors=0",
+      "detail": ""
+    },
+    {
+      "name": "stream chunks carry object:\"chat.completion.chunk\"",
+      "spec": "every non-[DONE] frame has object:\"chat.completion.chunk\", and a final frame carries finish_reason",
+      "passed": null,
+      "observed": "frames missing object field=2, saw finish_reason=false, first delta carried role=false",
+      "detail": "INCONCLUSIVE: the gateway streams upstream frames through unmodified, so these fields reflect the upstream. The bundled fake-upstream emits minimal frames (test/fakeupstream/main.go writes only choices[].delta.content)."
+    },
+    {
+      "name": "unknown virtual key is rejected with 401 + error object",
+      "spec": "HTTP 401 and {error:{message,type|code}}",
+      "passed": true,
+      "observed": "HTTP 401, body={\"error\":{\"code\":401,\"message\":\"unauthorized\",\"type\":\"gateway_error\"}}",
+      "detail": ""
+    },
+    {
+      "name": "unknown model produces a 4xx error object",
+      "spec": "HTTP 4xx and {error:{message,...}}",
+      "passed": true,
+      "observed": "HTTP 404, body={\"error\":{\"code\":404,\"message\":\"unknown model\",\"type\":\"gateway_error\"}}",
+      "detail": ""
+    },
+    {
+      "name": "gateway echoes which optimizer actually ran",
+      "spec": "response carries X-Gateway-RTK-Mode / -Saved-Bytes / -Route when an optimizer is requested",
+      "passed": true,
+      "observed": "{\"rtk\":\"aggressive\",\"squoze\":null,\"savedBytes\":\"53271\",\"savedTokens\":\"13317\",\"overhead\":\"5\",\"route\":\"fake-primary\"}",
+      "detail": ""
+    },
+    {
+      "name": "requested RTK compression reports non-zero savings on noisy input",
+      "spec": "X-Gateway-Saved-Bytes > 0 for a 900-line tool result with X-Gateway-Compress: aggressive",
+      "passed": true,
+      "observed": "saved_bytes=53271, rtk_mode=aggressive",
+      "detail": ""
+    }
+  ]
+}

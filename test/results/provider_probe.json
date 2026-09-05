@@ -1,0 +1,117 @@
+{
+  "timestamp": "2026-09-04T07:40:43.899Z",
+  "base": "https://gorouter.app/v1",
+  "models_endpoint": {
+    "status": 200,
+    "count": 0,
+    "ids": []
+  },
+  "availability": [
+    {
+      "model": "claude-opus-5",
+      "status": 503,
+      "elapsed": 311,
+      "ok": false,
+      "error": "No available channel for model claude-opus-5 under group default (distributor) (request id: 202609040740436845851358268d9d6GiUuyckB)"
+    },
+    {
+      "model": "claude-opus-4-5",
+      "status": 403,
+      "elapsed": 386,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "claude-opus-4-1",
+      "status": 403,
+      "elapsed": 397,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "claude-sonnet-4-5",
+      "status": 403,
+      "elapsed": 376,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "claude-sonnet-4",
+      "status": 403,
+      "elapsed": 384,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "claude-3-7-sonnet",
+      "status": 403,
+      "elapsed": 404,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "claude-3-5-sonnet",
+      "status": 403,
+      "elapsed": 380,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "gpt-5",
+      "status": 403,
+      "elapsed": 409,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "gpt-5-mini",
+      "status": 403,
+      "elapsed": 379,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "gpt-4o",
+      "status": 403,
+      "elapsed": 375,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "gpt-4o-mini",
+      "status": 403,
+      "elapsed": 371,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "gemini-2.5-pro",
+      "status": 403,
+      "elapsed": 372,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "gemini-2.5-flash",
+      "status": 403,
+      "elapsed": 389,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "deepseek-chat",
+      "status": 403,
+      "elapsed": 380,
+      "ok": false,
+      "nonJson": ""
+    },
+    {
+      "model": "deepseek-reasoner",
+      "status": 403,
+      "elapsed": 378,
+      "ok": false,
+      "nonJson": ""
+    }
+  ],
+  "usage_sanity": []
+}

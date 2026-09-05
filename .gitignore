@@ -29,3 +29,12 @@ Thumbs.db
 .enola/
 scratch/
 test/config-benchmark.yaml
+
+# benchmark harness scratch
+node_modules/
+test/results/matrix_raw.txt
+test/results/squoze_artifacts/
+
+# Alternate module file used by the squoze A/B repro scripts
+/go.local.mod
+/go.local.sum

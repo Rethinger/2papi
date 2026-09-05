@@ -102,6 +102,17 @@ type Optimization struct {
 	// with never-elide, decision memo and reversible marker refs. Exclusive:
 	// when set, rtk/caveman/headroom must be empty or Build() fails.
 	Squoze bool `yaml:"squoze,omitempty" json:"squoze,omitempty"`
+	// SquozeMaxBodyBytes skips squoze entirely for request bodies larger than
+	// this many bytes, before the body's format is even sniffed. 0 = no bound.
+	//
+	// The bound is a size and not a time budget on purpose: squoze's cache-safe
+	// contract is that identical original bytes always produce byte-identical
+	// output, so a body that compresses on an idle host but passes through on a
+	// busy one would break the provider prompt cache for every turn after it.
+	// A size is decidable before the work starts and gives the same answer every
+	// time. Inherits like the other optimization fields: virtual key > model >
+	// global.
+	SquozeMaxBodyBytes int `yaml:"squoze_max_body_bytes,omitempty" json:"squoze_max_body_bytes,omitempty"`
 }
 type Server struct {
 	Addr         string `yaml:"addr" json:"addr"`
@@ -651,6 +662,9 @@ func validateOptimizationModes(where string, o *Optimization) error {
 	}
 	if !hr[o.HeadroomProfile] {
 		return fmt.Errorf("%s: invalid headroom_profile %q", where, o.HeadroomProfile)
+	}
+	if o.SquozeMaxBodyBytes < 0 {
+		return fmt.Errorf("%s: squoze_max_body_bytes must be >= 0, got %d", where, o.SquozeMaxBodyBytes)
 	}
 	// squoze is an experimental EXCLUSIVE mode: it replaces (not combines
 	// with) the built-in optimizers, so mixing them is a config error.

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"strconv"
@@ -205,10 +206,59 @@ func (p *Proxy) Moderations(w http.ResponseWriter, r *http.Request, meta protoco
 	p.Endpoint(w, r, adapter.EndpointModerations, meta, body)
 }
 
-// squozeEngine backs the experimental exclusive squoze mode. One instance
-// per process: its decision memo must persist across requests for cache
-// stability (same original bytes → same compressed bytes).
-var squozeEngine = squoze.NewEngine(squoze.DefaultMemoCapacity)
+// squozeEngines pools one engine per distinct squoze.Limits value. Engines are
+// never per-request: the decision memo must persist across requests for cache
+// stability (same original bytes → same compressed bytes). But Limits decide
+// what a body turns into, so a memo is only sound within one set of them —
+// hence one engine per value rather than one engine reconfigured per request.
+//
+// The key space is closed by construction: Limits come from the config cascade
+// (global / model / virtual key), so the pool holds at most as many engines as
+// the config has distinct bounds. Request headers deliberately cannot mint new
+// values — see squozeLimitsFor.
+var squozeEngines sync.Map // squoze.Limits -> *squoze.Engine
+
+func squozeEngineFor(lim squoze.Limits) *squoze.Engine {
+	if e, ok := squozeEngines.Load(lim); ok {
+		return e.(*squoze.Engine)
+	}
+	e, _ := squozeEngines.LoadOrStore(lim, squoze.NewEngineWithLimits(squoze.DefaultMemoCapacity, lim))
+	return e.(*squoze.Engine)
+}
+
+// squozeLimitsFor resolves the work bounds for one request from the config
+// cascade: virtual key > model > global, first non-zero wins, zero means
+// unbounded (which is squoze v0.3.0 behaviour byte for byte).
+func squozeLimitsFor(g *config.Optimization, m, v *config.Optimization) squoze.Limits {
+	for _, o := range []*config.Optimization{v, m, g} {
+		if o != nil && o.SquozeMaxBodyBytes > 0 {
+			return squoze.Limits{MaxBodyBytes: o.SquozeMaxBodyBytes}
+		}
+	}
+	return squoze.Limits{}
+}
+
+// squozeHeaderCap reads X-Gateway-Squoze-Max-Body. It may only TIGHTEN the
+// configured bound, never loosen it, and it never reaches the engine pool.
+//
+// Both halves of that are deliberate. Loosening would let a caller force work
+// the operator's config exists to prevent — the guard would be advisory. And
+// pooling an engine per header value would let a caller mint unbounded engines
+// (each pre-allocates a 4k-entry decision memo, ~370 KB), so a header-tightened
+// skip is decided here and reported with the library's own reason constant
+// instead. The observable result is identical: the body is passed through
+// untouched and X-Gateway-Squoze-Skip says why.
+func squozeHeaderCap(h string) (int, bool) {
+	if h == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(h))
+	if err != nil || n <= 0 {
+		log.Printf("squoze: ignoring malformed X-Gateway-Squoze-Max-Body %q", h)
+		return 0, false
+	}
+	return n, true
+}
 
 func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapter.Endpoint, meta protocol.EndpointMetadata, body []byte) {
 	started := time.Now()
@@ -275,9 +325,27 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 	{
 		g, m, v := &p.Snap.Optimization, optModelCfg.Optimization, optVK.Optimization
 		if (g != nil && g.Squoze) || (m != nil && m.Squoze) || (v != nil && v.Squoze) {
-			out, res := squozeEngine.Apply(body)
+			lim := squozeLimitsFor(g, m, v)
+			var out []byte
+			var res squoze.Result
+			if cap, ok := squozeHeaderCap(r.Header.Get("X-Gateway-Squoze-Max-Body")); ok && len(body) > cap &&
+				(lim.MaxBodyBytes == 0 || cap < lim.MaxBodyBytes) {
+				// Tightened by the request: skip without touching the engine, and
+				// report it exactly as the engine's own body cap would.
+				out, res = body, squoze.Result{
+					OriginalBytes: len(body),
+					SentBytes:     len(body),
+					Skipped:       true,
+					SkipReason:    squoze.SkipBodyTooLarge,
+				}
+			} else {
+				out, res = squozeEngineFor(lim).Apply(body)
+			}
 			body = out
 			squozeActive = true
+			if res.Skipped {
+				w.Header().Set("X-Gateway-Squoze-Skip", res.SkipReason)
+			}
 			w.Header().Set("X-Gateway-Squoze", strconv.FormatBool(res.BlocksSqueezed > 0))
 			w.Header().Set("X-Gateway-Squoze-Format", res.Format.String())
 			w.Header().Set("X-Gateway-Squoze-Latency-Ms", fmt.Sprintf("%.2f", res.DurationMS))

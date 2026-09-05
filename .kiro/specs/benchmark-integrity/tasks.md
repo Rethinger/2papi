@@ -89,6 +89,28 @@ Requirements: [requirements.md](requirements.md) · Design: [design.md](design.m
   - Deliverables: `go.mod`, `go.sum`, `test/squozebench/verify_test.go`, `test/squozebench/classify_test.go`, `.github/workflows/ci.yml`, `test/results/squoze_quality_report.json`, `README.md`, `CHANGELOG.md`, `docs/benchmark-audit.md`, `test/results/README.md`, `test/squozebench/repro/README.md`, `test/squozebench/repro/savings_ab.sh`, `test/squozebench/repro/accept.sh`, `.kiro/specs/benchmark-integrity/design.md`
   - Acceptance: `go.mod` пинит `github.com/Rethinger/squoze v0.3.0`; `go vet ./...` и `go test -race ./... -count=1` зелёные без переменных окружения, без `SKIP` в `test/squozebench`; `contractPin` и задание CI `squoze-contract-pins` удалены; свежий `go run ./test/squozebench` даёт 14 pass / 0 fail / 1 known-limit вердикт-в-вердикт равно `squoze_ab/head.1.json` и лежит в репозитории с `squoze_version: 0.3.0`; ни один документ больше не утверждает, что тега выше v0.2.0 нет; зеркало скорера в `classify_test.go` отражает v0.3.0 (добавлен line-anchored `crashHits`, не отражённые диагностические строки объявлены как нижняя граница) и исключает само себя из выборки, потому что держит маркеры литералами; §3 аудита и таблица §7 пересчитаны по свежему прогону: 0 из 97 файлов элидировано, 0 из 65 тест-файлов выше порога, пункты 1–5 закрыты в v0.3.0, 6–7 открыты, 8 частично.
 
+## Фаза 7 — Живая точность и честное сравнение (P2/P3)
+
+- [ ] **TSK-016**: Preflight на действующем провайдере (`https://gpt.crax.lol`) и выбор моделей, которые реально отвечают.
+  - Requirement: FR-11, AC-11.3, AC-11.4, NFR-2
+  - Deliverables: `test/results/provider_probe.json` (перепрогон), при необходимости правка `test/provider_probe.mjs`
+  - Acceptance: список отвечающих моделей и признак наличия `usage` у каждой; ключ только из env (`PROBE_KEY`/`CRAX_KEY`), в отчёте его нет.
+
+- [ ] **TSK-017**: Прогон набора точности с k≥3 и снятие статуса BLOCKED.
+  - Requirement: FR-11, AC-11.1, AC-11.2
+  - Deliverables: `test/results/accuracy_report.json`, строка в `test/results/README.md`
+  - Acceptance: по каждому условию Δaccuracy, экономия токенов, overhead p95, k и дата; три гейта набора выведены как pass/fail; недоступные модели остаются BLOCKED поимённо, а не обнуляют отчёт.
+
+- [ ] **TSK-018**: Перемер накладных расходов шлюза после v0.4.0 и обновление BASELINE матрицы.
+  - Requirement: FR-7, FR-12, AC-12.2
+  - Deliverables: `test/results/gateway_matrix_report.json`, `test/matrix_compare.mjs` (BASELINE), `docs/benchmarks.md`
+  - Acceptance: BASELINE соответствует пину squoze на момент прогона (значение 438.56 снято на v0.2.0 и устарело на два релиза); у каждой цифры указаны размер payload, режим и команда перезапуска.
+
+- [ ] **TSK-019**: Таблица сравнения: свои замеры против заявлений вендоров.
+  - Requirement: FR-12, AC-12.1, AC-12.3
+  - Deliverables: `docs/benchmarks.md`, бенч-раздел `README.md`
+  - Acceptance: у каждой строки помечено «измерено» или «заявление вендора» с условиями; строки-цели без замера удалены; заявление bifrost (11 µs t3.xlarge / 59 µs t3.medium при 5 000 RPS) приведено как их цифра при их условиях, а сторонний бенчмарк, отдающий 403, помечен непроверяемым.
+
 ## Dependency graph
 
 ```mermaid
@@ -101,6 +123,8 @@ graph LR
     T3 --> T11[TSK-011] --> T13[TSK-013] --> T10
     T5 --> T12[TSK-012] --> T13
     T11 --> T14[TSK-014] --> T15[TSK-015]
+    T2 --> T16[TSK-016] --> T17[TSK-017] --> T19[TSK-019]
+    T15 --> T18[TSK-018] --> T19
 ```
 
 ## Progress
@@ -122,6 +146,10 @@ graph LR
 | TSK-013 | Complete | `test/results/squoze_ab/` — 3+3 прогона, канонические пары сверены `cmp` |
 | TSK-014 | Complete | `verify_test.go` гейт `SQUOZE_CONTRACT_PINS`, задание CI `squoze-contract-pins` |
 | TSK-015 | Complete | `go.mod` → `squoze v0.3.0`, гейт и задание CI удалены, 14 pass / 0 fail без переменных |
+| TSK-016 | Pending | preflight crax → `test/results/provider_probe.json` |
+| TSK-017 | Pending | `test/results/accuracy_report.json` — снять BLOCKED |
+| TSK-018 | Pending | `gateway_matrix_report.json` + BASELINE после v0.4.0 |
+| TSK-019 | Pending | таблица «измерено / заявление вендора» |
 
 ## Результаты прогона
 

@@ -132,8 +132,16 @@ func TestSquozeV2ProxyIntegration(t *testing.T) {
 	}
 	t.Logf("Squoze v2 saved bytes: %s", savedBytes)
 
-	// 2. Verify upstream payload contains tabular representation instead of bulky JSON
-	if !strings.Contains(string(capturedUpstreamBody), "[... squoze table: 25 rows ...]") {
-		t.Fatalf("upstream body was not distilled into table:\n%s", string(capturedUpstreamBody))
+	// 2. Verify upstream payload contains tabular representation instead of bulky JSON.
+	// Matched on the headline prefix and the table body rather than the exact
+	// headline string: the headline is an open-ended list of facts about the
+	// table (envelope fields, hoisted constant columns, truncation counts), so
+	// an exact match breaks on additions that are not regressions.
+	sent := string(capturedUpstreamBody)
+	if !strings.Contains(sent, "[... squoze table: 25 rows") {
+		t.Fatalf("upstream body was not distilled into table:\n%s", sent)
+	}
+	if !strings.Contains(sent, "| id | name |") {
+		t.Fatalf("distilled table is missing its header row:\n%s", sent)
 	}
 }

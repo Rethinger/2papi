@@ -21,6 +21,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 
 const BASE = process.env.GATEWAY_URL || 'http://127.0.0.1:8989';
 const KEY = process.env.GATEWAY_KEY || 'sk-2papi-bench';
@@ -73,6 +74,11 @@ async function callGateway(model, messages) {
   let content = '';
   let usage = null;
 
+  // Kept, because the savings gate is a percentage: X-Gateway-Saved-Bytes alone
+  // is a byte count, and a byte count without its denominator is not a rate.
+  const bodyText = JSON.stringify({ model, messages, max_tokens: MAX_TOKENS, stream: true });
+  const requestBytes = Buffer.byteLength(bodyText, 'utf-8');
+
   const res = await fetch(`${BASE}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -80,7 +86,7 @@ async function callGateway(model, messages) {
       Authorization: `Bearer ${KEY}`,
       'User-Agent': UA,
     },
-    body: JSON.stringify({ model, messages, max_tokens: MAX_TOKENS, stream: true }),
+    body: bodyText,
   });
 
   const headers = {
@@ -93,7 +99,7 @@ async function callGateway(model, messages) {
   };
 
   if (!res.ok) {
-    return { ok: false, headers, error: (await res.text()).slice(0, 300) };
+    return { ok: false, requestBytes, headers, error: (await res.text()).slice(0, 300) };
   }
 
   const reader = res.body.getReader();
@@ -126,7 +132,7 @@ async function callGateway(model, messages) {
     }
   }
 
-  return { ok: true, headers, usage, content, elapsedMs: Date.now() - t0, ttftMs: ttft };
+  return { ok: true, requestBytes, headers, usage, content, elapsedMs: Date.now() - t0, ttftMs: ttft };
 }
 
 // grade returns an explicit, auditable verdict. It deliberately does NOT claim
@@ -234,7 +240,10 @@ async function main() {
             ttftMs: r.ttftMs,
             promptTokens: r.usage?.prompt_tokens ?? null,
             completionTokens: r.usage?.completion_tokens ?? null,
+            requestBytes: r.requestBytes,
             savedBytes: r.headers.savedBytes,
+            savedPct: r.requestBytes ? Number(((r.headers.savedBytes / r.requestBytes) * 100).toFixed(2)) : null,
+            overheadMs: r.headers.overheadMs,
             squozeActive: r.headers.squoze === 'true',
             squozeLatencyMs: r.headers.squozeLatencyMs,
             grade: g,
@@ -264,6 +273,11 @@ async function main() {
         prompt_tokens_iqr: iqr(inTok),
         squoze_active_runs: ok.filter((t) => t.squozeActive).length,
         saved_bytes_median: median(ok.map((t) => t.savedBytes)),
+        saved_pct_median: median(ok.map((t) => t.savedPct).filter((v) => v !== null)),
+        squoze_latency_p95_ms: quantile(
+          ok.map((t) => t.squozeLatencyMs).filter((v) => v !== null && v !== undefined),
+          0.95
+        ),
       };
     };
 
@@ -297,8 +311,103 @@ async function main() {
     if (entry.caveat) console.log(`   ! ${entry.caveat}`);
   }
 
-  report.status = 'COMPLETE';
+  evaluateGates(report);
+  printGates(report);
+
   writeReport(report);
+}
+
+// Exported so the judging can be tested without a provider: the gates are the
+// part of this runner that has to be right even when nothing is reachable.
+// See test/accuracy_gates_selftest.mjs.
+export function evaluateGates(report) {
+  // ---- gates, judged rather than printed -------------------------------------
+  // A report that lists thresholds next to numbers and leaves the comparison to
+  // the reader has judged nothing. Each gate below resolves to pass/fail, or to
+  // null with the reason it could not be judged.
+  const fired = report.fixtures.filter((f) => (f.squoze.squoze_active_runs || 0) > 0);
+  const deltas = fired.map((f) => f.delta_score_pp).filter((v) => v !== null);
+  const savings = fired.map((f) => f.squoze.saved_pct_median).filter((v) => v !== null);
+  // Only trials where squoze actually ran. A skipped request reports latency 0,
+  // and averaging those in would report the overhead of not compressing.
+  const latencies = report.fixtures.flatMap((f) =>
+    f.trials.squoze
+      .filter((t) => !t.error && t.squozeActive && typeof t.squozeLatencyMs === 'number')
+      .map((t) => t.squozeLatencyMs)
+  );
+
+  const worstDelta = deltas.length ? Math.min(...deltas) : null;
+  const medianSavings = savings.length ? median(savings) : null;
+  const latencyP95 = latencies.length ? Number(quantile(latencies, 0.95).toFixed(2)) : null;
+
+  report.gate_results = {
+    fixtures_total: report.fixtures.length,
+    fixtures_where_squoze_fired: fired.length,
+    delta_accuracy: {
+      worst_pp: worstDelta,
+      threshold_pp: -report.gates.delta_accuracy_pp_max,
+      verdict: worstDelta === null ? null : worstDelta >= -report.gates.delta_accuracy_pp_max ? 'pass' : 'fail',
+      basis: 'worst per-fixture median score delta among fixtures where squoze fired',
+    },
+    savings: {
+      median_pct: medianSavings,
+      threshold_pct: report.gates.savings_pct_min,
+      verdict: medianSavings === null ? null : medianSavings >= report.gates.savings_pct_min ? 'pass' : 'fail',
+      basis: 'X-Gateway-Saved-Bytes over the request body actually sent, per trial, median of fixture medians',
+    },
+    overhead: {
+      squoze_p95_ms: latencyP95,
+      threshold_ms: report.gates.overhead_p95_ms_max,
+      verdict: latencyP95 === null ? null : latencyP95 <= report.gates.overhead_p95_ms_max ? 'pass' : 'fail',
+      basis: 'X-Gateway-Squoze-Latency-Ms across every squoze trial, p95',
+    },
+  };
+
+  // Does the provider's own accounting mean anything? If prompt_tokens is the
+  // same number for fixtures of wildly different sizes, it is a placeholder, and
+  // delta_prompt_tokens computed from it is noise dressed as a measurement.
+  const promptTokenValues = new Set(
+    report.fixtures
+      .flatMap((f) => [f.squoze.prompt_tokens_median, f.baseline.prompt_tokens_median])
+      .filter((v) => v !== null && v !== undefined)
+  );
+  report.provider_usage = {
+    distinct_prompt_tokens_values: promptTokenValues.size,
+    values: [...promptTokenValues].slice(0, 12),
+    usable_for_savings: promptTokenValues.size > 1,
+    note:
+      promptTokenValues.size > 1
+        ? 'prompt_tokens varies with payload size, so delta_prompt_tokens is a measurement'
+        : 'prompt_tokens is constant across fixtures of different sizes: the provider reports a placeholder, ' +
+          'so delta_prompt_tokens says nothing and the savings gate is judged on gateway byte accounting instead',
+  };
+
+  const verdicts = Object.values(report.gate_results)
+    .filter((g) => g && typeof g === 'object' && 'verdict' in g)
+    .map((g) => g.verdict);
+  if (!fired.length) {
+    report.status = 'INCONCLUSIVE';
+    report.inconclusive_reason =
+      'squoze did not fire on any fixture, so there is no compression to judge — the fixtures are below the size gate';
+  } else if (verdicts.includes('fail')) {
+    report.status = 'FAIL';
+  } else if (verdicts.includes(null)) {
+    report.status = 'PARTIAL';
+  } else {
+    report.status = 'PASS';
+  }
+  return report;
+}
+
+function printGates(report) {
+  console.log('');
+  console.log('---- gates ----');
+  for (const [name, g] of Object.entries(report.gate_results)) {
+    if (!g || typeof g !== 'object' || !('verdict' in g)) continue;
+    console.log(`  ${name.padEnd(15)} ${String(g.verdict ?? 'not judged').padEnd(10)} ${JSON.stringify(g)}`);
+  }
+  console.log(`  provider usage : ${report.provider_usage.note}`);
+  console.log(`  status         : ${report.status}`);
 }
 
 function writeReport(report) {
@@ -308,4 +417,7 @@ function writeReport(report) {
   console.log(`\nSaved ${out} (status: ${report.status})`);
 }
 
-main();
+// Only when run directly. Imported (by the gate self-test) this must do nothing.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

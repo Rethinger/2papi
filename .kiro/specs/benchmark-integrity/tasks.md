@@ -79,6 +79,11 @@ Requirements: [requirements.md](requirements.md) · Design: [design.md](design.m
   - Deliverables: `test/results/squoze_ab/` (3 прогона на сторону + канонические `base`/`head`), `test/results/squoze_quality_report.json`
   - Acceptance: канонические файлы побайтово равны `base.1.json` / `head.1.json`; ни один сохранённый отчёт не описывает корпус, которого больше нет.
 
+- [x] **TSK-014**: Закрыть три пина контрактов гейтом и вынести их в отдельное задание CI.
+  - Requirement: NFR-3, FR-1
+  - Deliverables: `test/squozebench/verify_test.go`, `.github/workflows/ci.yml`, `docs/benchmark-audit.md`, `test/squozebench/repro/README.md`, `README.md`, `CHANGELOG.md`
+  - Acceptance: `go test -race ./...` зелёный на пине `squoze v0.2.0` (три `SKIP` вместо трёх `FAIL`), с `SQUOZE_CONTRACT_PINS=1` все три по-прежнему падают, задание `squoze-contract-pins` помечено `continue-on-error` и не входит в `needs` релиза.
+
 ## Dependency graph
 
 ```mermaid
@@ -90,6 +95,7 @@ graph LR
     T8[TSK-008] --> T10
     T3 --> T11[TSK-011] --> T13[TSK-013] --> T10
     T5 --> T12[TSK-012] --> T13
+    T11 --> T14[TSK-014]
 ```
 
 ## Progress
@@ -109,6 +115,7 @@ graph LR
 | TSK-011 | Complete | `corpus.go` + `verify_test.go` — конверт как needles, `format-invalid: none` |
 | TSK-012 | Complete | `test/squozebench/repro/` — `-modfile=go.local.mod`, `go.mod` не мутируется |
 | TSK-013 | Complete | `test/results/squoze_ab/` — 3+3 прогона, канонические пары сверены `cmp` |
+| TSK-014 | Complete | `verify_test.go` гейт `SQUOZE_CONTRACT_PINS`, задание CI `squoze-contract-pins` |
 
 ## Результаты прогона
 

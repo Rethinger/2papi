@@ -353,6 +353,21 @@ mangled.
 The host does not need Go installed — the official image is enough, and the same
 image builds the container: `docker build -t 2papi-gateway .`
 
+That run is green, with three skips. `TestJSONTabularDeterminism`,
+`TestJSONEnvelopeLoss` and `TestDedupReExpandsHistory` assert the three contracts
+the pinned squoze v0.2.0 violates; the fixes exist upstream but are untagged, so
+against the pin they can only fail, and a permanently red suite is a signal
+nobody reads. They run on demand and in a separate non-blocking CI job:
+
+```sh
+docker run --rm -v "$PWD:/src" -w /src -e SQUOZE_CONTRACT_PINS=1 golang:1.22 \
+  go test -v -run 'TestJSONTabularDeterminism|TestJSONEnvelopeLoss|TestDedupReExpandsHistory' \
+  ./test/squozebench/
+```
+
+All three fail with the variable set — that is the pin working. Every other test
+in that package is unconditional, so a failure there is a real regression.
+
 Control-plane integration tests (migrations, constraints, audit, envelope
 encryption, compile/publish/rollback, gateway acknowledgements):
 

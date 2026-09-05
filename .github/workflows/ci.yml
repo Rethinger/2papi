@@ -23,6 +23,28 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+  squoze-contract-pins:
+    name: Squoze contract pins (non-blocking)
+    runs-on: ubuntu-latest
+    # These three tests assert contracts that the pinned squoze release
+    # violates. The fixes exist in squoze's working tree but are not tagged, so
+    # the job is expected to fail until go.mod bumps past v0.2.0 — it is kept
+    # visible here rather than blocking, and never gates the release job.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+      - name: Contract pins against the pinned squoze
+        env:
+          SQUOZE_CONTRACT_PINS: '1'
+        run: >-
+          go test -v -run
+          'TestJSONTabularDeterminism|TestJSONEnvelopeLoss|TestDedupReExpandsHistory'
+          ./test/squozebench/
+
   control-plane-test:
     name: Control-plane tests
     runs-on: ubuntu-latest

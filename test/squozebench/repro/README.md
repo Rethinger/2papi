@@ -63,6 +63,30 @@
 Пока тега выше `v0.2.0` нет, эти исправления недоступны потребителю: `go.mod`
 пинит релиз, и A/B — единственный способ увидеть разницу.
 
+## Гейт на трёх пинах контрактов
+
+`TestJSONTabularDeterminism`, `TestJSONEnvelopeLoss` и `TestDedupReExpandsHistory`
+пинят три нарушения из таблицы выше и против пина `v0.2.0` могут только
+падать. Постоянно красный `go test ./...` читать никто не будет, поэтому по
+умолчанию они `SKIP`, а запускаются переменной `SQUOZE_CONTRACT_PINS=1`:
+
+```sh
+MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/src" -w /src \
+  -e SQUOZE_CONTRACT_PINS=1 golang:1.23 \
+  go test -v -run 'TestJSONTabularDeterminism|TestJSONEnvelopeLoss|TestDedupReExpandsHistory' \
+  ./test/squozebench/
+```
+
+С переменной все три падают — это и есть работа пина. CI гоняет ровно эту
+команду отдельным заданием `squoze-contract-pins` с `continue-on-error`, чтобы
+падения были видны на GitHub и при этом не блокировали релиз. Когда `go.mod`
+будет пинить squoze выше `v0.2.0` и тройка пройдёт с переменной, гейт надо
+убрать: с этого момента они защищают исправленный контракт, а не описывают
+сломанный.
+
+Остальные тесты пакета гейта не знают и должны быть зелёными всегда:
+падение любого из них — настоящая регрессия.
+
 ## Как оценивается json_api_list_800_rows
 
 Кейс объявлен `Class: "structured-data"` и `Expect: ExpectEither` — подъём

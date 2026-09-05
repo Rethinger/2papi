@@ -296,13 +296,25 @@ REPEATS=5 GATEWAY_URL=http://127.0.0.1:8989 node test/accuracy_suite.mjs
 
 ### Expected result of `go test ./test/squozebench/`
 
-`FAIL` is still the correct outcome **against the squoze release `go.mod` pins**
-(`github.com/Rethinger/squoze v0.2.0`). Three tests are regression pins on
-upstream bugs, and all three are now **fixed upstream and verified green against
-the squoze working tree** — but the fixes are not tagged, so a plain
-`go test ./test/squozebench/` here still runs them against the buggy release and
-still fails. That is the pin doing its job: it goes green the moment 2papi bumps
-to a squoze version that carries the fix.
+Green, with three skips. Three tests are regression pins on contracts the pinned
+`github.com/Rethinger/squoze v0.2.0` violates; all three are **fixed in squoze's
+working tree and verified green there**, but the fixes are not tagged, so against
+the pin they can only fail. A `go test ./...` that is red on every commit until
+an unrelated repository cuts a release is a signal nobody reads, so the three
+skip by default and run under `SQUOZE_CONTRACT_PINS=1`:
+
+```sh
+docker run --rm -v "$PWD:/src" -w /src -e SQUOZE_CONTRACT_PINS=1 golang:1.23 \
+  go test -v -run 'TestJSONTabularDeterminism|TestJSONEnvelopeLoss|TestDedupReExpandsHistory' \
+  ./test/squozebench/
+```
+
+With the variable set, all three fail — that is the pin doing its job. CI runs
+exactly that command in a separate `squoze-contract-pins` job marked
+`continue-on-error`, so the failures stay visible on GitHub without blocking the
+release job. When `go.mod` pins a squoze above v0.2.0 and the three pass with
+the variable set, delete the gate: from that point they protect a fixed contract
+instead of documenting a broken one.
 
 | Test | Pins finding | Fixed upstream in | Green against release when |
 |---|---|---|---|
@@ -318,8 +330,9 @@ in whatever form the output takes. Same for the table headline comparison in
 byte-for-byte.
 
 To see the three green before there is a tag, point the module at the working
-tree — this is exactly what the A/B harness does, and it restores `go.mod`
-afterwards:
+tree — this is exactly what the A/B harness does, through an alternate module
+file, so `go.mod` and `go.sum` are never touched and nothing needs restoring
+even if the run is interrupted:
 
 ```sh
 MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/w" -v "/abs/path/to/squoze:/squoze" golang:1.23 sh /w/test/squozebench/repro/savings_ab.sh

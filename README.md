@@ -12,9 +12,10 @@ token savers and an MCP gateway. One static Go binary, no Python.*
 
 **A Go AI gateway for teams that outgrew LiteLLM.** Same virtual-key/budget
 model, but: **gateway overhead 0.02 ms at 10 concurrent** (measured below;
-LiteLLM's Rust rewrite publishes a ~8 ms p95 target), one static binary with an
-embedded dashboard (no Python ops tax), and three things no other Go gateway
-has:
+LiteLLM's own benchmark page reports 8 ms p95 at ~1k RPS across four instances —
+a different harness, [compared honestly](docs/benchmarks.md#measured-here-vs-vendor-claims)),
+one static binary with an embedded dashboard (no Python ops tax), and three
+things no other Go gateway has:
 
 - **Token savers built in** — four request optimizers: RTK tool-result
   compression, Caveman terse mode, Headroom context pruning, and
@@ -201,12 +202,20 @@ percentage on RTK, Caveman or Headroom. Treat any such figure you find in
 your own traffic is `X-Gateway-Saved-Bytes` on your own requests.
 
 **Cost of these passes.** They trade gateway CPU for upstream tokens, and the
-cost scales with body size rather than request rate: measured against a
-fake-upstream at 20 concurrent, RTK adds ~12 ms on a 97 KiB body and ~110 ms on
-633 KiB, while the gateway's own overhead without optimizers stays at ~0.1 ms.
-Headroom is the exception — on large bodies it raises throughput above baseline,
-because pruning shrinks what the upstream has to read. Per-mode numbers, payload
-profiles and methodology: [docs/benchmarks.md](docs/benchmarks.md).
+cost scales with body size rather than request rate. Measured 2026-09-06 against
+the bundled fake upstream at 20 concurrent on the laptop named in
+[docs/benchmarks.md](docs/benchmarks.md): RTK adds 16.10–16.85 ms on a 96.9 KiB
+body and 138.07–191.52 ms on 633.4 KiB, and Squoze 8.14 ms and 74.56 ms on the
+same bodies, against a gateway that costs 0.08 ms and 0.30 ms with no optimizer
+at all.
+
+A pass that shrinks the body can still finish *sooner* than doing nothing: on
+96.9 KiB, Squoze reaches 346 rps against baseline's 307 and Headroom balanced
+398 rps, with lower TTFB p95, because pruning shrinks what the upstream has to
+read. That does not survive at 633.4 KiB, where the no-op baseline (101 rps)
+beats every optimizer and the win is in tokens rather than wall-clock. Per-mode
+numbers, payload profiles and methodology:
+[docs/benchmarks.md](docs/benchmarks.md).
 
 **Reasoning models note**: reasoning-capable upstreams (DeepSeek R/V-series,
 o-series, Claude extended thinking) spend your `max_tokens` on hidden
@@ -290,13 +299,19 @@ one. It is graded `KNOWN-LIMIT`, never `PASS`.
 ### Gateway overhead
 
 ```sh
-docker compose --profile bench up --build bench-runner        # concurrency tiers
-docker compose --profile bench run --rm bench-matrix          # optimization-mode matrix
+# concurrency tiers (the table below)
+docker compose --profile bench up --build bench-runner
+
+# optimization-mode matrix (14 modes x 3 payload sizes)
+docker compose --profile bench up -d --build fake-upstream gateway-bench
+docker compose --profile bench run --rm --no-deps bench-matrix > test/results/matrix_raw.txt 2>&1
+node test/matrix_compare.mjs test/results/matrix_raw.txt
 ```
 
 Fixed local fake upstream, no provider network in the loop. Reference numbers
-from a Windows laptop running Docker Desktop (WSL2) — treat as a floor, Linux
-bare-metal does better:
+from an AMD Ryzen 5 3550H laptop (8 logical CPUs, 10.7 GiB RAM in the Docker VM)
+running Windows 11 Pro + Docker Desktop (WSL2) — treat every millisecond as a
+ceiling and every rps as a floor; Linux bare-metal does better:
 
 | concurrency | reqs | RPS | TTFB p50 | p95 | p99 | gateway overhead avg |
 |---|---|---|---|---|---|---|
@@ -307,9 +322,10 @@ bare-metal does better:
 Zero errors across 37k requests. The overhead column is the pure gateway cost
 (total minus upstream wait) — the sub-millisecond claim refers to this number,
 not to provider latency, and it holds for small bodies. Per-mode costs on large
-bodies are in [docs/benchmarks.md](docs/benchmarks.md); note that its squoze row
-is stale (documented 438 ms on 633 KiB, measured 74–147 ms after v0.2.0's fast
-bailout). `BENCH_TIERS`, `BENCH_DURATION_MS` and `GATEWAY_URL` tune the runner.
+bodies are in [docs/benchmarks.md](docs/benchmarks.md), re-measured 2026-09-06 on
+squoze v0.4.0: 8.14 ms on 96.9 KiB and 74.56 ms on 633.4 KiB, both with the pass
+actually applied. `BENCH_TIERS`, `BENCH_DURATION_MS` and `GATEWAY_URL` tune the
+runner.
 
 ### OpenAI wire-protocol conformance
 

@@ -1,138 +1,402 @@
 {
-  "timestamp": "2026-09-04T08:17:35.083Z",
-  "suite": "gateway optimization-mode matrix vs docs/benchmarks.md",
-  "documented_source": "docs/benchmarks.md, measured 2026-09-02",
+  "timestamp": "2026-09-05T22:50:19.566Z",
+  "suite": "gateway optimization-mode matrix vs recorded baseline run",
+  "baseline": {
+    "measured": "2026-09-06",
+    "squoze": "v0.4.0",
+    "gateway_commit": "ac098a4",
+    "verified_pin": "docker create + docker cp /app/gateway, then `go version -m gateway` → dep github.com/Rethinger/squoze v0.4.0",
+    "host": "AMD Ryzen 5 3550H, 8 logical CPUs and 10.7 GiB RAM visible inside the Docker VM, Windows 11 Pro + Docker Desktop (WSL2). A laptop, not an isolated bench host: treat absolute ms as a ceiling and rps as a floor.",
+    "harness": "fake upstream in the same compose network, conc=20, 6000 ms per mode, 3 warmup requests per mode, 14 modes × 3 payload profiles",
+    "payloads": {
+      "small": "0.1 KiB",
+      "large": "96.9 KiB",
+      "huge": "633.4 KiB"
+    },
+    "command": "docker compose --profile bench up -d --build fake-upstream gateway-bench && docker compose --profile bench run --rm --no-deps bench-matrix > test/results/matrix_raw.txt 2>&1 && node test/matrix_compare.mjs test/results/matrix_raw.txt"
+  },
+  "comparison": "ovh_delta_ms (mode overhead minus the baseline row of the SAME run) and rps_rel (mode rps over the baseline row of the same run). Absolute ms and rps are recorded per row but are host-specific and not diffed.",
   "drift_threshold_pct": 20,
-  "note": "Absolute throughput depends on host load, so rps drift is expected and is reported for context. The actionable signal is overhead drift on a mode whose implementation changed.",
+  "drift_floor_ms": 1,
+  "host_band": {
+    "min": 0.7,
+    "max": 1.4
+  },
+  "host_state": {
+    "small": {
+      "baseline_rps_recorded": 588,
+      "baseline_rps_measured": 588,
+      "host_factor": 1,
+      "verdict": "comparable",
+      "note": null
+    },
+    "large": {
+      "baseline_rps_recorded": 307,
+      "baseline_rps_measured": 307,
+      "host_factor": 1,
+      "verdict": "comparable",
+      "note": null
+    },
+    "huge": {
+      "baseline_rps_recorded": 101,
+      "baseline_rps_measured": 101,
+      "host_factor": 1,
+      "verdict": "comparable",
+      "note": null
+    }
+  },
   "profiles": {
     "small": {
-      "note": "no documented baseline for this profile",
       "modes": {
         "baseline (off)": {
-          "reqs": 843,
-          "rps": 141,
-          "err": 0,
-          "ovh_avg": 0.08,
-          "ovh_p95": 1,
-          "ttfb_p95": 231,
-          "applied": "—"
+          "measured": {
+            "reqs": 3526,
+            "rps": 588,
+            "err": 0,
+            "ovh_avg": 0.02,
+            "ovh_p95": 0,
+            "ttfb_p95": 34,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1
+          },
+          "baseline": {
+            "rps": 588,
+            "ovh_avg": 0.02
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk light": {
-          "reqs": 1269,
-          "rps": 212,
-          "err": 0,
-          "ovh_avg": 0.08,
-          "ovh_p95": 1,
-          "ttfb_p95": 174,
-          "applied": "—"
+          "measured": {
+            "reqs": 3385,
+            "rps": 564,
+            "err": 0,
+            "ovh_avg": 0.03,
+            "ovh_p95": 0,
+            "ttfb_p95": 31,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 0.959
+          },
+          "baseline": {
+            "rps": 564,
+            "ovh_avg": 0.03
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 0.959
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk standard": {
-          "reqs": 1380,
-          "rps": 230,
-          "err": 0,
-          "ovh_avg": 0.07,
-          "ovh_p95": 1,
-          "ttfb_p95": 139,
-          "applied": "—"
+          "measured": {
+            "reqs": 3838,
+            "rps": 640,
+            "err": 0,
+            "ovh_avg": 0.03,
+            "ovh_p95": 0,
+            "ttfb_p95": 22,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.088
+          },
+          "baseline": {
+            "rps": 640,
+            "ovh_avg": 0.03
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.088
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk aggressive": {
-          "reqs": 1669,
-          "rps": 278,
-          "err": 0,
-          "ovh_avg": 0.06,
-          "ovh_p95": 1,
-          "ttfb_p95": 118,
-          "applied": "—"
+          "measured": {
+            "reqs": 3803,
+            "rps": 634,
+            "err": 0,
+            "ovh_avg": 0.03,
+            "ovh_p95": 0,
+            "ttfb_p95": 29,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.078
+          },
+          "baseline": {
+            "rps": 634,
+            "ovh_avg": 0.03
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.078
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk auto": {
-          "reqs": 1872,
-          "rps": 312,
-          "err": 0,
-          "ovh_avg": 0.07,
-          "ovh_p95": 1,
-          "ttfb_p95": 93,
-          "applied": "rtk=auto"
+          "measured": {
+            "reqs": 4266,
+            "rps": 711,
+            "err": 0,
+            "ovh_avg": 0.02,
+            "ovh_p95": 0,
+            "ttfb_p95": 15,
+            "applied": "rtk=auto"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1.209
+          },
+          "baseline": {
+            "rps": 711,
+            "ovh_avg": 0.02
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1.209
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman lite": {
-          "reqs": 1711,
-          "rps": 285,
-          "err": 0,
-          "ovh_avg": 0.23,
-          "ovh_p95": 1,
-          "ttfb_p95": 120,
-          "applied": "caveman=lite"
+          "measured": {
+            "reqs": 3624,
+            "rps": 604,
+            "err": 0,
+            "ovh_avg": 0.11,
+            "ovh_p95": 1,
+            "ttfb_p95": 26,
+            "applied": "caveman=lite"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.09,
+            "rps_rel": 1.027
+          },
+          "baseline": {
+            "rps": 604,
+            "ovh_avg": 0.11
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.09,
+            "rps_rel": 1.027
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman full": {
-          "reqs": 1772,
-          "rps": 295,
-          "err": 0,
-          "ovh_avg": 0.22,
-          "ovh_p95": 1,
-          "ttfb_p95": 112,
-          "applied": "caveman=full"
+          "measured": {
+            "reqs": 3443,
+            "rps": 574,
+            "err": 0,
+            "ovh_avg": 0.21,
+            "ovh_p95": 1,
+            "ttfb_p95": 32,
+            "applied": "caveman=full"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.19,
+            "rps_rel": 0.976
+          },
+          "baseline": {
+            "rps": 574,
+            "ovh_avg": 0.21
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.19,
+            "rps_rel": 0.976
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman auto": {
-          "reqs": 1888,
-          "rps": 315,
-          "err": 0,
-          "ovh_avg": 0.21,
-          "ovh_p95": 1,
-          "ttfb_p95": 95,
-          "applied": "caveman=lite"
+          "measured": {
+            "reqs": 3662,
+            "rps": 610,
+            "err": 0,
+            "ovh_avg": 0.13,
+            "ovh_p95": 1,
+            "ttfb_p95": 21,
+            "applied": "caveman=lite"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.11,
+            "rps_rel": 1.037
+          },
+          "baseline": {
+            "rps": 610,
+            "ovh_avg": 0.13
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.11,
+            "rps_rel": 1.037
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom conservative": {
-          "reqs": 1686,
-          "rps": 281,
-          "err": 0,
-          "ovh_avg": 0.09,
-          "ovh_p95": 1,
-          "ttfb_p95": 116,
-          "applied": "—"
+          "measured": {
+            "reqs": 3594,
+            "rps": 599,
+            "err": 0,
+            "ovh_avg": 0.03,
+            "ovh_p95": 0,
+            "ttfb_p95": 26,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.019
+          },
+          "baseline": {
+            "rps": 599,
+            "ovh_avg": 0.03
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.019
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom balanced": {
-          "reqs": 1636,
-          "rps": 273,
-          "err": 0,
-          "ovh_avg": 0.06,
-          "ovh_p95": 1,
-          "ttfb_p95": 112,
-          "applied": "—"
+          "measured": {
+            "reqs": 3554,
+            "rps": 592,
+            "err": 0,
+            "ovh_avg": 0.03,
+            "ovh_p95": 0,
+            "ttfb_p95": 24,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.007
+          },
+          "baseline": {
+            "rps": 592,
+            "ovh_avg": 0.03
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.007
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom aggressive": {
-          "reqs": 1841,
-          "rps": 307,
-          "err": 0,
-          "ovh_avg": 0.08,
-          "ovh_p95": 1,
-          "ttfb_p95": 101,
-          "applied": "—"
+          "measured": {
+            "reqs": 3563,
+            "rps": 594,
+            "err": 0,
+            "ovh_avg": 0.03,
+            "ovh_p95": 0,
+            "ttfb_p95": 27,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.01
+          },
+          "baseline": {
+            "rps": 594,
+            "ovh_avg": 0.03
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.01
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom auto": {
-          "reqs": 1487,
-          "rps": 248,
-          "err": 0,
-          "ovh_avg": 0.09,
-          "ovh_p95": 1,
-          "ttfb_p95": 134,
-          "applied": "—"
+          "measured": {
+            "reqs": 3205,
+            "rps": 534,
+            "err": 0,
+            "ovh_avg": 0.05,
+            "ovh_p95": 0,
+            "ttfb_p95": 48,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.03,
+            "rps_rel": 0.908
+          },
+          "baseline": {
+            "rps": 534,
+            "ovh_avg": 0.05
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.03,
+            "rps_rel": 0.908
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "all three (std/full/balanced)": {
-          "reqs": 1718,
-          "rps": 286,
-          "err": 0,
-          "ovh_avg": 0.25,
-          "ovh_p95": 1,
-          "ttfb_p95": 104,
-          "applied": "caveman=full"
+          "measured": {
+            "reqs": 2743,
+            "rps": 457,
+            "err": 0,
+            "ovh_avg": 0.24,
+            "ovh_p95": 1,
+            "ttfb_p95": 50,
+            "applied": "caveman=full"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.22,
+            "rps_rel": 0.777
+          },
+          "baseline": {
+            "rps": 457,
+            "ovh_avg": 0.24
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.22,
+            "rps_rel": 0.777
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "squoze (exclusive)": {
-          "reqs": 1620,
-          "rps": 270,
-          "err": 0,
-          "ovh_avg": 0.11,
-          "ovh_p95": 1,
-          "ttfb_p95": 119,
-          "applied": "—"
+          "measured": {
+            "reqs": 2988,
+            "rps": 498,
+            "err": 0,
+            "ovh_avg": 0.05,
+            "ovh_p95": 1,
+            "ttfb_p95": 49,
+            "applied": "—"
+          },
+          "measured_rel": {
+            "ovh_delta_ms": 0.03,
+            "rps_rel": 0.847
+          },
+          "baseline": {
+            "rps": 498,
+            "ovh_avg": 0.05
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.03,
+            "rps_rel": 0.847
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         }
       }
     },
@@ -140,238 +404,353 @@
       "modes": {
         "baseline (off)": {
           "measured": {
-            "reqs": 1009,
-            "rps": 168,
+            "reqs": 1840,
+            "rps": 307,
             "err": 0,
-            "ovh_avg": 0.18,
+            "ovh_avg": 0.08,
             "ovh_p95": 1,
-            "ttfb_p95": 182,
+            "ttfb_p95": 99,
             "applied": "—"
           },
-          "documented": {
-            "rps": 336,
-            "ovh_avg": 0.09
+          "measured_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1
           },
-          "ovh_drift_pct": 100,
-          "rps_drift_pct": -50
+          "baseline": {
+            "rps": 307,
+            "ovh_avg": 0.08
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk light": {
           "measured": {
-            "reqs": 985,
-            "rps": 164,
+            "reqs": 1359,
+            "rps": 227,
             "err": 0,
-            "ovh_avg": 17.54,
-            "ovh_p95": 41,
-            "ttfb_p95": 185,
+            "ovh_avg": 16.75,
+            "ovh_p95": 40,
+            "ttfb_p95": 115,
             "applied": "rtk=light"
           },
-          "documented": {
-            "rps": 272,
-            "ovh_avg": 12.5
+          "measured_rel": {
+            "ovh_delta_ms": 16.67,
+            "rps_rel": 0.739
           },
-          "ovh_drift_pct": 40.3,
-          "rps_drift_pct": -39.7
+          "baseline": {
+            "rps": 227,
+            "ovh_avg": 16.75
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 16.67,
+            "rps_rel": 0.739
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk standard": {
           "measured": {
-            "reqs": 973,
-            "rps": 162,
+            "reqs": 1397,
+            "rps": 233,
             "err": 0,
-            "ovh_avg": 18.54,
-            "ovh_p95": 47,
-            "ttfb_p95": 187,
+            "ovh_avg": 16.1,
+            "ovh_p95": 37,
+            "ttfb_p95": 108,
             "applied": "rtk=standard"
           },
-          "documented": {
-            "rps": 264,
-            "ovh_avg": 13.02
+          "measured_rel": {
+            "ovh_delta_ms": 16.02,
+            "rps_rel": 0.759
           },
-          "ovh_drift_pct": 42.4,
-          "rps_drift_pct": -38.6
+          "baseline": {
+            "rps": 233,
+            "ovh_avg": 16.1
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 16.02,
+            "rps_rel": 0.759
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk aggressive": {
           "measured": {
-            "reqs": 945,
-            "rps": 158,
+            "reqs": 1313,
+            "rps": 219,
             "err": 0,
-            "ovh_avg": 20.25,
-            "ovh_p95": 54,
-            "ttfb_p95": 196,
+            "ovh_avg": 16.85,
+            "ovh_p95": 41,
+            "ttfb_p95": 121,
             "applied": "rtk=aggressive"
           },
-          "documented": {
-            "rps": 294,
-            "ovh_avg": 11.76
+          "measured_rel": {
+            "ovh_delta_ms": 16.77,
+            "rps_rel": 0.713
           },
-          "ovh_drift_pct": 72.2,
-          "rps_drift_pct": -46.3
+          "baseline": {
+            "rps": 219,
+            "ovh_avg": 16.85
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 16.77,
+            "rps_rel": 0.713
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk auto": {
           "measured": {
-            "reqs": 796,
-            "rps": 133,
+            "reqs": 1403,
+            "rps": 234,
             "err": 0,
-            "ovh_avg": 21.1,
-            "ovh_p95": 52,
-            "ttfb_p95": 237,
+            "ovh_avg": 16.33,
+            "ovh_p95": 39,
+            "ttfb_p95": 117,
             "applied": "rtk=auto"
           },
-          "documented": {
-            "rps": 270,
-            "ovh_avg": 12.76
+          "measured_rel": {
+            "ovh_delta_ms": 16.25,
+            "rps_rel": 0.762
           },
-          "ovh_drift_pct": 65.4,
-          "rps_drift_pct": -50.7
+          "baseline": {
+            "rps": 234,
+            "ovh_avg": 16.33
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 16.25,
+            "rps_rel": 0.762
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman lite": {
           "measured": {
-            "reqs": 780,
-            "rps": 130,
+            "reqs": 1306,
+            "rps": 218,
             "err": 0,
-            "ovh_avg": 26.26,
-            "ovh_p95": 65,
-            "ttfb_p95": 266,
+            "ovh_avg": 19.4,
+            "ovh_p95": 44,
+            "ttfb_p95": 131,
             "applied": "caveman=lite"
           },
-          "documented": {
-            "rps": 262,
-            "ovh_avg": 15.18
+          "measured_rel": {
+            "ovh_delta_ms": 19.32,
+            "rps_rel": 0.71
           },
-          "ovh_drift_pct": 73,
-          "rps_drift_pct": -50.4
+          "baseline": {
+            "rps": 218,
+            "ovh_avg": 19.4
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 19.32,
+            "rps_rel": 0.71
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman full": {
           "measured": {
-            "reqs": 927,
-            "rps": 155,
+            "reqs": 1244,
+            "rps": 207,
             "err": 0,
-            "ovh_avg": 22.94,
-            "ovh_p95": 51,
-            "ttfb_p95": 187,
+            "ovh_avg": 20.32,
+            "ovh_p95": 47,
+            "ttfb_p95": 127,
             "applied": "caveman=full"
           },
-          "documented": {
-            "rps": 286,
-            "ovh_avg": 14.19
+          "measured_rel": {
+            "ovh_delta_ms": 20.24,
+            "rps_rel": 0.674
           },
-          "ovh_drift_pct": 61.7,
-          "rps_drift_pct": -45.8
+          "baseline": {
+            "rps": 207,
+            "ovh_avg": 20.32
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 20.24,
+            "rps_rel": 0.674
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman auto": {
           "measured": {
-            "reqs": 951,
-            "rps": 159,
+            "reqs": 1167,
+            "rps": 195,
             "err": 0,
-            "ovh_avg": 22.81,
-            "ovh_p95": 52,
-            "ttfb_p95": 206,
+            "ovh_avg": 21.45,
+            "ovh_p95": 50,
+            "ttfb_p95": 146,
             "applied": "caveman=full"
           },
-          "documented": null,
-          "ovh_drift_pct": null,
-          "rps_drift_pct": null
+          "measured_rel": {
+            "ovh_delta_ms": 21.37,
+            "rps_rel": 0.635
+          },
+          "baseline": {
+            "rps": 195,
+            "ovh_avg": 21.45
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 21.37,
+            "rps_rel": 0.635
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom conservative": {
           "measured": {
-            "reqs": 864,
-            "rps": 144,
+            "reqs": 1832,
+            "rps": 305,
             "err": 0,
-            "ovh_avg": 0.24,
+            "ovh_avg": 0.1,
             "ovh_p95": 1,
-            "ttfb_p95": 229,
+            "ttfb_p95": 90,
             "applied": "—"
           },
-          "documented": {
-            "rps": 372,
-            "ovh_avg": 0.08
+          "measured_rel": {
+            "ovh_delta_ms": 0.02,
+            "rps_rel": 0.993
           },
-          "ovh_drift_pct": 200,
-          "rps_drift_pct": -61.3
+          "baseline": {
+            "rps": 305,
+            "ovh_avg": 0.1
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.02,
+            "rps_rel": 0.993
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom balanced": {
           "measured": {
-            "reqs": 993,
-            "rps": 166,
+            "reqs": 2389,
+            "rps": 398,
             "err": 0,
-            "ovh_avg": 0.25,
+            "ovh_avg": 0.08,
             "ovh_p95": 1,
-            "ttfb_p95": 215,
+            "ttfb_p95": 48,
             "applied": "—"
           },
-          "documented": {
-            "rps": 356,
-            "ovh_avg": 0.09
+          "measured_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1.296
           },
-          "ovh_drift_pct": 177.8,
-          "rps_drift_pct": -53.4
+          "baseline": {
+            "rps": 398,
+            "ovh_avg": 0.08
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1.296
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom aggressive": {
           "measured": {
-            "reqs": 724,
-            "rps": 121,
+            "reqs": 2105,
+            "rps": 351,
             "err": 0,
-            "ovh_avg": 0.66,
-            "ovh_p95": 2,
-            "ttfb_p95": 291,
+            "ovh_avg": 0.09,
+            "ovh_p95": 1,
+            "ttfb_p95": 66,
             "applied": "—"
           },
-          "documented": {
-            "rps": 372,
-            "ovh_avg": 0.08
+          "measured_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.143
           },
-          "ovh_drift_pct": 725,
-          "rps_drift_pct": -67.5
+          "baseline": {
+            "rps": 351,
+            "ovh_avg": 0.09
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.01,
+            "rps_rel": 1.143
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom auto": {
           "measured": {
-            "reqs": 761,
-            "rps": 127,
+            "reqs": 1833,
+            "rps": 306,
             "err": 0,
-            "ovh_avg": 0.48,
+            "ovh_avg": 0.11,
             "ovh_p95": 1,
-            "ttfb_p95": 248,
+            "ttfb_p95": 89,
             "applied": "—"
           },
-          "documented": {
-            "rps": 363,
-            "ovh_avg": 0.09
+          "measured_rel": {
+            "ovh_delta_ms": 0.03,
+            "rps_rel": 0.997
           },
-          "ovh_drift_pct": 433.3,
-          "rps_drift_pct": -65
+          "baseline": {
+            "rps": 306,
+            "ovh_avg": 0.11
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0.03,
+            "rps_rel": 0.997
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "all three (std/full/balanced)": {
           "measured": {
-            "reqs": 580,
-            "rps": 97,
+            "reqs": 1334,
+            "rps": 222,
             "err": 0,
-            "ovh_avg": 53.35,
-            "ovh_p95": 152,
-            "ttfb_p95": 363,
+            "ovh_avg": 22.93,
+            "ovh_p95": 50,
+            "ttfb_p95": 121,
             "applied": "rtk=standard caveman=f"
           },
-          "documented": {
-            "rps": 231,
-            "ovh_avg": 20.66
+          "measured_rel": {
+            "ovh_delta_ms": 22.85,
+            "rps_rel": 0.723
           },
-          "ovh_drift_pct": 158.2,
-          "rps_drift_pct": -58
+          "baseline": {
+            "rps": 222,
+            "ovh_avg": 22.93
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 22.85,
+            "rps_rel": 0.723
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "squoze (exclusive)": {
           "measured": {
-            "reqs": 631,
-            "rps": 105,
+            "reqs": 2073,
+            "rps": 346,
             "err": 0,
-            "ovh_avg": 31.06,
-            "ovh_p95": 103,
-            "ttfb_p95": 337,
-            "applied": "—"
+            "ovh_avg": 8.14,
+            "ovh_p95": 20,
+            "ttfb_p95": 70,
+            "applied": "squoze=true"
           },
-          "documented": {
-            "rps": 287,
-            "ovh_avg": 12
+          "measured_rel": {
+            "ovh_delta_ms": 8.06,
+            "rps_rel": 1.127
           },
-          "ovh_drift_pct": 158.8,
-          "rps_drift_pct": -63.4
+          "baseline": {
+            "rps": 346,
+            "ovh_avg": 8.14
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 8.06,
+            "rps_rel": 1.127
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         }
       }
     },
@@ -379,450 +758,358 @@
       "modes": {
         "baseline (off)": {
           "measured": {
-            "reqs": 227,
-            "rps": 38,
+            "reqs": 608,
+            "rps": 101,
             "err": 0,
-            "ovh_avg": 0.44,
+            "ovh_avg": 0.3,
             "ovh_p95": 1,
-            "ttfb_p95": 893,
+            "ttfb_p95": 296,
             "applied": "—"
           },
-          "documented": {
-            "rps": 97,
-            "ovh_avg": 0.11
+          "measured_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1
           },
-          "ovh_drift_pct": 300,
-          "rps_drift_pct": -60.8
+          "baseline": {
+            "rps": 101,
+            "ovh_avg": 0.3
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 0,
+            "rps_rel": 1
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk light": {
           "measured": {
-            "reqs": 122,
-            "rps": 20,
+            "reqs": 243,
+            "rps": 41,
             "err": 0,
-            "ovh_avg": 367.2,
-            "ovh_p95": 687,
-            "ttfb_p95": 1640,
+            "ovh_avg": 185.15,
+            "ovh_p95": 362,
+            "ttfb_p95": 822,
             "applied": "rtk=light"
           },
-          "documented": {
-            "rps": 61,
-            "ovh_avg": 112.31
+          "measured_rel": {
+            "ovh_delta_ms": 184.85,
+            "rps_rel": 0.406
           },
-          "ovh_drift_pct": 227,
-          "rps_drift_pct": -67.2
+          "baseline": {
+            "rps": 41,
+            "ovh_avg": 185.15
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 184.85,
+            "rps_rel": 0.406
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk standard": {
           "measured": {
-            "reqs": 197,
-            "rps": 33,
+            "reqs": 241,
+            "rps": 40,
             "err": 0,
-            "ovh_avg": 208.96,
-            "ovh_p95": 523,
-            "ttfb_p95": 1085,
+            "ovh_avg": 191.52,
+            "ovh_p95": 367,
+            "ttfb_p95": 760,
             "applied": "rtk=standard"
           },
-          "documented": {
-            "rps": 66,
-            "ovh_avg": 98.42
+          "measured_rel": {
+            "ovh_delta_ms": 191.22,
+            "rps_rel": 0.396
           },
-          "ovh_drift_pct": 112.3,
-          "rps_drift_pct": -50
+          "baseline": {
+            "rps": 40,
+            "ovh_avg": 191.52
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 191.22,
+            "rps_rel": 0.396
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk aggressive": {
           "measured": {
-            "reqs": 212,
-            "rps": 35,
+            "reqs": 302,
+            "rps": 50,
             "err": 0,
-            "ovh_avg": 195.66,
-            "ovh_p95": 464,
-            "ttfb_p95": 968,
+            "ovh_avg": 138.07,
+            "ovh_p95": 279,
+            "ttfb_p95": 651,
             "applied": "rtk=aggressive"
           },
-          "documented": {
-            "rps": 64,
-            "ovh_avg": 109.81
+          "measured_rel": {
+            "ovh_delta_ms": 137.77,
+            "rps_rel": 0.495
           },
-          "ovh_drift_pct": 78.2,
-          "rps_drift_pct": -45.3
+          "baseline": {
+            "rps": 50,
+            "ovh_avg": 138.07
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 137.77,
+            "rps_rel": 0.495
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "rtk auto": {
           "measured": {
-            "reqs": 270,
-            "rps": 45,
+            "reqs": 282,
+            "rps": 47,
             "err": 0,
-            "ovh_avg": 161.51,
-            "ovh_p95": 349,
-            "ttfb_p95": 742,
+            "ovh_avg": 156.44,
+            "ovh_p95": 329,
+            "ttfb_p95": 623,
             "applied": "rtk=auto"
           },
-          "documented": {
-            "rps": 63,
-            "ovh_avg": 112
+          "measured_rel": {
+            "ovh_delta_ms": 156.14,
+            "rps_rel": 0.465
           },
-          "ovh_drift_pct": 44.2,
-          "rps_drift_pct": -28.6
+          "baseline": {
+            "rps": 47,
+            "ovh_avg": 156.44
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 156.14,
+            "rps_rel": 0.465
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman lite": {
           "measured": {
-            "reqs": 234,
-            "rps": 39,
+            "reqs": 255,
+            "rps": 43,
             "err": 0,
-            "ovh_avg": 187.57,
-            "ovh_p95": 333,
-            "ttfb_p95": 812,
+            "ovh_avg": 204.3,
+            "ovh_p95": 396,
+            "ttfb_p95": 730,
             "applied": "caveman=lite"
           },
-          "documented": {
-            "rps": 60,
-            "ovh_avg": 134.02
+          "measured_rel": {
+            "ovh_delta_ms": 204,
+            "rps_rel": 0.426
           },
-          "ovh_drift_pct": 40,
-          "rps_drift_pct": -35
+          "baseline": {
+            "rps": 43,
+            "ovh_avg": 204.3
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 204,
+            "rps_rel": 0.426
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman full": {
           "measured": {
-            "reqs": 246,
-            "rps": 41,
+            "reqs": 275,
+            "rps": 46,
             "err": 0,
-            "ovh_avg": 191.78,
-            "ovh_p95": 364,
-            "ttfb_p95": 749,
+            "ovh_avg": 187.81,
+            "ovh_p95": 372,
+            "ttfb_p95": 664,
             "applied": "caveman=full"
           },
-          "documented": {
-            "rps": 63,
-            "ovh_avg": 125.09
+          "measured_rel": {
+            "ovh_delta_ms": 187.51,
+            "rps_rel": 0.455
           },
-          "ovh_drift_pct": 53.3,
-          "rps_drift_pct": -34.9
+          "baseline": {
+            "rps": 46,
+            "ovh_avg": 187.81
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 187.51,
+            "rps_rel": 0.455
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "caveman auto": {
           "measured": {
-            "reqs": 226,
-            "rps": 38,
+            "reqs": 185,
+            "rps": 31,
             "err": 0,
-            "ovh_avg": 207.2,
-            "ovh_p95": 414,
-            "ttfb_p95": 846,
+            "ovh_avg": 298.31,
+            "ovh_p95": 582,
+            "ttfb_p95": 1043,
             "applied": "caveman=full"
           },
-          "documented": null,
-          "ovh_drift_pct": null,
-          "rps_drift_pct": null
+          "measured_rel": {
+            "ovh_delta_ms": 298.01,
+            "rps_rel": 0.307
+          },
+          "baseline": {
+            "rps": 31,
+            "ovh_avg": 298.31
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 298.01,
+            "rps_rel": 0.307
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom conservative": {
           "measured": {
-            "reqs": 383,
-            "rps": 64,
+            "reqs": 342,
+            "rps": 57,
             "err": 0,
-            "ovh_avg": 83.27,
-            "ovh_p95": 212,
-            "ttfb_p95": 531,
+            "ovh_avg": 112.71,
+            "ovh_p95": 249,
+            "ttfb_p95": 612,
             "applied": "headroom=conservative"
           },
-          "documented": {
-            "rps": 114,
-            "ovh_avg": 51.16
+          "measured_rel": {
+            "ovh_delta_ms": 112.41,
+            "rps_rel": 0.564
           },
-          "ovh_drift_pct": 62.8,
-          "rps_drift_pct": -43.9
+          "baseline": {
+            "rps": 57,
+            "ovh_avg": 112.71
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 112.41,
+            "rps_rel": 0.564
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom balanced": {
           "measured": {
-            "reqs": 389,
-            "rps": 65,
+            "reqs": 408,
+            "rps": 68,
             "err": 0,
-            "ovh_avg": 67.97,
-            "ovh_p95": 167,
-            "ttfb_p95": 570,
+            "ovh_avg": 91.07,
+            "ovh_p95": 207,
+            "ttfb_p95": 469,
             "applied": "headroom=balanced"
           },
-          "documented": {
-            "rps": 123,
-            "ovh_avg": 48.02
+          "measured_rel": {
+            "ovh_delta_ms": 90.77,
+            "rps_rel": 0.673
           },
-          "ovh_drift_pct": 41.5,
-          "rps_drift_pct": -47.2
+          "baseline": {
+            "rps": 68,
+            "ovh_avg": 91.07
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 90.77,
+            "rps_rel": 0.673
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom aggressive": {
           "measured": {
-            "reqs": 356,
-            "rps": 59,
+            "reqs": 443,
+            "rps": 74,
             "err": 0,
-            "ovh_avg": 80.02,
-            "ovh_p95": 217,
-            "ttfb_p95": 617,
+            "ovh_avg": 75.81,
+            "ovh_p95": 170,
+            "ttfb_p95": 426,
             "applied": "headroom=aggressive"
           },
-          "documented": {
-            "rps": 128,
-            "ovh_avg": 43.21
+          "measured_rel": {
+            "ovh_delta_ms": 75.51,
+            "rps_rel": 0.733
           },
-          "ovh_drift_pct": 85.2,
-          "rps_drift_pct": -53.9
+          "baseline": {
+            "rps": 74,
+            "ovh_avg": 75.81
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 75.51,
+            "rps_rel": 0.733
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "headroom auto": {
           "measured": {
-            "reqs": 330,
-            "rps": 55,
+            "reqs": 521,
+            "rps": 87,
             "err": 0,
-            "ovh_avg": 91.39,
-            "ovh_p95": 243,
-            "ttfb_p95": 639,
+            "ovh_avg": 69.3,
+            "ovh_p95": 171,
+            "ttfb_p95": 388,
             "applied": "headroom=auto"
           },
-          "documented": {
-            "rps": 127,
-            "ovh_avg": 44.14
+          "measured_rel": {
+            "ovh_delta_ms": 69,
+            "rps_rel": 0.861
           },
-          "ovh_drift_pct": 107,
-          "rps_drift_pct": -56.7
+          "baseline": {
+            "rps": 87,
+            "ovh_avg": 69.3
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 69,
+            "rps_rel": 0.861
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "all three (std/full/balanced)": {
           "measured": {
-            "reqs": 330,
-            "rps": 55,
+            "reqs": 437,
+            "rps": 73,
             "err": 0,
-            "ovh_avg": 97,
-            "ovh_p95": 242,
-            "ttfb_p95": 663,
+            "ovh_avg": 83.46,
+            "ovh_p95": 205,
+            "ttfb_p95": 492,
             "applied": "rtk=standard caveman=f"
           },
-          "documented": {
-            "rps": 118,
-            "ovh_avg": 48.18
+          "measured_rel": {
+            "ovh_delta_ms": 83.16,
+            "rps_rel": 0.723
           },
-          "ovh_drift_pct": 101.3,
-          "rps_drift_pct": -53.4
+          "baseline": {
+            "rps": 73,
+            "ovh_avg": 83.46
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 83.16,
+            "rps_rel": 0.723
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         },
         "squoze (exclusive)": {
           "measured": {
-            "reqs": 197,
-            "rps": 33,
+            "reqs": 512,
+            "rps": 85,
             "err": 0,
-            "ovh_avg": 146.59,
-            "ovh_p95": 377,
-            "ttfb_p95": 1172,
-            "applied": "—"
+            "ovh_avg": 74.56,
+            "ovh_p95": 175,
+            "ttfb_p95": 371,
+            "applied": "squoze=true"
           },
-          "documented": {
-            "rps": 31,
-            "ovh_avg": 438.56
+          "measured_rel": {
+            "ovh_delta_ms": 74.26,
+            "rps_rel": 0.842
           },
-          "ovh_drift_pct": -66.6,
-          "rps_drift_pct": 6.5
+          "baseline": {
+            "rps": 85,
+            "ovh_avg": 74.56
+          },
+          "baseline_rel": {
+            "ovh_delta_ms": 74.26,
+            "rps_rel": 0.842
+          },
+          "ovh_delta_drift_pct": 0,
+          "rps_rel_drift_pct": 0
         }
       }
     }
   },
-  "significant_drift": [
-    {
-      "profile": "large",
-      "mode": "baseline (off)",
-      "documented_ovh_ms": 0.09,
-      "measured_ovh_ms": 0.18,
-      "drift_pct": 100,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "rtk light",
-      "documented_ovh_ms": 12.5,
-      "measured_ovh_ms": 17.54,
-      "drift_pct": 40.3,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "rtk standard",
-      "documented_ovh_ms": 13.02,
-      "measured_ovh_ms": 18.54,
-      "drift_pct": 42.4,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "rtk aggressive",
-      "documented_ovh_ms": 11.76,
-      "measured_ovh_ms": 20.25,
-      "drift_pct": 72.2,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "rtk auto",
-      "documented_ovh_ms": 12.76,
-      "measured_ovh_ms": 21.1,
-      "drift_pct": 65.4,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "caveman lite",
-      "documented_ovh_ms": 15.18,
-      "measured_ovh_ms": 26.26,
-      "drift_pct": 73,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "caveman full",
-      "documented_ovh_ms": 14.19,
-      "measured_ovh_ms": 22.94,
-      "drift_pct": 61.7,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "headroom conservative",
-      "documented_ovh_ms": 0.08,
-      "measured_ovh_ms": 0.24,
-      "drift_pct": 200,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "headroom balanced",
-      "documented_ovh_ms": 0.09,
-      "measured_ovh_ms": 0.25,
-      "drift_pct": 177.8,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "headroom aggressive",
-      "documented_ovh_ms": 0.08,
-      "measured_ovh_ms": 0.66,
-      "drift_pct": 725,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "headroom auto",
-      "documented_ovh_ms": 0.09,
-      "measured_ovh_ms": 0.48,
-      "drift_pct": 433.3,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "all three (std/full/balanced)",
-      "documented_ovh_ms": 20.66,
-      "measured_ovh_ms": 53.35,
-      "drift_pct": 158.2,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "large",
-      "mode": "squoze (exclusive)",
-      "documented_ovh_ms": 12,
-      "measured_ovh_ms": 31.06,
-      "drift_pct": 158.8,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "baseline (off)",
-      "documented_ovh_ms": 0.11,
-      "measured_ovh_ms": 0.44,
-      "drift_pct": 300,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "rtk light",
-      "documented_ovh_ms": 112.31,
-      "measured_ovh_ms": 367.2,
-      "drift_pct": 227,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "rtk standard",
-      "documented_ovh_ms": 98.42,
-      "measured_ovh_ms": 208.96,
-      "drift_pct": 112.3,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "rtk aggressive",
-      "documented_ovh_ms": 109.81,
-      "measured_ovh_ms": 195.66,
-      "drift_pct": 78.2,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "rtk auto",
-      "documented_ovh_ms": 112,
-      "measured_ovh_ms": 161.51,
-      "drift_pct": 44.2,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "caveman lite",
-      "documented_ovh_ms": 134.02,
-      "measured_ovh_ms": 187.57,
-      "drift_pct": 40,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "caveman full",
-      "documented_ovh_ms": 125.09,
-      "measured_ovh_ms": 191.78,
-      "drift_pct": 53.3,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "headroom conservative",
-      "documented_ovh_ms": 51.16,
-      "measured_ovh_ms": 83.27,
-      "drift_pct": 62.8,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "headroom balanced",
-      "documented_ovh_ms": 48.02,
-      "measured_ovh_ms": 67.97,
-      "drift_pct": 41.5,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "headroom aggressive",
-      "documented_ovh_ms": 43.21,
-      "measured_ovh_ms": 80.02,
-      "drift_pct": 85.2,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "headroom auto",
-      "documented_ovh_ms": 44.14,
-      "measured_ovh_ms": 91.39,
-      "drift_pct": 107,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "all three (std/full/balanced)",
-      "documented_ovh_ms": 48.18,
-      "measured_ovh_ms": 97,
-      "drift_pct": 101.3,
-      "direction": "slower than documented"
-    },
-    {
-      "profile": "huge",
-      "mode": "squoze (exclusive)",
-      "documented_ovh_ms": 438.56,
-      "measured_ovh_ms": 146.59,
-      "drift_pct": -66.6,
-      "direction": "faster than documented"
-    }
-  ]
+  "significant_drift": [],
+  "throughput_drift": [],
+  "missing_from_baseline": []
 }

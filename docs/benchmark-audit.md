@@ -228,7 +228,7 @@ quoted**; the relative ordering of modes reproduced consistently.
 
 One robust finding survives the noise:
 
-| mode, 633 KiB payload | documented | measured (2 runs) |
+| mode, 633 KiB payload | documented then | measured 2026-09-04 (2 runs) |
 |---|---|---|
 | squoze (exclusive) | 438.56 ms | **74.7 ms**, **146.6 ms** |
 
@@ -236,6 +236,20 @@ Both runs are far below the documented figure, so `docs/benchmarks.md`'s squoze
 number is stale — v0.2.0's fast bailout (`len(body) < 256 || !hasCandidate`)
 landed after it was written. Squoze is no longer the most expensive pass; on the
 huge profile it is now cheaper than RTK and caveman.
+
+**Resolved 2026-09-06 (TSK-018).** The matrix was re-measured on squoze v0.4.0,
+with the pin verified on the binary that actually served the requests (`docker cp`
+the gateway out of the bench image, then `go version -m`). The comparator no
+longer diffs absolute milliseconds at all: every mode is restated as its distance
+from the `baseline (off)` row of the *same* run, and per-mode drift is suppressed
+unless the measured baseline throughput lands within 0.7-1.4x of the recorded one
+— the contended run above, at 0.55x (large) and 0.38x (huge), is refused by that
+gate rather than published as 25 regressions. The 438.56 ms row was deleted from
+`docs/benchmarks.md` rather than annotated: it was measured on v0.2.0 and reported
+`applied = squoze=false`, i.e. the full cost of deciding *not* to compress. On
+v0.4.0 the pass fires, at **8.14 ms** on 96.9 KiB and **74.56 ms** on 633.4 KiB,
+both with `squoze=true`. The gate is itself tested offline —
+`node test/matrix_gate_selftest.mjs`, 9 checks, no Docker and no provider.
 
 ## 5. OpenAI wire-protocol conformance
 
@@ -287,7 +301,7 @@ regression is a red suite, not a rediscovered audit finding.
 | 5 | State in the elision marker how many error lines were dropped when `MaxKept` is hit | squoze `internal/compress/compress.go` | small | **done in v0.3.0** — marker carries `· N more failure lines over cap=…` |
 | 6 | Make the fake upstream OpenAI-faithful (emit `usage`, `object`, `id`, `finish_reason`; honour non-stream requests) so conformance and token measurements are possible offline | `test/fakeupstream/main.go` | medium | **open** — the codex path emits `usage`, `/v1/chat/completions` still answers with bare `{"choices":[{"delta":…}]}` SSE regardless of `stream`. This is why `benchmark_summary.json` reads `usage: null` |
 | 7 | Log the upstream status and error message when all attempts fail — currently a `503 "no available channel"` becomes a bare `502` with nothing on stdout | `internal/proxy/proxy.go` | small | **open** — the final path is still `Error(w, http.StatusBadGateway, "all upstream attempts failed")` with no upstream status or body retained |
-| 8 | Refresh the squoze row in `docs/benchmarks.md`; it is stale by ~3–6× | `docs/benchmarks.md` | docs | **partial** — the row is annotated stale with the re-measured 74.7 / 146.6 ms and a host-load caveat; the table itself still prints 438 ms |
+| 8 | Refresh the squoze row in `docs/benchmarks.md`; it is stale by ~3–6× | `docs/benchmarks.md` | docs | **done 2026-09-06** — the page was re-measured on v0.4.0 and rewritten: three full 14-mode tables, the 438 ms row deleted (v0.2.0, `squoze=false`), hardware and re-run command on every own figure, vendor claims separated into a `kind`-labelled table, and the design-target table dropped. Row 7 stays open: that is `internal/proxy/proxy.go`, not docs |
 
 ## 8. How to re-run everything
 

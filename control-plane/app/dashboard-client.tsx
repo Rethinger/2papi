@@ -623,6 +623,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
         fallbacks: form.getAll('fallbacks'),
         input_per_mtok: Number(form.get('input_per_mtok') || 0),
         output_per_mtok: Number(form.get('output_per_mtok') || 0),
+        ...cacheFormValues(form),
       }),
     }));
   }
@@ -1000,6 +1001,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
           fallbacks: form.getAll('fallbacks'),
           input_per_mtok: Number(form.get('input_per_mtok') || 0),
           output_per_mtok: Number(form.get('output_per_mtok') || 0),
+          ...cacheFormValues(form),
           ...(!editing.item.provider_id ? { accounts: form.getAll('accounts') } : {}),
         };
         break;
@@ -1707,6 +1709,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
               <Field label={t('form.outputPerMtok')} name="output_per_mtok" type="number" step="any" defaultValue="0" />
             </div></fieldset>
             <fieldset><legend>{t('form.fallbacks')}</legend>{data.models.map(model => <label className="check-row" key={model.id}><input type="checkbox" name="fallbacks" value={model.alias} /><span>{model.alias}</span><small>{model.upstream_model}</small></label>)}<small className="field-hint">{t('form.fallbackHint')}</small></fieldset>
+            <CacheFields t={t} />
             <FormActions pending={isPending} t={t} />
           </form>
         </Modal>
@@ -1871,6 +1874,7 @@ export default function DashboardClient({ initialLocale }: { initialLocale: Loca
                 <Field label={t('form.outputPerMtok')} name="output_per_mtok" type="number" step="any" defaultValue={String(editing.item.output_per_mtok ?? 0)} />
               </div></fieldset>
               <fieldset><legend>{t('form.fallbacks')}</legend>{data.models.filter(model => model.id !== editing.item.id).map(model => <label className="check-row" key={model.id}><input type="checkbox" name="fallbacks" value={model.alias} defaultChecked={(editing.item.fallbacks ?? []).includes(model.alias)} /><span>{model.alias}</span><small>{model.upstream_model}</small></label>)}<small className="field-hint">{t('form.fallbackHint')}</small></fieldset>
+              <CacheFields t={t} cache={editing.item.cache} cacheTtl={editing.item.cache_ttl} threshold={editing.item.cache_similar_threshold} />
             </>}
             {editing.kind === 'team' && <>
               <Field label={t('form.teamName')} name="name" defaultValue={editing.item.name} />
@@ -2009,6 +2013,48 @@ function ResourcePage({ eyebrow, title, description, action, children }: {
 
 function Empty({ title, body, onClick }: { title: string; body: string; onClick: () => void }) {
   return <button className="empty-state" onClick={onClick}><PlusIcon size={24} /><b>{title}</b><span>{body}</span></button>;
+}
+
+// One definition for both model forms. Two copies would drift, and a cache mode
+// that saves on create but not on edit is the kind of half-wiring that looks
+// configured and is not.
+function CacheFields({ t, cache, cacheTtl, threshold }: {
+  t: Translator;
+  cache?: string;
+  cacheTtl?: string;
+  threshold?: number | null;
+}) {
+  return (
+    <fieldset><legend>{t('form.cache')}</legend>
+      <div className="form-row">
+        <label>{t('form.cacheMode')}
+          <select name="cache" defaultValue={cache ?? ''}>
+            <option value="">{t('form.cacheInherit')}</option>
+            {(['off', 'exact', 'similar'] as const).map(mode => <option key={mode} value={mode}>{mode}</option>)}
+          </select>
+        </label>
+        <label>{t('form.cacheTtl')}<input name="cache_ttl" placeholder="5m" defaultValue={cacheTtl ?? ''} /></label>
+        <label>{t('form.cacheSimilarThreshold')}<input name="cache_similar_threshold" type="number" step="any" min="0" max="1" placeholder="0.95" defaultValue={threshold == null ? '' : String(threshold)} /></label>
+      </div>
+      <small className="field-hint">{t('form.cacheHint')}</small>
+    </fieldset>
+  );
+}
+
+// Empty means "not set", and for the threshold that has to reach the API as null
+// rather than 0: the gateway rejects 0 instead of reading it as unset, which is
+// what makes the distinction load-bearing. The threshold is also dropped unless
+// the mode is `similar`, because that pair is a hard error at publish time -- the
+// UI should not be able to compose a config the snapshot compiler refuses.
+function cacheFormValues(form: FormData) {
+  const mode = String(form.get('cache') ?? '');
+  const ttl = String(form.get('cache_ttl') ?? '').trim();
+  const raw = String(form.get('cache_similar_threshold') ?? '').trim();
+  return {
+    cache: mode,
+    cache_ttl: ttl,
+    cache_similar_threshold: mode === 'similar' && raw !== '' ? Number(raw) : null,
+  };
 }
 
 function Field({ label, name, type = 'text', placeholder, defaultValue, step }: {

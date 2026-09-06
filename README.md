@@ -30,8 +30,9 @@ things no other Go gateway has:
 - **MCP gateway behind budgets** — `POST /v1/mcp/<server>` JSON-RPC passthrough
   where your virtual-key budgets and RPM limits apply to tool calls.
 
-Plus a semantic response cache (exact + Jaccard-similar, hit-rate in the
-dashboard) and immutable config snapshots with rollback.
+Plus a response cache with three modes (`off` / `exact` / byte-exact-then-
+Jaccard-`similar`, hit-rate in the dashboard) and immutable config snapshots
+with rollback.
 
 OpenAI Codex account setup, model discovery, quota/reset safety, and validation
 are documented in [docs/codex-provider.md](docs/codex-provider.md).
@@ -123,7 +124,10 @@ Design system and widget console are in [`open-design/`](open-design/) — hand-
 - Upstream proxies for every account and a global pool — all protocols (http/https/socks4/4a/5/5h) in any format (`http://user:pass@host:8080`, `socks5://host:1080`, `host:3128`, `host:3128:user:pass`, `[::1]:9090`, lists per line/comma/JSON). Round-robin rotation per request with failover; `X-Gateway-Proxy` response header shows the masked proxy used. The pool is managed in the dashboard (Settings → Proxy pool).
 - Routing strategies: `priority`, `balanced`, `fastest`, `cheapest`, `quota-drain`, `fallback-chain`.
 - **Multi-provider aliases (`sources[]`)**: one public model served by different providers with their own upstream model names, weights, and per-source pricing — the gateway rewrites per attempt and telemetry records the actual upstream.
-- **Semantic response cache**: exact + Jaccard-similar matching with hit-rate/exact/similar stats in the dashboard.
+- **Response cache, three modes**: `off` / `exact` / `similar` per model — byte-exact hits, or Jaccard
+  near-duplicate hits for single-turn questions (opt-in per model, since a similar hit answers a *different*
+  request), with `HIT` / `HIT-SIMILAR` + score headers and hit-rate/exact/similar stats in the dashboard.
+  See [Response cache](#response-cache-off--exact--similar).
 - Virtual API keys with constant-time keyed-HMAC comparison, model allowlists, and RPM token buckets.
 - Sticky affinity from `X-Gateway-Session`, `metadata.gateway_session`, or stable user/model fallback.
 - Account cooldowns, circuit breakers, concurrency caps, and route diagnostic headers.
@@ -222,6 +226,77 @@ o-series, Claude extended thinking) spend your `max_tokens` on hidden
 `reasoning_content` *before* any visible content — a small limit yields an
 empty answer with `finish_reason:"length"`. Budget ≥512–2000 tokens for such
 aliases, and prefer per-key/per-model Caveman to tame verbose thinking.
+
+## Response cache (off / exact / similar)
+
+Non-streaming JSON answers can be served from an in-process TTL cache (4096
+entries, `internal/proxy/proxy.go`). Three modes, set per model:
+
+| `cache:` | What a request gets | Reached by |
+|---|---|---|
+| `off` / unset | nothing, unless the client asks | `X-Gateway-Cache: true` or `X-Gateway-Cache-TTL: 10m` on the request |
+| `exact` | the stored answer to a **byte-identical** body on the same model | the model config, no client header needed |
+| `similar` | exact first; on a miss, the answer to a **near-duplicate** question | the model config **only** |
+
+```yaml
+models:
+  - alias: faq-mini
+    upstream_model: gpt-4o-mini
+    accounts: [primary]
+    cache: similar               # off | exact | similar
+    cache_ttl: 15m               # default 5m
+    cache_similar_threshold: 0.9 # default 0.95, must be in (0, 1]
+```
+
+`X-Gateway-Cache: false` on a request disables both lookups. Streaming
+responses and `X-Gateway-Output-Format: anthropic` are never cached. The
+counters behind the dashboard's cache widget are at `GET /api/cache/stats`
+(`exact_hits`, `similar_hits`, `misses`, `hit_rate`, `size`, `max_size`).
+
+**A similar hit returns the answer to a different request than the one that was
+asked.** That is the whole trade of the mode, not a caveat about it — so it is
+per-model opt-in, it is not a global or virtual-key setting, and a client cannot
+reach it with a header: `X-Gateway-Cache: true` against a model configured
+`exact` (or unset) still buys exact-only lookups. Set
+`cache_similar_threshold` without `cache: similar` and the gateway refuses to
+start rather than silently ignoring it; so does a threshold of `0` or `1.5`.
+
+Similarity is Jaccard overlap of the significant words in the last `user`
+message — no embeddings, no extra dependency. Words of two characters or fewer
+are dropped and repeats count once, so `0.9` means nine of every ten distinct
+words are shared.
+
+**The mode only applies to single-turn questions.** A lookup is skipped
+entirely — not scored and rejected, skipped — when any of these holds:
+
+- the body carries `tools`, or any message has `role: tool` (the answer depends
+  on tool results, not on the wording);
+- more than two messages carry a role other than `system` (a question, at most
+  with one prior reply, is a single turn; anything deeper is a conversation);
+- the last `user` message has fewer than **8** distinct significant words
+  (`continue`, `fix the failing test` and friends look identical across
+  unrelated tasks);
+- `content` is a multimodal array rather than a string (fail-closed).
+
+Cached hits are labelled on the response: `X-Gateway-Cache: HIT` for the exact
+one, `HIT-SIMILAR` plus `X-Gateway-Cache-Score: 0.9091` for the near-duplicate,
+`MISS` otherwise, and `X-Gateway-Route: cache` on both hit kinds. The score is
+the actual overlap that earned the hit, so a client that cares can second-guess
+the gateway per response.
+
+**What it costs.** Every request on a `cache: similar` model pays a linear scan
+of the cache under `RLock` when the exact lookup misses. Measured on a full
+4096-entry cache: **0.39–0.43 ms** on a miss, **0.52–0.62 ms** on a hit — the
+budget is 1 ms, and the figures, the host and the before/after are in
+[docs/benchmarks.md](docs/benchmarks.md#similar-response-cache-lookup--measured-2026-09-06).
+Re-run it yourself:
+
+```sh
+go test -run '^$' -bench 'FindSimilar|LookupExact' -benchtime 2s -count=3 ./internal/cache/
+```
+
+Embedding-based semantic caching is a Cloud/Enterprise concern and is not what
+this mode is.
 
 ## Benchmarks
 
@@ -431,7 +506,8 @@ snapshot.
 Start from `config/example.yaml`. It defines a versioned immutable snapshot:
 
 - `virtual_keys`: client keys, allowed models, and RPM limits.
-- `models`: public aliases mapped to upstream model IDs and account lists.
+- `models`: public aliases mapped to upstream model IDs and account lists, plus optional
+  `cache` / `cache_ttl` / `cache_similar_threshold` ([Response cache](#response-cache-off--exact--similar)).
 - `accounts`: OpenAI-compatible base URLs, API keys, and optional per-account `proxy` (any format, list allowed).
 - `proxies` (optional): global upstream proxy pool for accounts without their own proxy.
 - `routing`: strategy, sticky TTL, and max pre-commit attempts.

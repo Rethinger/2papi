@@ -491,19 +491,30 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 	}()
 
 	// 2. TTL Response Cache check (for non-streaming requests with cache opt-in,
-	// or per-model `cache: exact` — G4)
+	// or per-model `cache: exact` / `cache: similar` -- G4)
 	wantCache := false
+	similarThreshold := 0.0
 	if !meta.Stream && r.Header.Get("X-Gateway-Output-Format") != "anthropic" {
 		cacheHeader := r.Header.Get("X-Gateway-Cache")
 		wantCache = cacheHeader == "true" || r.Header.Get("X-Gateway-Cache-TTL") != ""
-		if optModelCfg.Cache == "exact" && cacheHeader != "false" {
+		if (optModelCfg.Cache == "exact" || optModelCfg.Cache == "similar") && cacheHeader != "false" {
 			wantCache = true
+		}
+		// A similar hit answers a different request than the one that was asked,
+		// so the mode is per-model opt-in and unreachable through the header
+		// alone: a client sending X-Gateway-Cache: true on a model configured
+		// `exact` still gets exact-only lookups.
+		if wantCache && optModelCfg.Cache == "similar" {
+			similarThreshold = cache.DefaultSimilarThreshold
+			if optModelCfg.CacheSimilarThreshold != nil {
+				similarThreshold = *optModelCfg.CacheSimilarThreshold
+			}
 		}
 	}
 	var cacheKey string
 	if wantCache && p.Cache != nil {
-		cacheKey = p.Cache.KeyFor(meta.Model, body)
-		if entry, hit := p.Cache.Get(cacheKey); hit {
+		entry, kind, score, hit := p.Cache.Lookup(meta.Model, body, similarThreshold)
+		if hit {
 			for k, v := range entry.Header {
 				for _, vv := range v {
 					w.Header().Add(k, vv)
@@ -516,7 +527,18 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 				w.Header().Add("Vary", "Accept-Encoding")
 				w.Header().Del("Content-Length")
 			}
-			w.Header().Set("X-Gateway-Cache", "HIT")
+			// Two hit kinds have to be distinguishable by a client that cares:
+			// HIT is the answer to this request, HIT-SIMILAR the answer to a
+			// near-duplicate one, with the overlap that earned it published as a
+			// number rather than asserted in prose.
+			outcome := "success"
+			if kind == cache.KindSimilar {
+				w.Header().Set("X-Gateway-Cache", "HIT-SIMILAR")
+				w.Header().Set("X-Gateway-Cache-Score", strconv.FormatFloat(score, 'f', 4, 64))
+				outcome = "cache_similar"
+			} else {
+				w.Header().Set("X-Gateway-Cache", "HIT")
+			}
 			w.Header().Set("X-Gateway-Route", "cache")
 			w.Header().Set("X-Gateway-Overhead-MS", strconv.FormatInt(durationMillis(time.Since(started)), 10))
 			w.Header().Set("Content-Type", "application/json")
@@ -524,9 +546,13 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 			_, _ = w.Write(cacheBody)
 			event.FinalStatus = http.StatusOK
 			event.Success = true
-			event.Attempts = append(event.Attempts, telemetry.Attempt{Account: "cache", Adapter: "cache", Status: http.StatusOK, Outcome: "success"})
+			event.Attempts = append(event.Attempts, telemetry.Attempt{Account: "cache", Adapter: "cache", Status: http.StatusOK, Outcome: outcome})
 			return
 		}
+		// Computed only after the lookup missed: Lookup derives the exact key
+		// itself, and the write path needs the key for this body, not for the
+		// near-duplicate that might have been served.
+		cacheKey = p.Cache.KeyFor(meta.Model, body)
 		w.Header().Set("X-Gateway-Cache", "MISS")
 	}
 
@@ -626,7 +652,7 @@ func (p *Proxy) Endpoint(w http.ResponseWriter, r *http.Request, endpoint adapte
 							ttl = parsed
 						}
 					}
-					p.Cache.SetWithRequest(cacheKey, respBytes, w.Header().Clone(), ttl, body, 0, 0)
+					p.Cache.SetWithRequest(cacheKey, respBytes, w.Header().Clone(), ttl, body, meta.Model, 0, 0)
 				}
 				return
 			}

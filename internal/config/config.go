@@ -194,12 +194,21 @@ type Model struct {
 	InputCostPerMtok  float64       `yaml:"input_cost_per_mtok,omitempty" json:"input_cost_per_mtok,omitempty"`
 	OutputCostPerMtok float64       `yaml:"output_cost_per_mtok,omitempty" json:"output_cost_per_mtok,omitempty"`
 	Optimization      *Optimization `yaml:"optimization,omitempty" json:"optimization,omitempty"`
-	// Cache (G4) enables the per-model exact-match response cache:
+	// Cache (G4) enables the per-model response cache:
 	// "" = inherit (off unless the client sends X-Gateway-Cache: true),
-	// "exact" = non-streaming responses are cached with no opt-in header.
+	// "exact" = non-streaming responses are cached with no opt-in header,
+	// "similar" = exact first, and on a miss a near-duplicate answer may be
+	// served (Jaccard on the last user message, single-turn requests only).
 	// CacheTTL overrides the default 5m window (Go duration string).
-	Cache    string `yaml:"cache,omitempty" json:"cache,omitempty"`
-	CacheTTL string `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
+	//
+	// A similar hit answers a DIFFERENT request than the one that was asked, so
+	// it is opt-in per model and never a default. CacheSimilarThreshold sets the
+	// required overlap and must be in (0, 1]; it is a pointer so that an
+	// explicit 0 is rejected as a config error instead of quietly meaning
+	// "unset" -- unset (nil) is what selects cache.DefaultSimilarThreshold.
+	Cache                 string   `yaml:"cache,omitempty" json:"cache,omitempty"`
+	CacheTTL              string   `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
+	CacheSimilarThreshold *float64 `yaml:"cache_similar_threshold,omitempty" json:"cache_similar_threshold,omitempty"`
 	// ThinkingBudget bounds thinking tokens for reasoning models (Claude Opus 5, o-series).
 	// 0 = unbounded / client default.
 	ThinkingBudget int `yaml:"thinking_budget,omitempty" json:"thinking_budget,omitempty"`
@@ -543,12 +552,23 @@ func Build(c Config) (*Snapshot, error) {
 		if cycleErr := modelFallbackCycle(c.Models, m.Alias, map[string]bool{}); cycleErr != "" {
 			return nil, fmt.Errorf("model fallback cycle involving %s", cycleErr)
 		}
-		if m.Cache != "" && m.Cache != "off" && m.Cache != "exact" {
-			return nil, fmt.Errorf("model %s cache must be off|exact|empty, got %q", m.Alias, m.Cache)
+		if m.Cache != "" && m.Cache != "off" && m.Cache != "exact" && m.Cache != "similar" {
+			return nil, fmt.Errorf("model %s cache must be off|exact|similar|empty, got %q", m.Alias, m.Cache)
 		}
 		if m.CacheTTL != "" {
 			if d, err := time.ParseDuration(m.CacheTTL); err != nil || d <= 0 {
 				return nil, fmt.Errorf("model %s cache_ttl must be a positive Go duration", m.Alias)
+			}
+		}
+		if m.CacheSimilarThreshold != nil {
+			if t := *m.CacheSimilarThreshold; t <= 0 || t > 1 {
+				return nil, fmt.Errorf("model %s cache_similar_threshold must be in (0, 1], got %v", m.Alias, t)
+			}
+			// A threshold under cache: exact would silently do nothing, and a
+			// config that looks like it enabled the mode is worse than one that
+			// refuses to start.
+			if m.Cache != "similar" {
+				return nil, fmt.Errorf("model %s cache_similar_threshold requires cache: similar, got cache %q", m.Alias, m.Cache)
 			}
 		}
 	}

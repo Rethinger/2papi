@@ -245,6 +245,69 @@ sub-pages whose navigation is client-rendered, and the 4.5 ms p99 attributed to
 Bifrost v1.6.4 by a LiteLLM post. If either is wanted in this table later, fetch
 the page it lives on and quote it with its own conditions.
 
+## Similar-response cache lookup — measured 2026-09-06
+
+`cache: similar` answers a near-duplicate question from the cache, which means
+every request on such a model pays a lookup before it can go upstream. That
+lookup is a linear scan, so its cost is the cache size: the gateway builds its
+cache with `NewTTLResponseCache(4096)` (`internal/proxy/proxy.go`), and these
+benchmarks fill exactly that many live entries under one model, so the model
+filter rejects nothing.
+
+```sh
+docker run --rm -v "$PWD:/src" -v 2papi-gomod:/go/pkg/mod -w /src golang:1.25 \
+  go test -run '^$' -bench 'FindSimilar|LookupExact' -benchtime 2s -count=3 ./internal/cache/
+```
+
+`go1.25.14 linux/amd64`, AMD Ryzen 5 3550H, 8 logical CPUs, three runs each:
+
+| case | what the query is | measured | allocs |
+|---|---|---|---|
+| `FindSimilarFullCacheMiss` | 13 words against 13-word entries, sharing none — the size prune rules nothing out, so all 4096 reach the signature test | **0.385 / 0.423 / 0.433 ms** | 2 272 B, 23/op |
+| `FindSimilarFullCacheHit` | 14 words, a near-duplicate of one entry — the bound rejects the other 4 095, one is scored exactly | **0.619 / 0.572 / 0.517 ms** | 2 352 B, 23/op |
+| `FindSimilarSizePruned` | 10 words against 13-word entries — 10/13 = 0.77 cannot reach 0.9, so the size prune drops all 4096 for one comparison each | **0.317 / 0.323 / 0.341 ms** | 2 080 B, 23/op |
+| `FindSimilarGateRejects` | `"continue"` — under `MinSimilarWords`, refused before the scan | **4.1 / 6.0 / 8.4 µs** | 424 B, 13/op |
+| `LookupExactHitFullCache` | the exact path on the same full cache, for reference | **12.8 / 8.7 / 8.0 µs** | 848 B, 13/op |
+
+**NFR-1 (similar lookup ≤ 1 ms on a full cache) holds**, worst case 0.43 ms with
+about 2× headroom. Read the size-pruned row as the floor of a full scan: it does
+no word work at all, so ~0.32 ms is what walking 4096 map entries costs by
+itself, and the word work adds 0.05-0.30 ms on top. The gate row is the one
+an agent loop hits, and it is three orders of magnitude cheaper than the scan.
+
+Note the two µs rows swing 2× between runs on this laptop. Treat every figure
+here as a ceiling of the same shape as the rest of this page, and re-run the
+command above rather than trusting the exact digits.
+
+### What made it fit (same command, same session)
+
+The first working version measured **2.384 / 2.527 / 2.485 ms** on the miss and
+**4.559 / 4.623 / 4.602 ms** on the hit, at **12 310 allocs and 1.87 MB per
+lookup** — two to five times over budget, because it built a `map[string]struct{}`
+for every candidate to intersect it with the query. Three changes, all in
+`internal/cache/cache.go`, brought it inside:
+
+- **Store the words as a set.** `wordList` dedupes on the way in, so a stored
+  `RequestWords` slice can be probed against a single reusable query map instead
+  of being rebuilt into one. Allocations fell 12 310 → 23 and memory 1.87 MB →
+  ~2 KB. (`MinSimilarWords` therefore counts *distinct* words — eight repeats of
+  one word carry one word's signal.)
+- **Prune on set size.** The intersection is at most the smaller set and the union
+  at least the larger, so Jaccard ≤ small/large: one integer comparison rules out
+  every candidate too long or too short to reach the threshold.
+- **Prune on a 64-bit word signature.** `Entry.WordBits` ORs one bit per word
+  (FNV-1a, `& 63`), so a query word whose bit is absent from a candidate is
+  certainly not in it, and the bits that *are* present cap the intersection.
+  Thirteen AND-tests replace thirteen string hashes. Bit collisions only loosen
+  the bound, so a collision costs one exact comparison and can never hide a match.
+
+Both prunes are exact upper bounds on the score, which is why they change no
+answer: a pruned candidate could not have won. The `internal/proxy` acceptance
+tests (`cache_similar_test.go`) pass unchanged across the whole optimization, and
+`TestLoadFromFileNormalizesLegacyWords` pins the one place the prunes could have
+been fooled — a cache written by an older build, whose words carry repeats and
+whose signature is absent, is normalized when it is loaded.
+
 ## How to run the benchmarks in this repo
 
 ```sh
@@ -261,6 +324,9 @@ go run ./test/squozebench
 
 # OpenAI wire-shape conformance
 node test/conformance.mjs
+
+# similar-cache lookup on a full 4096-entry cache (the table above)
+go test -run '^$' -bench 'FindSimilar|LookupExact' -benchtime 2s -count=3 ./internal/cache/
 ```
 
 `scripts/benchmark.sh [gateway_url] [upstream_url]` is an ad-hoc script for a
@@ -270,8 +336,8 @@ if `wrk` is installed, and falls back to `hey -n 200 -c 20` for POST if `hey` is
 No figure on this page comes from it — the reproducible paths are the compose
 profiles above.
 
-There is no `go test -bench` path: this repo currently defines no Go benchmark
-functions, so `-bench=.` matches nothing.
+The only Go benchmarks in this repo are the cache-lookup ones in
+`internal/cache/similar_bench_test.go`; `-bench=.` elsewhere matches nothing.
 
 ## What was optimized
 

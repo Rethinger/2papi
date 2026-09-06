@@ -71,7 +71,14 @@ const proxyField = () => z.string().max(65536).optional().superRefine((value, ct
 });
 
 export const AccountSchema = z.object({ provider_id: z.string().uuid(), name: z.string().min(1), display_name: z.string().min(1), base_url: httpUrl(), enabled: z.boolean().default(true), priority: z.number().int().default(1), weight: z.number().int().positive().default(1), max_concurrency: z.number().int().positive().default(100), cost: z.number().nonnegative().default(0), credential: AccountCredentialSchema.optional(), metadata: z.record(z.string(), z.unknown()).default({}), proxy: proxyField() });
-const ModelBaseSchema = z.object({ alias: z.string().min(1), upstream_model: z.string().min(1), enabled: z.boolean().default(true), fallbacks: z.array(z.string().min(1)).default([]), input_per_mtok: z.number().nonnegative().default(0), output_per_mtok: z.number().nonnegative().default(0), cache: z.enum(['off', 'exact']).optional(), cache_ttl: z.string().optional() });
+// A similar-cache threshold is the Jaccard overlap a near-duplicate must reach.
+// The gateway takes it in (0, 1] and rejects an explicit 0, because as a plain
+// number 0 is indistinguishable from "not configured" and would silently switch
+// off the mode it looks like it enables. Absent/null therefore has to survive as
+// absent/null all the way to the snapshot -- never as a coerced 0.
+const similarThreshold = () => z.number().positive().max(1).nullish();
+
+const ModelBaseSchema = z.object({ alias: z.string().min(1), upstream_model: z.string().min(1), enabled: z.boolean().default(true), fallbacks: z.array(z.string().min(1)).default([]), input_per_mtok: z.number().nonnegative().default(0), output_per_mtok: z.number().nonnegative().default(0), cache: z.enum(['', 'off', 'exact', 'similar']).optional(), cache_ttl: z.string().optional(), cache_similar_threshold: similarThreshold() });
 const ManualModelSchema = ModelBaseSchema.extend({
   provider_id: z.null().optional(),
   routing_strategy: z.literal('manual').default('manual'),
@@ -148,8 +155,9 @@ export const ModelPatchSchema = z.object({
   fallbacks: z.array(z.string().min(1)).optional(),
   input_per_mtok: z.number().nonnegative().optional(),
   output_per_mtok: z.number().nonnegative().optional(),
-  cache: z.enum(['off', 'exact']).optional(),
+  cache: z.enum(['', 'off', 'exact', 'similar']).optional(),
   cache_ttl: z.string().optional(),
+  cache_similar_threshold: similarThreshold(),
 });
 export const VirtualKeyPatchSchema = z.object({
   name: z.string().min(1).optional(),

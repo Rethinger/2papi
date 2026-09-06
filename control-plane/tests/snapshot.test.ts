@@ -23,14 +23,14 @@ function secretRows() {
   return [{ id: accountId, credential_revision: 1, key_version: enc.key_version, data_key_nonce: buf(enc.data_key_nonce), data_key_ciphertext: buf(enc.data_key_ciphertext), data_key_tag: buf(enc.data_key_tag), secret_nonce: buf(enc.secret_nonce), secret_ciphertext: buf(enc.secret_ciphertext), secret_tag: buf(enc.secret_tag) }];
 }
 
-function mockClient(extra?: { noSecret?: boolean; published?: unknown; optimization?: unknown }) {
+function mockClient(extra?: { noSecret?: boolean; published?: unknown; optimization?: unknown; model?: Record<string, unknown> }) {
   const queries: Array<{ sql: string; params?: unknown[] }> = [];
   const query = async (sql: string, params?: unknown[]) => {
     queries.push({ sql, params });
     if (sql.startsWith('SELECT a.*, p.adapter FROM accounts')) return { rows: declarative.accounts };
     if (sql.startsWith('SELECT a.id account_id, a.credential_revision, sr.* FROM accounts')) return { rows: extra?.noSecret ? [] : secretRows().map(row => ({ ...row, account_id: accountId })) };
     if (sql.startsWith('SELECT * FROM model_aliases')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', provider_id: null, routing_strategy: 'manual', fallbacks: [] }] };
-    if (sql.startsWith('SELECT ma.*, mp.input_per_mtok')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', provider_id: null, routing_strategy: 'manual', fallbacks: [], input_per_mtok: null, output_per_mtok: null }] };
+    if (sql.startsWith('SELECT ma.*, mp.input_per_mtok')) return { rows: [{ id: 'm1', alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', provider_id: null, routing_strategy: 'manual', fallbacks: [], input_per_mtok: null, output_per_mtok: null, ...extra?.model }] };
     if (sql.startsWith('SELECT mam')) return { rows: [{ alias: 'gpt-dev', account_name: 'primary' }] };
     if (sql.includes('FROM model_aliases ma') && sql.includes('JOIN discovered_models dm')) return { rows: [] };
     if (sql.startsWith('SELECT * FROM routing_settings')) return { rows: [{ strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: declarative.resilience }] };
@@ -133,4 +133,25 @@ test('snapshot carries mode presets and squoze; omits unset modes', async () => 
     rtk_compression: false, caveman: false, headroom: false, headroom_reserve: 120000, headroom_keep: 8, squoze: true,
   });
   assert.equal('rtk_mode' in squoze.snapshot.optimization, false);
+});
+
+test('snapshot carries the similar cache mode and refuses a threshold the gateway would reject', async () => {
+  const similar = await compileDeclarativeSnapshot(mockClient({ model: { cache: 'similar', cache_ttl: '10m', cache_similar_threshold: 0.9 } }).client);
+  assert.equal(similar.snapshot.models[0].cache, 'similar');
+  assert.equal(similar.snapshot.models[0].cache_ttl, '10m');
+  assert.equal(similar.snapshot.models[0].cache_similar_threshold, 0.9);
+
+  // A NULL threshold stays absent rather than arriving as 0. The gateway reads
+  // absent as "use the 0.95 default" and rejects 0 as a config error, so the two
+  // must not collapse into one another anywhere on the path.
+  const inherited = await compileDeclarativeSnapshot(mockClient({ model: { cache: 'similar', cache_similar_threshold: null } }).client);
+  assert.equal(inherited.snapshot.models[0].cache, 'similar');
+  assert.equal('cache_similar_threshold' in inherited.snapshot.models[0], false);
+
+  // The gateway refuses these three on adoption. If the compiler let them through,
+  // the control plane would report a healthy publish while the gateway kept serving
+  // the previous config.
+  await assert.rejects(() => compileDeclarativeSnapshot(mockClient({ model: { cache: 'exact', cache_similar_threshold: 0.9 } }).client), /requires cache: similar/);
+  await assert.rejects(() => compileDeclarativeSnapshot(mockClient({ model: { cache: 'similar', cache_similar_threshold: 0 } }).client), /must be in \(0, 1\]/);
+  await assert.rejects(() => compileDeclarativeSnapshot(mockClient({ model: { cache: 'similar', cache_similar_threshold: 1.5 } }).client), /must be in \(0, 1\]/);
 });

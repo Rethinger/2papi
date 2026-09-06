@@ -101,6 +101,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
       ...(Number(m.output_per_mtok) > 0 ? { output_cost_per_mtok: Number(m.output_per_mtok) } : {}),
       ...(m.cache ? { cache: m.cache } : {}),
       ...(m.cache_ttl ? { cache_ttl: m.cache_ttl } : {}),
+      ...(m.cache_similar_threshold == null ? {} : { cache_similar_threshold: Number(m.cache_similar_threshold) }),
       ...(sourcesByAlias.get(m.alias)?.length ? { sources: sourcesByAlias.get(m.alias) } : {}),
     };
   });
@@ -108,6 +109,7 @@ export async function compileDeclarativeSnapshot(client: PoolClient): Promise<Co
   // injected during runtime materialization (same split as account creds).
   const mcpServers = mcpR.rows.map((m: any) => ({ name: m.name, url: m.url, enabled: true }));
   validateFallbackChains(models);
+  validateCacheModes(models);
   const routing = routingR.rows[0] ?? { strategy: 'balanced', sticky_ttl: '1h', max_attempts: 2, resilience: { cooldown: '30s', circuit_failures: 3, circuit_reset: '1m', lockout_failures: 10, lockout_duration: '15m' } };
   const resilience = {
     cooldown: routing.resilience?.cooldown ?? '30s',
@@ -161,6 +163,25 @@ export function normalizeOptimization(o: any) {
     ...(typeof o?.headroom_profile === 'string' && o.headroom_profile ? { headroom_profile: o.headroom_profile } : {}),
     ...(o?.squoze === true ? { squoze: true } : {}),
   };
+}
+
+// The gateway refuses to start on a threshold outside (0, 1] or on one set
+// without cache: similar, so a snapshot carrying either would be published and
+// then rejected on adoption -- the control plane would look healthy while the
+// gateway sat on a stale config. PATCH cannot catch this alone (it may set the
+// threshold while `cache` already lives in the row), so the check belongs here,
+// where the composed state is finally visible.
+function validateCacheModes(models: Array<{ alias: string; cache?: string; cache_similar_threshold?: number }>) {
+  for (const model of models) {
+    const threshold = model.cache_similar_threshold;
+    if (threshold === undefined) continue;
+    if (!(threshold > 0 && threshold <= 1)) {
+      throw new Error(`model ${model.alias} cache_similar_threshold must be in (0, 1], got ${threshold}`);
+    }
+    if (model.cache !== 'similar') {
+      throw new Error(`model ${model.alias} cache_similar_threshold requires cache: similar, got cache ${JSON.stringify(model.cache ?? '')}`);
+    }
+  }
 }
 
 function validateFallbackChains(models: Array<{ alias: string; fallbacks?: string[] }>) {

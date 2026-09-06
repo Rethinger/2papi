@@ -36,6 +36,29 @@ test('management schemas accept valid payloads', () => {
   assert.throws(() => ModelPatchSchema.parse({ cache_ttl: 12345 }));
 });
 
+test('similar cache mode round-trips and its threshold keeps absent apart from zero', () => {
+  const base = { alias: 'gpt-dev', upstream_model: 'gpt-4o-mini', accounts: ['00000000-0000-0000-0000-000000000000'] };
+  const similar = ModelSchema.parse({ ...base, cache: 'similar', cache_similar_threshold: 0.9 });
+  assert.equal(similar.cache, 'similar');
+  assert.equal(similar.cache_similar_threshold, 0.9);
+  assert.equal(ModelSchema.parse({ ...base, cache_similar_threshold: 1 }).cache_similar_threshold, 1);
+
+  // '' is the stored "inherit" value, so the UI's first option has to survive the
+  // schema -- otherwise the select would offer a choice that cannot be saved.
+  assert.equal(ModelSchema.parse({ ...base, cache: '' }).cache, '');
+
+  // Absent stays absent and an explicit null stays null: the API layer needs the
+  // difference to tell "leave it alone" from "clear it", and the gateway reads a
+  // missing threshold as the 0.95 default. A 0 would look configured and switch the
+  // mode off, so the schema refuses it outright instead of coercing.
+  assert.equal('cache_similar_threshold' in ModelSchema.parse(base), false);
+  assert.equal(ModelPatchSchema.parse({ cache_similar_threshold: null }).cache_similar_threshold, null);
+  assert.throws(() => ModelSchema.parse({ ...base, cache: 'similar', cache_similar_threshold: 0 }));
+  assert.throws(() => ModelSchema.parse({ ...base, cache: 'similar', cache_similar_threshold: 1.5 }));
+  assert.throws(() => ModelSchema.parse({ ...base, cache: 'similar', cache_similar_threshold: -0.5 }));
+  assert.throws(() => ModelPatchSchema.parse({ cache_similar_threshold: 'high' }));
+});
+
 test('account proxy field accepts any format and rejects invalid lists', () => {
   const base = { provider_id: '00000000-0000-0000-0000-000000000000', name: 'a', display_name: 'A', base_url: 'https://example.com', credential: { api_key: 'sk' } };
   const parsed = AccountSchema.parse({ ...base, proxy: 'http://user:pass@host:8080\nsocks5://host:1080' });

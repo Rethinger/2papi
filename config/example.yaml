@@ -31,6 +31,17 @@ models:
     accounts: [secondary]
     input_cost_per_mtok: 0.10
     output_cost_per_mtok: 0.40
+    # Response cache (G4): off | exact | similar. Пусто = выключен, пока клиент
+    # не пришлёт X-Gateway-Cache: true.
+    #   exact   - байт-в-байт совпадение тела на этой же модели;
+    #   similar - сначала exact, на промахе near-duplicate по Jaccard на словах
+    #             последнего user-сообщения (только одношаговые запросы: нет
+    #             tools, <=2 сообщений помимо system, >=8 значимых слов).
+    # ВНИМАНИЕ: похожий хит - это ответ на ДРУГОЙ запрос. Поэтому режим
+    # включается только здесь, per-model, и недостижим одним хедером.
+    # cache: similar
+    # cache_ttl: 15m                # по умолчанию 5m
+    # cache_similar_threshold: 0.9  # по умолчанию 0.95, диапазон (0, 1]
     # Пример per-model переопределения (опционально):
     # optimization:
     #   rtk_compression: true
